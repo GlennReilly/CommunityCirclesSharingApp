@@ -23,12 +23,13 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0017](0017-shadow-jar-for-single-file-deploy.md) | One runnable jar with the Shadow plugin | Accepted |
 | [0018](0018-m2-libsodium-bindings.md) | M2 libsodium bindings: lazysodium (test scope) on JVM, libsodium-wrappers on JS | Accepted |
 | [0019](0019-cipher-separate-from-crypto.md) | Encryption lives in a separate `Cipher` interface (amends 0018 point 1) | Accepted |
+| [0020](0020-shamir-own-implementation.md) | Shamir secret sharing: own implementation with independent vectors | Accepted |
 
 ## Open decisions still to record
 
 From the spec, section 11. Record each as an ADR when it is decided:
 
-1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Still open: Shamir implementation (own with test vectors vs a vetted library).
+1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Shamir: decided (ADR 0020).
 2. Local replica store in the browser: IndexedDB vs SQLite-WASM on OPFS.
 3. Kotlin/JS bundle size outcome and the fallback plan if over budget.
 4. Recovery code wordlist and format.
