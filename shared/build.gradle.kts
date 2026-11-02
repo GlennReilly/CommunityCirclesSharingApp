@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
@@ -12,6 +13,11 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.serialization.json)
+        }
+        jvmMain.dependencies {
+            // ADR 0010: JDK Ed25519 plus BouncyCastle BLAKE2b on the JVM; no native library.
+            implementation(libs.bouncycastle)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

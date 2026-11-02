@@ -4,14 +4,14 @@ A local-first sharing network for small groups of neighbours: lend tools, offer 
 
 ## Status
 
-Milestone **M0 (skeleton)** is done: Gradle multi-module build, the trust-model policy in `shared` with tests (JVM and JS), a stub server with a health endpoint, ADRs, and CI. Next is **M1**: the signed event log, SQLite store and sync endpoints.
+**M0 (skeleton)** and **M1 (event log and sync)** are done, plus rate limiting, JSON logging and a single-jar build pulled forward from M5. M1 gives you signed events in a deterministic CBOR encoding, a SQLite-backed server with push, pull and challenge-response login, the `serve` and `migrate` commands, and an acceptance test in which two JVM test clients sync a circle (in-process and over a real socket). Payloads are plaintext in M1 (envelope `v = 0`, [ADR 0014](docs/adr/0014-m1-server-rules-and-dev-payload-format.md)); **M2** adds encryption. The API is in [docs/api.md](docs/api.md).
 
 ## Layout
 
 | Folder | What it holds |
 |---|---|
-| `shared/` | Kotlin Multiplatform (JVM + JS): model, policy (tiers, standing, access), later encoding, validation, sync logic |
-| `server/` | Ktor server (stub: `/healthz` only) |
+| `shared/` | Kotlin Multiplatform (JVM + JS): policy (tiers, standing, access), CBOR encoding, envelope, validation, API types, `Crypto` interface (JVM implementation) |
+| `server/` | Ktor server: `domain/` (rules, services), `data/` (SQLite, migrations), `web/` (routes), `config/`, CLI |
 | `web/` | Placeholder for the PWA; stack not yet decided ([ADR 0009](docs/adr/0009-web-ui-stack.md)) |
 | `deploy/`, `tools/` | Placeholders for Docker, Caddy, systemd and dev scripts |
 | `docs/spec/` | Design doc and implementation spec |
@@ -31,10 +31,31 @@ Run only the shared policy tests, on both targets:
 ./gradlew :shared:jvmTest :shared:jsNodeTest
 ```
 
-Run the stub server (port 8080, override with `CIRCLES_PORT` and `CIRCLES_BIND`):
+Run the server (a brand-new database is created and migrated on first start):
 
 ```bash
-./gradlew :server:run
+./gradlew :server:run --args=serve
+./gradlew :server:run --args=migrate     # apply migrations without starting
+```
+
+Settings (environment variables, all optional):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CIRCLES_DATA_DIR` | `./data` | Where `circles.db` lives |
+| `CIRCLES_BIND`, `CIRCLES_PORT` | `0.0.0.0`, `8080` | Listen address |
+| `CIRCLES_ALLOW_CREATE` | `true` | `false` stops strangers creating circles |
+| `CIRCLES_RATE_LIMIT` | `true` | Per-address and per-device request limits ([ADR 0015](docs/adr/0015-rate-limiting-pulled-forward.md)) |
+| `CIRCLES_TRUST_PROXY` | `false` | Behind a reverse proxy, take the client address from the last `X-Forwarded-For` entry; otherwise every client looks like the proxy and shares one limit |
+| `CIRCLES_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+
+Logs are one JSON object per line on stdout. They never contain bodies, headers, tokens, keys, client addresses or exception messages ([ADR 0016](docs/adr/0016-structured-json-logging.md)).
+
+Build a single runnable jar (about 39 MB, [ADR 0017](docs/adr/0017-shadow-jar-for-single-file-deploy.md)) and run it anywhere with Java 17+:
+
+```bash
+./gradlew :server:shadowJar
+java -jar server/build/libs/circles-server.jar serve
 ```
 
 ## Principles in one paragraph

@@ -3,12 +3,18 @@
 Read `docs/spec/community-sharing-app-design.md` (why) and `docs/spec/community-sharing-app-spec.md` (what to build) before changing anything. Decisions are in `docs/adr/`. The parent `ClaudeCodeExperiments/CLAUDE.md` conventions apply (Kotlin, immutable data, sealed results instead of exceptions for expected errors, named constants, JUnit5 and MockK, clean architecture, README).
 
 ## Where things are
-- `shared/` Kotlin Multiplatform (JVM + JS). Policy is in `shared/src/commonMain/kotlin/circles/policy/CircleAccess.kt`; tests in `shared/src/commonTest` (kotlin.test, run on both targets).
-- `server/` Ktor, stub only until M1. `web/`, `deploy/`, `tools/` are placeholders.
-- Milestones are in spec section 9. M0 (skeleton) is done; M1 (event log and sync) is next.
+- `shared/` Kotlin Multiplatform (JVM + JS), common code unless noted:
+  - `circles.policy` trust model (`CircleAccess.kt`), tests in `commonTest`.
+  - `circles.encoding` `ByteString`, `Parsed`, the CBOR subset (`CborEncoder`, strict `CborDecoder`).
+  - `circles.event` `Envelope` (+ `EnvelopeDto` wire form), `EnvelopeChecks`, `PublicParts`, ids, `EventAuthor` (builds and signs events; used by test clients and later the web client).
+  - `circles.crypto` the `Crypto` interface; `JvmCrypto` is in `jvmMain` (JDK Ed25519 + BouncyCastle BLAKE2b). No JS implementation yet.
+  - `circles.api` request/response types and `ApiJson`.
+- `server/` Ktor + SQLite, layered: `domain/` (`EventRules`, `SyncService`, `AuthService`, `RateLimiter`, store interfaces, no framework imports except `java.time.Clock`), `logging/` (`JsonLog`), `data/` (`SqliteStore`, `Migrator`, migrations in `src/main/resources/db/migration`), `web/` (routes, `module(Services)`), `config/`, `Cli.kt`. `./gradlew :server:shadowJar` makes `server/build/libs/circles-server.jar`. Tests in `server/src/test` use `support/` (`TestServer`, `ApiClient`, two transports).
+- `web/`, `deploy/`, `tools/` are placeholders. API reference: `docs/api.md`.
+- Milestones are in spec section 9. M0 and M1 are done; M2 (encryption) is next.
 
 ## Rules for this project
-- No custom cryptography: libsodium primitives only (spec section 5). No telemetry or third-party network calls.
+- No custom cryptography: libsodium primitives only (spec section 5), except that the JVM uses the JDK's Ed25519 and BouncyCastle's BLAKE2b for signing and hashing (ADR 0010). Nothing hand-rolled. No telemetry or third-party network calls.
 - Policy code is common Kotlin: no `java.*`, no `String.format`, no `kotlin.math.round` (ties differ between JVM and JS). Use integer days (ADR 0007).
 - A field goes in an event's `public` part only if the server must read it; everything else is `encrypted` (ADR 0004).
 - Every behaviour in the spec needs a test. Write an ADR for decisions that are hard to reverse; never edit an accepted ADR, supersede it.
@@ -18,6 +24,18 @@ Read `docs/spec/community-sharing-app-design.md` (why) and `docs/spec/community-
 At the end of each session, update this file with architectural or tooling decisions made, milestones completed or in progress, and gotchas learned.
 
 ## State (2026-11-02)
-- Done: M0 skeleton, policy corrections C1-C13 with tests, ADRs 0001-0009 (0009 web UI stack is Proposed).
+- Done: M0 skeleton, policy C1-C13, ADRs 0001-0009; M1 event log and sync (ADRs 0010-0014): deterministic CBOR with RFC and Python-reference vectors on JVM and JS, Ed25519 signing, BLAKE2b-256 ids, validation, SQLite V1, push/pull, challenge login, `circle.create`/`member.invite`/`member.join`/`device.add`, CLI `serve` and `migrate`, `TwoClientsSyncTest` (in-process and real socket). Pulled forward from M5 at the owner's request: rate limiting (ADR 0015), JSON logging (ADR 0016), shadow jar (ADR 0017). Not committed yet (user asked for no commits).
+- Decisions in force: envelope `v = 0` is plaintext dev format, M2 moves to `v = 1` (sealed) and must retire `v = 0`; `UNIQUE(device, ctr)` dropped; ids are random 128-bit hex (device-id squatting accepted); circle creation is open by default (`CIRCLES_ALLOW_CREATE`); rate limits are in-memory token buckets (per address, per device) and need `CIRCLES_TRUST_PROXY=true` behind a proxy; logs are our own JSON (`Log`), never SLF4J, and take named fields only so secrets cannot slip in; the JVM uses JDK + BouncyCastle, not libsodium (M2 needs a new ADR for sealed boxes and XChaCha20 on JVM clients, likely lazysodium in tests only).
+- Not built yet: SSE, blobs, backup/export/import, a JS `Crypto`, X25519 (M1 box keys are random bytes), `device.revoke` and steward events (the server already has `revoked_seq` and a `stewards` table).
 - Open decisions are listed at the bottom of `docs/adr/README.md`.
-- Gotchas: `@JvmInline` needs `import kotlin.jvm.JvmInline` in common code (JS fails without it; found by the JS compile, not the JVM one); a JUnit test method that returns a value silently does not run (use `= testApplication { ... }` or `runTest`, not a value-returning expression); the Gradle wrapper and versions were copied from the HomeFinder project, update both together if they drift.
+- Gotchas:
+  - `@JvmInline` needs `import kotlin.jvm.JvmInline` in common code (JS fails without it).
+  - A JUnit test method that returns a value silently does not run: use `= testApplication { ... }`, `= apiTest { ... }` or `runTest`. Check the XML counts under `build/test-results` after adding tests.
+  - `.gitignore` had `data/`, which also ignored the `circles.server.data` source package; it is now anchored to `/data/` and `/server/data/`. Check `git status` shows new packages.
+  - Kotlin `fun interface` methods cannot have default parameter values (test `Transport` is a plain interface).
+  - `decodeToString(throwOnInvalidSequence = true)` and `kotlin.io.encoding.Base64` work in common code; Node has no BLAKE2b-256, so signature and id vectors are JVM-only until libsodium reaches JS.
+  - Test vectors for the envelope come from an independent Python encoder (`hashlib.blake2b`, `cryptography` Ed25519), not from the code under test; regenerate them the same way if the encoding changes.
+  - A 500 on a quiet path (`/healthz`, `/readyz`) must still log at error level; the request-log level check puts status before path.
+  - Shadow jar: drop `META-INF/*.SF/DSA/RSA` (BouncyCastle) and `META-INF/native/*quiche*` (HTTP/3 natives, 11 MB); `mergeServiceFiles()` is needed for the SQLite driver.
+  - The sandbox denies curl, pkill and background processes, so `serve` was checked through the real-socket test, not by hand.
+  - The Gradle wrapper and versions were copied from the HomeFinder project, update both together if they drift.

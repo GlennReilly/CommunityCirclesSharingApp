@@ -2,6 +2,8 @@
 
 Status: draft v0.2, 2026-11-02. Read `community-sharing-app-design.md` first for rationale. This document says what to build. Where it says "decide", pick the simplest option that meets the constraints and record the choice in `docs/adr/` as a short ADR (`NNNN-slug.md`, with a `README.md` index and a `template.md`).
 
+M1 amendments (2026-11-02, ADRs 0010-0014): `UNIQUE(device, ctr)` and the counter check are dropped; `events` gains `v`; `stewards` and `invites` tables; `POST /circles` for `circle.create`; `v = 0` is the plaintext development payload format used until M2; JVM crypto is the JDK plus BouncyCastle.
+
 v0.2 changes: envelope split into `public` and `encrypted` (3.1, 3.2); optimistic loan returns and `loan.dispute` / `loan.resolve` (3.3); policy corrections C1-C13 with tests (2.1); ADR folder renamed to `docs/adr/`.
 
 Reference: the trust model now lives in `shared/src/commonMain/kotlin/circles/policy/CircleAccess.kt` (v0.2, implements C1-C13) with tests in `shared/src/commonTest`; they pass on the JVM and on Node/JS. The original sketch is kept as `docs/spec/CircleAccess.v0.1.kt.orig` for comparison.
@@ -105,7 +107,7 @@ Envelope {
 
 - Canonical bytes: deterministic CBOR (RFC 8949 section 4.2), definite lengths, map keys sorted bytewise, prefixed with the domain string `"circles/event/v1"`.
 - `id = hex(BLAKE2b-256(canonical bytes including sig))`. The server also assigns `serverSeq` (per circle, monotonic) on acceptance. `serverSeq` is not signed.
-- Server validation on push: size limits; `v` supported; circle exists; device registered and not revoked as of this event; signature valid; `day <= receivedDay + 1`; `ctr` not previously seen for that device (duplicate id returns "duplicate", not an error); `type` allowed for the author's role (e.g. only stewards may send `steward.add`, `config.update`, `key.rotate`). The server derives the device list from the `public` part of `circle.create`, `member.join`, `device.add` and `device.revoke`, and the steward set from `circle.create`, `steward.add` and `steward.remove`. These checks keep spam out; they are not a security boundary, because the operator is not trusted. Clients re-validate every event they fold (3.4).
+- Server validation on push: size limits; `v` supported; circle exists; device registered and not revoked as of this event; signature valid; `day <= receivedDay + 1`; a duplicate id returns "duplicate", not an error (`ctr` is informational and may repeat, ADR 0011); `type` allowed for the author's role (e.g. only stewards may send `steward.add`, `config.update`, `key.rotate`). The server derives the device list from the `public` part of `circle.create`, `member.join`, `device.add` and `device.revoke`, and the steward set from `circle.create`, `steward.add` and `steward.remove`. These checks keep spam out; they are not a security boundary, because the operator is not trusted. Clients re-validate every event they fold (3.4).
 
 ### 3.2 Payload: `public` and `encrypted`
 
@@ -194,15 +196,15 @@ CREATE TABLE devices (
   added_seq INTEGER NOT NULL, revoked_seq INTEGER
 );
 CREATE TABLE events (
-  server_seq INTEGER NOT NULL, circle_id TEXT NOT NULL, event_id TEXT NOT NULL,
+  server_seq INTEGER NOT NULL, circle_id TEXT NOT NULL, event_id TEXT NOT NULL, v INTEGER NOT NULL,
   author TEXT NOT NULL, device TEXT NOT NULL, type TEXT NOT NULL,
   day INTEGER NOT NULL, ctr INTEGER NOT NULL, epoch INTEGER NOT NULL,
   public BLOB NOT NULL,       -- canonical CBOR of the public map (may be empty)
   nonce BLOB NOT NULL, encrypted BLOB NOT NULL, sig BLOB NOT NULL, received_at INTEGER NOT NULL,
   PRIMARY KEY (circle_id, server_seq),
-  UNIQUE (circle_id, event_id),
-  UNIQUE (device, ctr)
+  UNIQUE (circle_id, event_id)
 );
+CREATE INDEX events_by_device_ctr ON events (device, ctr);   -- not unique (ADR 0011)
 CREATE TABLE blobs (
   hash TEXT PRIMARY KEY, circle_id TEXT NOT NULL, size INTEGER NOT NULL,
   created_at INTEGER NOT NULL
@@ -214,6 +216,8 @@ CREATE TABLE challenges (
   nonce BLOB PRIMARY KEY, device_id TEXT NOT NULL, expires_at INTEGER NOT NULL
 );
 ```
+
+The migration also creates `stewards(circle_id, member_id, added_seq, removed_seq)` and `invites(circle_id, event_id, author, invite_pub, expires_day, max_uses, used)`, which the server needs to enforce roles and invite limits (ADR 0014).
 
 The server keeps device public keys in `devices` by reading the `public` part of `circle.create`, `member.join`, `device.add` and `device.revoke` envelopes (see 3.2). It also tracks the steward set from the `public` part of `circle.create`, `steward.add` and `steward.remove`, for the role checks in 3.1.
 
@@ -232,6 +236,7 @@ Blobs:
 - `PUT /circles/{id}/blobs/{hash}` ciphertext (<= 2 MiB); server verifies hash of body; `GET` same path.
 
 Joining and admin:
+- `POST /circles` accepts one signed `circle.create` envelope, `{event}`; no session (the founder has none yet). Open by default; `CIRCLES_ALLOW_CREATE=false` closes it (ADR 0014). Answers `201` accepted, `200` duplicate, `422` rejected.
 - `POST /circles/{id}/join` accepts a signed `member.join` envelope plus invite proof (public join path; rate limited).
 - `GET /healthz`, `GET /readyz`, `GET /version` (unauthenticated, minimal info).
 - `POST /admin/import` and `GET /admin/export/{circleId}`: authorised by a signed steward request, not by a server password (see 4.5).
@@ -359,7 +364,7 @@ Load test: 300 members, 20k events, sync from zero in under 10 seconds on the ta
 
 **M0 Skeleton**: repo, Gradle multi-module, CI (build, tests, lint), ADR template. Port `CircleAccess.kt` into `shared/policy`, fix compile errors, add the tests in section 2. Done when `./gradlew check` passes. (Done 2026-11-02.)
 
-**M1 Event log and sync (plaintext payloads, signatures real)**: envelope encoding, signing, id, validation; SQLite store; push/pull endpoints; auth challenge flow; `circle.create`, `member.invite`, `member.join`, `device.add`. CLI `serve` and `migrate`. Done when two JVM test clients sync a circle.
+**M1 Event log and sync (plaintext payloads, signatures real)**: envelope encoding, signing, id, validation; SQLite store; push/pull endpoints; auth challenge flow; `circle.create`, `member.invite`, `member.join`, `device.add`. CLI `serve` and `migrate`. Done when two JVM test clients sync a circle. (Done 2026-11-02, see ADRs 0010-0014; `TwoClientsSyncTest`.)
 
 **M2 Encryption**: libsodium integration, circle key, payload encryption/decryption, key wrapping, `key.rotate`, item detail keys. Done when a database dump contains no plaintext payloads.
 
