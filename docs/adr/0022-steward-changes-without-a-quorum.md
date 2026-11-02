@@ -1,6 +1,6 @@
 # 0022. Steward changes: any steward acts, the last steward stays
 
-- Status: Accepted
+- Status: Superseded by 0023
 - Date: 2026-11-02
 
 ## Context
