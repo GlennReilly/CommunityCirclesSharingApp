@@ -14,6 +14,9 @@ val ApiJson: Json = Json {
 const val API_PREFIX = "/api/v1"
 
 /** Longest push batch (spec 4.3). */
+/** Largest blob the server stores, in bytes (ADR 0026). */
+const val MAX_BLOB_BYTES = 2 * 1024 * 1024
+
 const val MAX_PUSH_EVENTS = 200
 
 /** Pull page size limits (spec 4.3). */

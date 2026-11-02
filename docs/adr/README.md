@@ -29,6 +29,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0023](0023-steward-changes-need-a-quorum.md) | Steward changes need a quorum of distinct stewards | Accepted |
 | [0024](0024-retire-the-plaintext-v0-format.md) | Retire the plaintext v = 0 format (amends 0014, 0021) | Accepted |
 | [0025](0025-item-and-loan-event-payloads.md) | Item and loan event payloads and folding rules | Accepted |
+| [0026](0026-sse-hints-and-blob-storage.md) | Server-sent event hints and blob storage | Accepted |
 
 ## Open decisions still to record
 
@@ -38,7 +39,7 @@ From the spec, section 11. Record each as an ADR when it is decided:
 2. Local replica store in the browser: IndexedDB vs SQLite-WASM on OPFS.
 3. Kotlin/JS bundle size outcome and the fallback plan if over budget.
 4. Recovery code wordlist and format.
-5. Whether the server serves SSE in v1 or polling only.
+5. ~~Whether the server serves SSE in v1 or polling only.~~ Decided: hint-only SSE, optional for clients (ADR 0026).
 6. Default thresholds and half-life, after the pilot.
 7. Whether dispute resolution needs more than one steward (default: one non-party steward).
 8. ~~Whether to keep `UNIQUE(device, ctr)`~~: decided, dropped (ADR 0011).

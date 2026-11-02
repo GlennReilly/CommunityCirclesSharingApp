@@ -17,8 +17,12 @@ class RateLimiterTest {
     private fun spend(bucket: Bucket, key: String): Int = generateSequence { allowed(bucket, key).takeIf { it } }.count()
 
     @Test
-    fun theLimitsAreThoseOfAdr0015() {
-        assertEquals(mapOf("auth" to 10, "push" to 60, "join" to 5, "create" to 5), Bucket.entries.associate { it.label to it.perMinute })
+    fun theLimitsAreThoseOfAdr0015AndAdr0026() {
+        // ADR 0015: auth, push, join, create. ADR 0026 added blob uploads and stream opens.
+        assertEquals(
+            mapOf("auth" to 10, "push" to 60, "join" to 5, "create" to 5, "blob" to 30, "stream" to 6),
+            Bucket.entries.associate { it.label to it.perMinute },
+        )
     }
 
     @Test

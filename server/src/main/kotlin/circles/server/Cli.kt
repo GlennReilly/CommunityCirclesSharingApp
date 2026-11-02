@@ -2,6 +2,7 @@ package circles.server
 
 import circles.crypto.Crypto
 import circles.crypto.JvmCrypto
+import circles.server.domain.BYTES_PER_MIB
 import circles.server.config.ConfigResult
 import circles.server.config.ServerConfig
 import circles.server.config.ServerConfigReader
@@ -107,9 +108,10 @@ class Cli(
             "creation_open" to config.allowCreate,
             "rate_limit" to config.rateLimit,
             "trust_proxy" to config.trustProxy,
+            "blob_quota_mib" to config.blobQuotaMib,
             "version" to SERVER_VERSION,
         )
-        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy)) }
+        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy, config.dataDir.resolve("blobs"), config.blobQuotaMib * BYTES_PER_MIB)) }
         return EXIT_OK
     }
 

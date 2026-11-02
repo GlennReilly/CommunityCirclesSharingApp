@@ -28,6 +28,17 @@ interface Directory {
     /** Pending `steward.add` or `steward.remove` events for [target], as recorded by [Effect.RecordStewardVote]. */
     fun stewardVotes(circle: CircleId, change: StewardChange, target: MemberId): List<StewardVote>
 
+    /** The newest `serverSeq` of the circle, or 0 if it has no events. */
+    fun latestSeq(circle: CircleId): Long
+
+    /** The stored size of a blob, or null if there is none. */
+    fun blobSize(circle: CircleId, hash: String): Long?
+
+    /** Total bytes of blobs stored for the circle. */
+    fun blobBytesUsed(circle: CircleId): Long
+
+    fun insertBlob(circle: CircleId, hash: String, size: Long, createdAtMillis: Long)
+
     /** The newest circle key epoch announced by a `key.wrap` or `key.rotate`; 0 before the first key. */
     fun currentEpoch(circle: CircleId): Int
 

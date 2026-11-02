@@ -132,6 +132,27 @@ class SqliteStore(private val connection: Connection) : Store {
                 it.setString(3, target.v)
             }) { rows -> buildList { while (rows.next()) add(StewardVote(MemberId(rows.getString(1)), rows.getInt(2))) } }
 
+        override fun latestSeq(circle: CircleId): Long =
+            query("SELECT COALESCE(MAX(server_seq), 0) FROM events WHERE circle_id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getLong(1) else 0L }
+
+        override fun blobSize(circle: CircleId, hash: String): Long? =
+            query("SELECT size FROM blobs WHERE circle_id = ? AND hash = ?", {
+                it.setString(1, circle.v)
+                it.setString(2, hash)
+            }) { rows -> if (rows.next()) rows.getLong(1) else null }
+
+        override fun blobBytesUsed(circle: CircleId): Long =
+            query("SELECT COALESCE(SUM(size), 0) FROM blobs WHERE circle_id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getLong(1) else 0L }
+
+        override fun insertBlob(circle: CircleId, hash: String, size: Long, createdAtMillis: Long) {
+            update("INSERT INTO blobs (circle_id, hash, size, created_at) VALUES (?, ?, ?, ?)") {
+                it.setString(1, circle.v)
+                it.setString(2, hash)
+                it.setLong(3, size)
+                it.setLong(4, createdAtMillis)
+            }
+        }
+
         override fun currentEpoch(circle: CircleId): Int =
             query("SELECT current_epoch FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
 

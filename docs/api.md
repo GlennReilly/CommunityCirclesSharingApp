@@ -35,3 +35,13 @@ Status codes: `401` missing or bad token, `403` the device is not in that circle
 ## Not yet
 
 SSE stream, blobs, admin import/export, and any event type other than `circle.create`, `member.invite`, `member.join` and `device.add`.
+
+## Streams and blobs (ADR 0026)
+
+| Call | Body | Answer |
+|---|---|---|
+| `GET /circles/{id}/events/stream` (session) | | `text/event-stream`: `retry: 5000`, then `data: {"serverSeq":N}` with the circle's newest number on connect and again for each newer event; `: keep-alive` every 25 s. Hints only: pull to get events. `401`, `403`, `404` as for pull; `429` over 3 streams per device; `503` if the server is full |
+| `PUT /circles/{id}/blobs/{hash}` (session) | ciphertext, at most 2 MiB | `201` stored, `200` already stored, `400` bad hash, `413` too big, `422` hash is not the BLAKE2b-256 of the body, `507` circle quota full |
+| `GET /circles/{id}/blobs/{hash}` (session) | | the bytes (`application/octet-stream`, `ETag` is the hash, `Cache-Control: private, immutable`), or `404` |
+
+`{hash}` is 64 lowercase hex characters, the BLAKE2b-256 of the (encrypted) body. Browsers' `EventSource` cannot send the `Authorization` header, so web clients read the stream with `fetch`. A reverse proxy must not buffer or time out `text/event-stream`; the server sends `X-Accel-Buffering: no`. Rate limits per device and minute: 6 stream opens, 30 blob uploads.

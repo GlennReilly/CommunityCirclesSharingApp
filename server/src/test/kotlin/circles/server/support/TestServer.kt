@@ -45,11 +45,14 @@ class TestServer(
     rateLimit: Boolean = false,
     trustProxy: Boolean = false,
     log: Log = NoLog,
+    blobQuotaBytes: Long = 1024L * 1024,
+    streamKeepAliveMillis: Long = 25_000,
 ) : AutoCloseable {
     val crypto = JvmCrypto()
     val clock = MutableClock()
     val connection: Connection = Database.openMemory().also { Migrator(it).migrate() }
-    val services: Services = buildServices(connection, crypto, clock, allowCreate, log, rateLimit, trustProxy)
+    val blobsDir: java.nio.file.Path = java.nio.file.Files.createTempDirectory("circles-blobs")
+    val services: Services = buildServices(connection, crypto, clock, allowCreate, log, rateLimit, trustProxy, blobsDir, blobQuotaBytes, streamKeepAliveMillis)
 
     /** Runs a query against the database for assertions. */
     fun rows(sql: String): List<List<Any?>> =
@@ -72,6 +75,7 @@ class TestServer(
 
     override fun close() {
         connection.close()
+        blobsDir.toFile().deleteRecursively()
     }
 }
 

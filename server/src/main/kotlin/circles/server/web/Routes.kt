@@ -1,6 +1,7 @@
 package circles.server.web
 
 import circles.api.API_PREFIX
+import circles.api.MAX_BLOB_BYTES
 import circles.api.ChallengeRequest
 import circles.api.DEFAULT_PULL_LIMIT
 import circles.api.PullResponse
@@ -15,6 +16,18 @@ import circles.api.SessionResponse
 import circles.api.VersionResponse
 import circles.event.isValidRandomId
 import circles.policy.CircleId
+import circles.server.domain.BlobPutResult
+import circles.server.domain.BlobService
+import circles.server.domain.EventHub
+import circles.server.domain.SubscribeResult
+import circles.server.logging.info
+import io.ktor.http.ContentType
+import io.ktor.server.request.contentLength
+import io.ktor.server.request.receiveStream
+import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondBytesWriter
+import io.ktor.server.routing.put
+import io.ktor.utils.io.writeStringUtf8
 import circles.server.domain.AuthService
 import circles.server.domain.Bucket
 import circles.server.domain.Limit
@@ -56,6 +69,11 @@ const val SERVER_VERSION = "0.1.0-M1"
 private const val BEARER_PREFIX = "Bearer "
 private const val LOGGED_FRAMES = 5
 private const val FORWARDED_FOR = "X-Forwarded-For"
+const val STREAM_KEEP_ALIVE_MILLIS = 25_000L
+private const val STREAM_RETRY_MILLIS = 5_000
+private const val BLOB_CACHE_CONTROL = "private, max-age=31536000, immutable"
+private const val NO_PROXY_BUFFERING = "X-Accel-Buffering"
+private val InsufficientStorage = HttpStatusCode(507, "Insufficient Storage")
 
 /** Everything the routes need. */
 class Services(
@@ -66,6 +84,10 @@ class Services(
     val limits: RateLimits = Unlimited,
     /** Take the client address from the last `X-Forwarded-For` entry (ADR 0015). */
     val trustProxy: Boolean = false,
+    val blobs: BlobService? = null,
+    val hub: EventHub = EventHub(),
+    /** How often an idle event stream sends a keep-alive and re-checks its token (ADR 0026). */
+    val streamKeepAliveMillis: Long = STREAM_KEEP_ALIVE_MILLIS,
 )
 
 fun Application.module(services: Services) {
@@ -131,6 +153,7 @@ private fun Route.circleRoutes(services: Services) {
                 val circle = call.circleOrNull() ?: return@post call.respondProblem(HttpStatusCode.NotFound, "No such circle")
                 single(call, sync, Entrance.Join(circle))
             }
+            blobRoutes(services)
             route("/events") {
                 post {
                     val (circle, device) = call.authorised(services.auth) ?: return@post
@@ -146,6 +169,7 @@ private fun Route.circleRoutes(services: Services) {
                         }
                     }
                 }
+                get("/stream") { stream(call, services) }
                 get {
                     val (circle, _) = call.authorised(services.auth) ?: return@get
                     val after = call.parameters["after"]?.let { it.toLongOrNull()?.takeIf { n -> n >= 0 } }
@@ -159,6 +183,77 @@ private fun Route.circleRoutes(services: Services) {
         }
     }
 }
+
+/** `PUT` and `GET /circles/{id}/blobs/{hash}` (ADR 0026): ciphertext in, the same ciphertext out. */
+private fun Route.blobRoutes(services: Services) {
+    val blobs = services.blobs ?: return
+    route("/blobs/{hash}") {
+        put {
+            val (circle, device) = call.authorised(services.auth) ?: return@put
+            if (call.refusedByLimit(services, Bucket.BLOB, device.device.v)) return@put
+            val declared = call.request.contentLength()
+            if (declared != null && declared > MAX_BLOB_BYTES) return@put call.respondProblem(HttpStatusCode.PayloadTooLarge, "Blob too large")
+            val body = withContext(Dispatchers.IO) { call.receiveStream().use { it.readNBytes(MAX_BLOB_BYTES + 1) } }
+            val hash = call.parameters["hash"].orEmpty()
+            when (withContext(Dispatchers.IO) { blobs.put(circle, hash, body) }) {
+                BlobPutResult.Created -> call.respondText("", status = HttpStatusCode.Created)
+                BlobPutResult.AlreadyThere -> call.respondText("", status = HttpStatusCode.OK)
+                BlobPutResult.BadHash -> call.respondProblem(HttpStatusCode.BadRequest, "Bad hash", "The hash is 64 lowercase hex characters.")
+                BlobPutResult.TooLarge -> call.respondProblem(HttpStatusCode.PayloadTooLarge, "Blob too large")
+                BlobPutResult.HashMismatch -> call.respondProblem(HttpStatusCode.UnprocessableEntity, "Hash mismatch", "The hash is not the BLAKE2b-256 of the body.")
+                BlobPutResult.QuotaExceeded -> call.respondProblem(InsufficientStorage, "Circle storage is full")
+            }
+        }
+        get {
+            val (circle, _) = call.authorised(services.auth) ?: return@get
+            val hash = call.parameters["hash"].orEmpty()
+            val bytes = withContext(Dispatchers.IO) { blobs.get(circle, hash) } ?: return@get call.respondProblem(HttpStatusCode.NotFound, "No such blob")
+            call.response.header(HttpHeaders.CacheControl, BLOB_CACHE_CONTROL)
+            call.response.header(HttpHeaders.ETag, "\"$hash\"")
+            call.respondBytes(bytes, ContentType.Application.OctetStream)
+        }
+    }
+}
+
+/**
+ * `GET /circles/{id}/events/stream` (ADR 0026): one `data: {"serverSeq":N}` hint per newer event, a greeting with the
+ * current number, and a keep-alive that also re-checks the token. Authentication happens before the stream opens.
+ */
+private suspend fun stream(call: ApplicationCall, services: Services) {
+    val (circle, device) = call.authorised(services.auth) ?: return
+    if (call.refusedByLimit(services, Bucket.STREAM, device.device.v)) return
+    val token = call.bearerToken() ?: return call.respondUnauthorized()
+    val subscription = when (val result = services.hub.subscribe(circle, device.device)) {
+        SubscribeResult.DeviceLimit -> return call.respondProblem(HttpStatusCode.TooManyRequests, "Too many streams for this device")
+        SubscribeResult.ServerLimit -> return call.respondProblem(HttpStatusCode.ServiceUnavailable, "The server has no room for another stream")
+        is SubscribeResult.Subscribed -> result.subscription
+    }
+    subscription.use { open ->
+        val greeting = withContext(Dispatchers.IO) { services.sync.latestSeq(circle) }
+        services.log.info("stream_opened", "open" to services.hub.openStreams)
+        call.response.header(HttpHeaders.CacheControl, "no-cache")
+        call.response.header(NO_PROXY_BUFFERING, "no")
+        call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+            writeStringUtf8("retry: $STREAM_RETRY_MILLIS\n\n")
+            writeStringUtf8(hintMessage(greeting))
+            flush()
+            while (true) {
+                val next = open.next(services.streamKeepAliveMillis)
+                if (next != null) {
+                    writeStringUtf8(hintMessage(next))
+                } else {
+                    // Idle: end the stream if the session expired or the device was revoked, else keep the connection warm.
+                    if (withContext(Dispatchers.IO) { services.auth.authenticate(token) } == null) break
+                    writeStringUtf8(": keep-alive\n\n")
+                }
+                flush()
+            }
+        }
+        services.log.info("stream_closed", "open" to (services.hub.openStreams - 1))
+    }
+}
+
+private fun hintMessage(serverSeq: Long): String = "data: {\"serverSeq\":$serverSeq}\n\n"
 
 /** The two public endpoints: one event in, one result out. */
 private suspend fun single(call: ApplicationCall, sync: SyncService, entrance: Entrance) {
@@ -178,6 +273,9 @@ private suspend fun single(call: ApplicationCall, sync: SyncService, entrance: E
 
 private fun ApplicationCall.circleOrNull(): CircleId? = parameters["id"]?.takeIf { isValidRandomId(it) }?.let { CircleId(it) }
 
+private fun ApplicationCall.bearerToken(): String? =
+    request.headers[HttpHeaders.Authorization]?.takeIf { it.startsWith(BEARER_PREFIX) }?.removePrefix(BEARER_PREFIX)
+
 /** Checks the bearer token and that its device belongs to the circle in the path; answers 401, 403 or 404 otherwise. */
 private suspend fun ApplicationCall.authorised(auth: AuthService): Pair<CircleId, DeviceRecord>? {
     val circle = circleOrNull()
@@ -185,7 +283,7 @@ private suspend fun ApplicationCall.authorised(auth: AuthService): Pair<CircleId
         respondProblem(HttpStatusCode.NotFound, "No such circle")
         return null
     }
-    val token = request.headers[HttpHeaders.Authorization]?.takeIf { it.startsWith(BEARER_PREFIX) }?.removePrefix(BEARER_PREFIX)
+    val token = bearerToken()
     val device = token?.let { withContext(Dispatchers.IO) { auth.authenticate(it) } }
     if (device == null) {
         respondUnauthorized()

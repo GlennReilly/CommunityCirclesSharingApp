@@ -39,6 +39,7 @@ class SyncService(
     private val rules: EventRules,
     private val creationAllowed: Boolean,
     private val log: Log = NoLog,
+    private val hints: EventHints = NoHints,
 ) {
     val isCreationAllowed: Boolean get() = creationAllowed
 
@@ -47,9 +48,26 @@ class SyncService(
         val now = clock.millis()
         val today = Math.floorDiv(now, MILLIS_PER_DAY).toInt()
         val results = store.transaction { tx -> events.map { submitOne(it, entrance, now, today, tx) } }
+        publishHints(entrance, events, results)
         logSummary(entrance, results)
         return results
     }
+
+    /** The newest `serverSeq` of the circle; used to greet a new stream. */
+    fun latestSeq(circle: CircleId): Long = store.transaction { it.latestSeq(circle) }
+
+    /** After commit, tells open streams about the newest accepted event of each circle in the batch. */
+    private fun publishHints(entrance: Entrance, events: List<EnvelopeDto>, results: List<PushResult>) {
+        events.zip(results).filter { it.second.status == PushStatus.ACCEPTED }.groupBy { circleOf(entrance, it.first) }
+            .forEach { (circle, accepted) -> circle?.let { hints.publish(it, accepted.maxOf { pair -> pair.second.serverSeq ?: 0L }) } }
+    }
+
+    private fun circleOf(entrance: Entrance, dto: EnvelopeDto): CircleId? =
+        when (entrance) {
+            is Entrance.Push -> entrance.circle
+            is Entrance.Join -> entrance.circle
+            Entrance.Create -> CircleId(dto.circle)
+        }
 
     fun pull(circle: CircleId, after: Long, limit: Int): PullResponse {
         val pageSize = limit.coerceIn(1, MAX_PULL_LIMIT)

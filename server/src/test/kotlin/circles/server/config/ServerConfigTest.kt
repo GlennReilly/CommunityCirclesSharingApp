@@ -54,6 +54,8 @@ class ServerConfigTest {
         assertEquals(circles.server.logging.LogLevel.INFO, defaults.logLevel)
         assertEquals(false, defaults.trustProxy)
         assertEquals(true, defaults.rateLimit)
+        assertEquals(256L, defaults.blobQuotaMib)
+        assertEquals(64L, valid(mapOf(ENV_BLOB_QUOTA_MIB to "64")).blobQuotaMib)
         val changed = valid(mapOf(ENV_LOG_LEVEL to "debug", ENV_TRUST_PROXY to "true", ENV_RATE_LIMIT to "false"))
         assertEquals(circles.server.logging.LogLevel.DEBUG, changed.logLevel)
         assertEquals(true, changed.trustProxy)
@@ -65,6 +67,7 @@ class ServerConfigTest {
         assertTrue(problems(mapOf(ENV_LOG_LEVEL to "LOUD")).single().contains(ENV_LOG_LEVEL))
         assertTrue(problems(mapOf(ENV_TRUST_PROXY to "yes")).single().contains(ENV_TRUST_PROXY))
         assertTrue(problems(mapOf(ENV_RATE_LIMIT to "0")).single().contains(ENV_RATE_LIMIT))
+        listOf("0", "-5", "lots", "1.5").forEach { assertTrue(problems(mapOf(ENV_BLOB_QUOTA_MIB to it)).single().contains(ENV_BLOB_QUOTA_MIB), it) }
         assertEquals(3, problems(mapOf(ENV_LOG_LEVEL to "x", ENV_TRUST_PROXY to "x", ENV_RATE_LIMIT to "x")).size)
     }
 }

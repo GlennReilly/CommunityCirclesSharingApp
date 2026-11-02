@@ -1,7 +1,14 @@
 package circles.server
 
 import circles.crypto.Crypto
+import circles.server.data.FileBlobFiles
 import circles.server.data.SqliteStore
+import circles.server.domain.BYTES_PER_MIB
+import circles.server.domain.BlobService
+import circles.server.domain.DEFAULT_BLOB_QUOTA_MIB
+import circles.server.domain.EventHub
+import circles.server.web.STREAM_KEEP_ALIVE_MILLIS
+import java.nio.file.Path
 import circles.server.domain.RateLimiter
 import circles.server.domain.Unlimited
 import circles.server.logging.Log
@@ -22,14 +29,21 @@ fun buildServices(
     log: Log = NoLog,
     rateLimit: Boolean = true,
     trustProxy: Boolean = false,
+    blobsDir: Path,
+    blobQuotaBytes: Long = DEFAULT_BLOB_QUOTA_MIB * BYTES_PER_MIB,
+    streamKeepAliveMillis: Long = STREAM_KEEP_ALIVE_MILLIS,
 ): Services {
     val store = SqliteStore(connection)
+    val hub = EventHub()
     return Services(
-        sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log),
+        sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log, hub),
         auth = AuthService(store, crypto, clock),
         store = store,
         log = log,
         limits = if (rateLimit) RateLimiter(clock) else Unlimited,
         trustProxy = trustProxy,
+        blobs = BlobService(store, FileBlobFiles(blobsDir), crypto, clock, blobQuotaBytes),
+        hub = hub,
+        streamKeepAliveMillis = streamKeepAliveMillis,
     )
 }
