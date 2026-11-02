@@ -19,6 +19,10 @@ kotlin {
             // ADR 0010: JDK Ed25519 plus BouncyCastle BLAKE2b on the JVM; no native library.
             implementation(libs.bouncycastle)
         }
+        jsMain.dependencies {
+            // ADR 0018: libsodium in the browser (and Node tests).
+            implementation(npm("libsodium-wrappers", "0.7.15"))
+        }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
