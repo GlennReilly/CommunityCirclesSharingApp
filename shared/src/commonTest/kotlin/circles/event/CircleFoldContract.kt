@@ -160,6 +160,20 @@ abstract class CircleFoldContract {
     }
 
     @Test
+    fun stewardChangesFollowTheRulesAndTheLastStewardStays() = runTest {
+        val w = world()
+        w.start()
+        val notYet = w.bea.stewardAdd(w.circle, w.carol.identity.member, day) // bea is not a steward yet
+        val removeLast = w.founder.stewardRemove(w.circle, w.founder.identity.member, day)
+        val unknown = w.founder.stewardAdd(w.circle, w.person().identity.member, day)
+        val view = w.fold(w.founder, w.log + listOf(notYet, removeLast, unknown))
+        assertEquals(setOf("only a steward may add a steward", "a circle keeps at least one steward", "member is not in the circle"), view.rejected.map { it.reason }.toSet())
+        val ok = w.fold(w.founder, w.log + listOf(w.founder.stewardAdd(w.circle, w.bea.identity.member, day), w.founder.stewardRemove(w.circle, w.founder.identity.member, day)))
+        assertEquals(setOf(w.bea.identity.member), ok.stewards)
+        assertEquals(emptyList(), ok.rejected)
+    }
+
+    @Test
     fun aLogThatDoesNotStartWithCircleCreateIsRejected() = runTest {
         val w = world()
         w.start()

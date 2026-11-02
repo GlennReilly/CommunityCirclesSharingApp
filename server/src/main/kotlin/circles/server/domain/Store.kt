@@ -18,6 +18,8 @@ interface Directory {
 
     fun isSteward(circle: CircleId, member: MemberId): Boolean
 
+    fun stewardCount(circle: CircleId): Int
+
     /** The newest circle key epoch announced by a `key.wrap` or `key.rotate`; 0 before the first key. */
     fun currentEpoch(circle: CircleId): Int
 

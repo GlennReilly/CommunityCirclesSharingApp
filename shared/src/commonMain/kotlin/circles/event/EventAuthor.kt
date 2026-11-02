@@ -84,6 +84,12 @@ class EventAuthor(
         }
     }
 
+    fun stewardAdd(circle: CircleId, member: MemberId, day: Int, note: String? = null): Envelope =
+        build(circle, EventType.STEWARD_ADD, day, PublicParts.stewardPublic(member), textPayload(PublicParts.NOTE, note))
+
+    fun stewardRemove(circle: CircleId, member: MemberId, day: Int, note: String? = null): Envelope =
+        build(circle, EventType.STEWARD_REMOVE, day, PublicParts.stewardPublic(member), textPayload(PublicParts.NOTE, note))
+
     /** Revokes [target]. Allowed for a member's own devices and, for any device, to a steward. */
     fun deviceRevoke(circle: CircleId, target: DeviceId, day: Int, reason: String? = null): Envelope =
         build(circle, EventType.DEVICE_REVOKE, day, PublicParts.revokePublic(target), textPayload(PublicParts.REASON, reason))

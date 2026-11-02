@@ -67,6 +67,8 @@ class CircleFold(private val crypto: Crypto, private val cipher: Cipher, private
                 EventType.MEMBER_INVITE -> invite(e, id)
                 EventType.DEVICE_ADD -> deviceAdd(e, sender)
                 EventType.DEVICE_REVOKE -> revoke(e, sender)
+                EventType.STEWARD_ADD -> stewardAdd(e, sender)
+                EventType.STEWARD_REMOVE -> stewardRemove(e, sender)
                 EventType.KEY_WRAP -> wrap(e, sender)
                 EventType.KEY_ROTATE -> rotate(e, sender)
                 else -> null
@@ -121,6 +123,23 @@ class CircleFold(private val crypto: Crypto, private val cipher: Cipher, private
             if (target.revoked) return "device already revoked"
             if (target.registration.member != sender.member && sender.member !in stewards) return "only a steward may revoke another member's device"
             devices[target.registration.device] = target.copy(revoked = true)
+            return null
+        }
+
+        private fun stewardAdd(e: Envelope, sender: DeviceRegistration): String? {
+            if (sender.member !in stewards) return "only a steward may add a steward"
+            val member = (PublicParts.steward(e.public) as? Parsed.Ok)?.value ?: return "bad steward change"
+            if (devices.values.none { it.registration.member == member }) return "member is not in the circle"
+            if (!stewards.add(member)) return "member is already a steward"
+            return null
+        }
+
+        private fun stewardRemove(e: Envelope, sender: DeviceRegistration): String? {
+            if (sender.member !in stewards) return "only a steward may remove a steward"
+            val member = (PublicParts.steward(e.public) as? Parsed.Ok)?.value ?: return "bad steward change"
+            if (member !in stewards) return "member is not a steward"
+            if (stewards.size == 1) return "a circle keeps at least one steward"
+            stewards.remove(member)
             return null
         }
 

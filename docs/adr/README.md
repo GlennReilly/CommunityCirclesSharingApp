@@ -25,6 +25,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0019](0019-cipher-separate-from-crypto.md) | Encryption lives in a separate `Cipher` interface (amends 0018 point 1) | Accepted |
 | [0020](0020-shamir-own-implementation.md) | Shamir secret sharing: own implementation with independent vectors | Accepted |
 | [0021](0021-sealed-envelope-v1-and-circle-key-wrapping.md) | Sealed envelope v = 1, circle keys and key wrapping | Accepted |
+| [0022](0022-steward-changes-without-a-quorum.md) | Steward changes: any steward acts, the last steward stays | Accepted |
 
 ## Open decisions still to record
 

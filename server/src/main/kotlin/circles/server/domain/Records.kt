@@ -38,6 +38,8 @@ sealed interface Effect {
 
     data class UseInvite(val circle: CircleId, val id: EventId) : Effect
 
+    data class RemoveSteward(val circle: CircleId, val member: MemberId) : Effect
+
     data class RevokeDevice(val circle: CircleId, val device: DeviceId) : Effect
 
     data class SetEpoch(val circle: CircleId, val epoch: Int) : Effect

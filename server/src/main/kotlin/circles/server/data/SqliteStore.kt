@@ -115,6 +115,9 @@ class SqliteStore(private val connection: Connection) : Store {
                 it.setString(2, member.v)
             }) { it.next() }
 
+        override fun stewardCount(circle: CircleId): Int =
+            query("SELECT COUNT(*) FROM stewards WHERE circle_id = ? AND removed_seq IS NULL", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
+
         override fun currentEpoch(circle: CircleId): Int =
             query("SELECT current_epoch FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
 
@@ -173,7 +176,7 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setInt(2, effect.day)
                 }
                 is Effect.RegisterDevice -> registerDevice(effect.circle, effect.registration, serverSeq)
-                is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq) VALUES (?, ?, ?)") {
+                is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq) VALUES (?, ?, ?) ON CONFLICT (circle_id, member_id) DO UPDATE SET added_seq = excluded.added_seq, removed_seq = NULL") {
                     it.setString(1, effect.circle.v)
                     it.setString(2, effect.member.v)
                     it.setLong(3, serverSeq)
@@ -185,6 +188,11 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setBytes(4, effect.terms.invitePub.toByteArray())
                     it.setInt(5, effect.terms.expiresDay)
                     it.setInt(6, effect.terms.maxUses)
+                }
+                is Effect.RemoveSteward -> update("UPDATE stewards SET removed_seq = ? WHERE circle_id = ? AND member_id = ? AND removed_seq IS NULL") {
+                    it.setLong(1, serverSeq)
+                    it.setString(2, effect.circle.v)
+                    it.setString(3, effect.member.v)
                 }
                 is Effect.RevokeDevice -> update("UPDATE devices SET revoked_seq = ? WHERE device_id = ? AND circle_id = ? AND revoked_seq IS NULL") {
                     it.setLong(1, serverSeq)

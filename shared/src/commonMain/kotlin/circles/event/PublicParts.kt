@@ -89,6 +89,15 @@ object PublicParts {
         return Parsed.Ok(DeviceId(device))
     }
 
+    /** `public` of `steward.add` and `steward.remove`: the member whose role changes. */
+    fun steward(map: CborMap): Parsed<MemberId> {
+        exactKeys(map, setOf(KEY_MEMBER))?.let { return Parsed.Invalid(it) }
+        val member = (map[KEY_MEMBER] as? CborText)?.value?.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("member must be 32 lowercase hex characters")
+        return Parsed.Ok(MemberId(member))
+    }
+
+    fun stewardPublic(member: MemberId): CborMap = CborMap.of(KEY_MEMBER to CborText(member.v))
+
     fun revokePublic(device: DeviceId): CborMap = CborMap.of(KEY_DEVICE to CborText(device.v))
 
     /** The optional text of a payload (`note` for invites, `label` for devices); an empty payload gives null. */

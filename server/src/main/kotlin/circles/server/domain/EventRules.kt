@@ -32,6 +32,8 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.KEY_ROTATE,
     EventType.DEVICE_REVOKE,
     EventType.RECOVERY_SHARE,
+    EventType.STEWARD_ADD,
+    EventType.STEWARD_REMOVE,
 )
 
 /**
@@ -60,6 +62,7 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             EventType.KEY_ROTATE -> keyRotate(envelope, payloadEmpty, directory)
             EventType.DEVICE_REVOKE -> deviceRevoke(envelope, directory)
             EventType.RECOVERY_SHARE -> recoveryShare(envelope, payloadEmpty, directory)
+            EventType.STEWARD_ADD, EventType.STEWARD_REMOVE -> stewardChange(envelope, type == EventType.STEWARD_ADD, directory)
             else -> deviceAdd(envelope, directory)
         }
     }
@@ -97,6 +100,30 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             }
             terms.epoch in FIRST_EPOCH..current -> Decision.Accept(emptyList())
             else -> reject(RejectionCode.MALFORMED, "epoch ${terms.epoch} has not been started (current $current)")
+        }
+    }
+
+    private fun stewardChange(envelope: Envelope, adding: Boolean, directory: Directory): Decision {
+        val sender = sender(envelope, directory).deviceOrReject { return it }
+        if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may change stewards")
+        val member = when (val parsed = PublicParts.steward(envelope.public)) {
+            is Parsed.Ok -> parsed.value
+            is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
+        }
+        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.NOTE)?.let { return it }
+        val isSteward = directory.isSteward(envelope.circle, member)
+        return if (adding) {
+            when {
+                !directory.memberExists(envelope.circle, member) -> reject(RejectionCode.INVALID_PUBLIC, "member is not in this circle")
+                isSteward -> reject(RejectionCode.INVALID_PUBLIC, "member is already a steward")
+                else -> Decision.Accept(listOf(Effect.AddSteward(envelope.circle, member)))
+            }
+        } else {
+            when {
+                !isSteward -> reject(RejectionCode.INVALID_PUBLIC, "member is not a steward")
+                directory.stewardCount(envelope.circle) <= 1 -> reject(RejectionCode.INVALID_PUBLIC, "a circle keeps at least one steward")
+                else -> Decision.Accept(listOf(Effect.RemoveSteward(envelope.circle, member)))
+            }
         }
     }
 
