@@ -107,10 +107,9 @@ class Cli(
             "creation_open" to config.allowCreate,
             "rate_limit" to config.rateLimit,
             "trust_proxy" to config.trustProxy,
-            "plaintext_dev_format" to config.allowPlaintextDev,
             "version" to SERVER_VERSION,
         )
-        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy, config.allowPlaintextDev)) }
+        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy)) }
         return EXIT_OK
     }
 

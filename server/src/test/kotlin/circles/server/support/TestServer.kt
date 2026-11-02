@@ -45,13 +45,11 @@ class TestServer(
     rateLimit: Boolean = false,
     trustProxy: Boolean = false,
     log: Log = NoLog,
-    /** Existing M1 tests use the plaintext development format; sealed-format tests pass false (ADR 0021). */
-    allowPlaintext: Boolean = true,
 ) : AutoCloseable {
     val crypto = JvmCrypto()
     val clock = MutableClock()
     val connection: Connection = Database.openMemory().also { Migrator(it).migrate() }
-    val services: Services = buildServices(connection, crypto, clock, allowCreate, log, rateLimit, trustProxy, allowPlaintext)
+    val services: Services = buildServices(connection, crypto, clock, allowCreate, log, rateLimit, trustProxy)
 
     /** Runs a query against the database for assertions. */
     fun rows(sql: String): List<List<Any?>> =

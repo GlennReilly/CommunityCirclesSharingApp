@@ -84,12 +84,16 @@ class LoggingApiTest {
         val bea = Person(crypto)
         val circle = newCircleId(crypto)
         val key = newInviteKey(crypto)
+        val circleKey = circles.event.KeyRing.newCircleKey(crypto)
+        alice.author.keyRing = circles.event.KeyRing.EMPTY.with(circles.event.FIRST_EPOCH, circleKey)
+        val selfWrap = alice.author.keyWrap(circle, alice.identity.registration, circles.event.FIRST_EPOCH, circleKey, TODAY)
         val invite = alice.author.invite(circle, key, TODAY + 5, 1, TODAY, note = "private note for Bea")
         var token = ""
         var nonceSeen = ""
         apiTest(rateLimit = true, trustProxy = true, log = log) {
             api.createCircle(alice.author.circleCreate(circle, TODAY))
             token = api.login(alice.identity)
+            api.push(token, circle, listOf(selfWrap))
             api.push(token, circle, listOf(invite))
             api.join(circle, bea.author.join(circle, invite.eventId(server.crypto), key, TODAY))
             api.pull(token, circle)
@@ -106,6 +110,8 @@ class LoggingApiTest {
             "198.51.100.77",
             "127.0.0.1",
             "private note for Bea",
+            circleKey.toHex(),
+            circleKey.toBase64Url(),
             circle.v,
             alice.identity.device.v,
             alice.identity.member.v,

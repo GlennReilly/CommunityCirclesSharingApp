@@ -119,8 +119,8 @@ abstract class SealedEventContract {
         val terms = assertIs<Parsed.Ok<KeyWrapTerms>>(CircleKeys.keyWrap(wrap.public)).value
         assertEquals(bea.device, terms.device)
         assertEquals(FIRST_EPOCH, terms.epoch)
-        assertEquals(k.key, assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.boxKeys!!, k.circle, FIRST_EPOCH, terms.wrapped)).value)
-        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, carol.boxKeys!!, k.circle, FIRST_EPOCH, terms.wrapped))
+        assertEquals(k.key, assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.boxKeys, k.circle, FIRST_EPOCH, terms.wrapped)).value)
+        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, carol.boxKeys, k.circle, FIRST_EPOCH, terms.wrapped))
         assertFalse(wrap.public.toString().contains(k.key.toHex()))
     }
 
@@ -129,9 +129,9 @@ abstract class SealedEventContract {
         val k = kit()
         val bea = DeviceIdentity.generate(k.crypto, cipher = k.cipher)
         val wrapped = CircleKeys.wrap(k.cipher, bea.boxPub, k.circle, 1, k.key)
-        assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.boxKeys!!, k.circle, 1, wrapped))
-        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, bea.boxKeys!!, k.circle, 2, wrapped))
-        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, bea.boxKeys!!, newCircleId(k.crypto), 1, wrapped))
+        assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.boxKeys, k.circle, 1, wrapped))
+        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, bea.boxKeys, k.circle, 2, wrapped))
+        assertIs<Parsed.Invalid>(CircleKeys.unwrap(k.cipher, bea.boxKeys, newCircleId(k.crypto), 1, wrapped))
     }
 
     @Test
@@ -142,7 +142,7 @@ abstract class SealedEventContract {
         assertIs<Parsed.Invalid>(PayloadSealing.open(k.cipher, bea.keyRing, event))
         val wrap = k.founder.keyWrap(k.circle, bea.identity.registration, FIRST_EPOCH, k.key, day)
         val terms = assertIs<Parsed.Ok<KeyWrapTerms>>(CircleKeys.keyWrap(wrap.public)).value
-        val key = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.identity.boxKeys!!, k.circle, wrap.epoch, terms.wrapped)).value
+        val key = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(k.cipher, bea.identity.boxKeys, k.circle, wrap.epoch, terms.wrapped)).value
         bea.keyRing = bea.keyRing.with(wrap.epoch, key)
         assertEquals(note, k.noteText(event, bea.keyRing))
     }

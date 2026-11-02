@@ -1,5 +1,6 @@
 package circles.event
 
+import circles.crypto.AEAD_NONCE_BYTES
 import circles.encoding.ByteString
 import circles.encoding.CborBytes
 import circles.encoding.CborEncoder
@@ -15,7 +16,8 @@ import kotlin.test.assertNull
 private const val PAYLOAD_OVERHEAD = 6
 
 class EnvelopeChecksTest {
-    private val ok = EnvelopeVectors.withFakeSig
+    // The vector pins the byte encoding with v = 0, which is only an integer there; a checkable envelope needs v = 1.
+    private val ok = EnvelopeVectors.withFakeSig.copy(v = PAYLOAD_VERSION_SEALED)
 
     private fun code(envelope: Envelope): RejectionCode? = EnvelopeChecks.check(envelope)?.code
 
@@ -52,30 +54,14 @@ class EnvelopeChecksTest {
     fun enforcesTheEncryptedSizeLimitAtTheBoundary() {
         val atLimit = payloadOfEncodedSize(MAX_ENCRYPTED_BYTES)
         assertEquals(MAX_ENCRYPTED_BYTES, atLimit.size)
-        assertNull(EnvelopeChecks.check(ok.copy(encrypted = atLimit)))
-        assertEquals(RejectionCode.TOO_LARGE, code(ok.copy(encrypted = payloadOfEncodedSize(MAX_ENCRYPTED_BYTES + 1))))
+        val sealed = ok.copy(epoch = FIRST_EPOCH, nonce = ByteString.of(ByteArray(AEAD_NONCE_BYTES)))
+        assertNull(EnvelopeChecks.check(sealed.copy(encrypted = atLimit)))
+        assertEquals(RejectionCode.TOO_LARGE, code(sealed.copy(encrypted = payloadOfEncodedSize(MAX_ENCRYPTED_BYTES + 1))))
     }
 
     @Test
     fun refusesOversizedPublic() {
         val big = CborMap.of("x" to CborText("a".repeat(MAX_PUBLIC_BYTES)))
         assertEquals(RejectionCode.TOO_LARGE, code(ok.copy(public = big)))
-    }
-
-    @Test
-    fun payloadIsEmptyMapWhenNothingIsEncrypted() {
-        assertEquals(Parsed.Ok(CborMap.EMPTY), EnvelopeChecks.payload(ok))
-    }
-
-    @Test
-    fun payloadMustBeCanonicalCborMap() {
-        val good = ByteString.of(CborEncoder.encode(CborMap.of("note" to CborText("hi"))))
-        assertEquals(Parsed.Ok(CborMap.of("note" to CborText("hi"))), EnvelopeChecks.payload(ok.copy(encrypted = good)))
-        listOf("83010203", "a2616201616102", "ff").forEach {
-            val envelope = ok.copy(encrypted = ByteString.fromHex(it)!!)
-            assertIs<Parsed.Invalid>(EnvelopeChecks.payload(envelope), "payload $it")
-            assertEquals(RejectionCode.INVALID_PAYLOAD, code(envelope))
-        }
-        assertIs<Parsed.Ok<*>>(EnvelopeChecks.payload(ok.copy(encrypted = ByteString.of(CborEncoder.encode(CborMap.of("n" to CborInt(1)))))))
     }
 }

@@ -1,5 +1,6 @@
 package circles.server.domain
 
+import circles.server.support.testCipher
 import circles.api.PushResult
 import circles.api.PushStatus
 import circles.encoding.ByteString
@@ -50,7 +51,7 @@ class SyncServiceTest {
 
     private fun invite(by: Person = founder, maxUses: Int = 2, expiresDay: Int = TODAY + 30): Triple<Envelope, circles.event.InviteKey, EventId> {
         val key = newInviteKey(crypto)
-        val event = by.author.invite(circle, key, expiresDay, maxUses, TODAY, note = "welcome")
+        val event = by.author.invite(circle, key, expiresDay, maxUses, TODAY)
         accepted(push(event).single())
         return Triple(event, key, event.eventId(crypto))
     }
@@ -92,7 +93,7 @@ class SyncServiceTest {
 
     @Test
     fun createMustRegisterItsOwnAuthorAndDevice() {
-        val other = DeviceIdentity.generate(crypto)
+        val other = DeviceIdentity.generate(crypto, testCipher)
         val forged = founder.author.circleCreate(circle, TODAY).copy(public = other.registration.toPublic())
         assertRejected(RejectionCode.AUTHOR_MISMATCH, push(forged).single())
     }
@@ -105,10 +106,11 @@ class SyncServiceTest {
     }
 
     @Test
-    fun createWithPayloadIsRefused() {
-        val withPayload = founder.author.circleCreate(circle, TODAY).copy(encrypted = ByteString.of(circles.encoding.CborEncoder.encode(CborMap.of("note" to CborText("x")))))
+    fun createWithASecretPartIsRefused() {
+        // circle.create has no secret part, and no circle key exists yet for a sealed one to use.
+        val sealed = founder.author.circleCreate(circle, TODAY).copy(epoch = 1, nonce = ByteString.of(ByteArray(24)), encrypted = ByteString.of(ByteArray(32)))
             .signedBy(crypto, founder.identity.signing.secretSeed)
-        assertRejected(RejectionCode.INVALID_PAYLOAD, push(withPayload).single())
+        assertRejected(RejectionCode.MALFORMED, push(sealed).single())
     }
 
     // ---- stateless checks and the day rule ----
@@ -137,8 +139,8 @@ class SyncServiceTest {
 
     @Test
     fun oversizedPayloadIsRefused() {
-        val big = CborMap.of("note" to CborText("a".repeat(MAX_ENCRYPTED_BYTES)))
-        val event = founder.author.circleCreate(circle, TODAY).copy(encrypted = ByteString.of(circles.encoding.CborEncoder.encode(big)))
+        val event = founder.author.circleCreate(circle, TODAY)
+            .copy(epoch = 1, nonce = ByteString.of(ByteArray(24)), encrypted = ByteString.of(ByteArray(MAX_ENCRYPTED_BYTES + 1)))
             .signedBy(crypto, founder.identity.signing.secretSeed)
         assertRejected(RejectionCode.TOO_LARGE, push(event).single())
     }
@@ -224,7 +226,6 @@ class SyncServiceTest {
         createCircle()
         assertRejected(RejectionCode.INVALID_PUBLIC, push(founder.author.invite(circle, newInviteKey(crypto), TODAY - 1, 1, TODAY)).single())
         assertRejected(RejectionCode.INVALID_PUBLIC, push(founder.author.invite(circle, newInviteKey(crypto), TODAY + 1, 0, TODAY)).single())
-        assertRejected(RejectionCode.INVALID_PAYLOAD, push(founder.author.invite(circle, newInviteKey(crypto), TODAY + 1, 1, TODAY, note = "x".repeat(300))).single())
     }
 
     // ---- member.join ----
@@ -306,9 +307,9 @@ class SyncServiceTest {
         val (_, key, id) = invite(maxUses = 5)
         val bea = joiner()
         assertEquals(PushStatus.ACCEPTED, join(bea, id, key).status)
-        val sameMember = Person(crypto, EventAuthor(crypto, DeviceIdentity.generate(crypto, bea.identity.member)))
+        val sameMember = Person(crypto, EventAuthor(crypto, DeviceIdentity.generate(crypto, testCipher, bea.identity.member), testCipher))
         assertRejected(RejectionCode.MEMBER_EXISTS, join(sameMember, id, key))
-        val sameDevice = Person(crypto, EventAuthor(crypto, DeviceIdentity(circles.event.newMemberId(crypto), bea.identity.device, crypto.generateSigningKeyPair(), bea.identity.boxPub)))
+        val sameDevice = Person(crypto, EventAuthor(crypto, DeviceIdentity(circles.event.newMemberId(crypto), bea.identity.device, crypto.generateSigningKeyPair(), bea.identity.boxPub, bea.identity.boxSecret), testCipher))
         assertRejected(RejectionCode.DEVICE_EXISTS, join(sameDevice, id, key))
     }
 
@@ -340,8 +341,8 @@ class SyncServiceTest {
     @Test
     fun aMemberCanAddTheirOwnDevice() {
         createCircle()
-        val phone = DeviceIdentity.generate(crypto, founder.identity.member)
-        accepted(push(founder.author.deviceAdd(circle, phone, TODAY, label = "phone")).single())
+        val phone = DeviceIdentity.generate(crypto, testCipher, founder.identity.member)
+        accepted(push(founder.author.deviceAdd(circle, phone, TODAY)).single())
         assertEquals(1, server.rows("SELECT 1 FROM devices WHERE device_id = '${phone.device.v}' AND member_id = '${founder.identity.member.v}'").size)
     }
 
@@ -349,7 +350,7 @@ class SyncServiceTest {
     fun aStewardCanAddADeviceForAnotherMember() {
         createCircle()
         val bea = joined()
-        val beaPhone = DeviceIdentity.generate(crypto, bea.identity.member)
+        val beaPhone = DeviceIdentity.generate(crypto, testCipher, bea.identity.member)
         accepted(push(founder.author.deviceAdd(circle, beaPhone, TODAY)).single())
     }
 
@@ -357,14 +358,14 @@ class SyncServiceTest {
     fun aNonStewardCannotAddADeviceForAnotherMember() {
         createCircle()
         val bea = joined()
-        val foundersPhone = DeviceIdentity.generate(crypto, founder.identity.member)
+        val foundersPhone = DeviceIdentity.generate(crypto, testCipher, founder.identity.member)
         assertRejected(RejectionCode.NOT_STEWARD, push(bea.author.deviceAdd(circle, foundersPhone, TODAY)).single())
     }
 
     @Test
     fun aStewardCannotAddADeviceForAMemberWhoIsNotInTheCircle() {
         createCircle()
-        val nobody = DeviceIdentity.generate(crypto)
+        val nobody = DeviceIdentity.generate(crypto, testCipher)
         assertRejected(RejectionCode.INVALID_PUBLIC, push(founder.author.deviceAdd(circle, nobody, TODAY)).single())
     }
 
@@ -378,14 +379,7 @@ class SyncServiceTest {
     fun deviceAddNeedsAnExistingSigner() {
         createCircle()
         val stranger = Person(crypto)
-        assertRejected(RejectionCode.UNKNOWN_DEVICE, push(stranger.author.deviceAdd(circle, DeviceIdentity.generate(crypto, stranger.identity.member), TODAY)).single())
-    }
-
-    @Test
-    fun aDeviceLabelIsLimited() {
-        createCircle()
-        val phone = DeviceIdentity.generate(crypto, founder.identity.member)
-        assertRejected(RejectionCode.INVALID_PAYLOAD, push(founder.author.deviceAdd(circle, phone, TODAY, label = "x".repeat(300))).single())
+        assertRejected(RejectionCode.UNKNOWN_DEVICE, push(stranger.author.deviceAdd(circle, DeviceIdentity.generate(crypto, testCipher, stranger.identity.member), TODAY)).single())
     }
 
     // ---- ordering, batches, ADR 0011 ----
@@ -412,8 +406,8 @@ class SyncServiceTest {
     @Test
     fun counterReuseIsAcceptedBecauseTheIdAlreadyMakesPushesIdempotent() {
         createCircle()
-        val first = EventAuthor(crypto, founder.identity, firstCounter = 5).invite(circle, newInviteKey(crypto), TODAY + 5, 1, TODAY)
-        val second = EventAuthor(crypto, founder.identity, firstCounter = 5).invite(circle, newInviteKey(crypto), TODAY + 5, 1, TODAY)
+        val first = EventAuthor(crypto, founder.identity, testCipher, firstCounter = 5).invite(circle, newInviteKey(crypto), TODAY + 5, 1, TODAY)
+        val second = EventAuthor(crypto, founder.identity, testCipher, firstCounter = 5).invite(circle, newInviteKey(crypto), TODAY + 5, 1, TODAY)
         assertEquals(first.ctr, second.ctr)
         assertEquals(listOf(PushStatus.ACCEPTED, PushStatus.ACCEPTED), push(first, second).map { it.status })
     }
@@ -436,7 +430,7 @@ class SyncServiceTest {
         try {
             val futures = List(threads) {
                 pool.submit<List<Long>> {
-                    val author = EventAuthor(crypto, founder.identity, firstCounter = 100L * it)
+                    val author = EventAuthor(crypto, founder.identity, testCipher, firstCounter = 100L * it)
                     List(perThread) { accepted(push(author.invite(circle, newInviteKey(crypto), TODAY + 5, 1, TODAY)).single()) }
                 }
             }

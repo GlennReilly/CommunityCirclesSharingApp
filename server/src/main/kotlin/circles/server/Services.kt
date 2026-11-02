@@ -22,11 +22,10 @@ fun buildServices(
     log: Log = NoLog,
     rateLimit: Boolean = true,
     trustProxy: Boolean = false,
-    allowPlaintextDev: Boolean = false,
 ): Services {
     val store = SqliteStore(connection)
     return Services(
-        sync = SyncService(store, crypto, clock, EventRules(crypto, allowPlaintextDev), allowCreate, log),
+        sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log),
         auth = AuthService(store, crypto, clock),
         store = store,
         log = log,

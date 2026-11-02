@@ -1,6 +1,7 @@
 package circles.event
 
 import circles.crypto.JvmCrypto
+import circles.crypto.LibsodiumCipher
 import circles.encoding.ByteString
 import circles.encoding.Parsed
 import kotlin.test.Test
@@ -11,7 +12,10 @@ import kotlin.test.assertTrue
 
 class EventAuthorTest {
     private val crypto = JvmCrypto()
-    private val founder = EventAuthor(crypto, DeviceIdentity.generate(crypto))
+    private val cipher = LibsodiumCipher()
+    private val founder = EventAuthor(crypto, DeviceIdentity.generate(crypto, cipher), cipher).also {
+        it.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, KeyRing.newCircleKey(crypto))
+    }
     private val circle = newCircleId(crypto)
 
     private fun registration(envelope: Envelope): DeviceRegistration {
@@ -42,7 +46,7 @@ class EventAuthorTest {
         val first = founder.circleCreate(circle, 100)
         val second = founder.circleCreate(circle, 100)
         assertEquals(listOf(0L, 1L), listOf(first.ctr, second.ctr))
-        assertEquals(7L, EventAuthor(crypto, founder.identity, firstCounter = 7).circleCreate(circle, 1).ctr)
+        assertEquals(7L, EventAuthor(crypto, founder.identity, cipher, firstCounter = 7).circleCreate(circle, 1).ctr)
     }
 
     @Test
@@ -52,14 +56,14 @@ class EventAuthorTest {
         assertIs<Parsed.Ok<InviteTerms>>(PublicParts.invite(event.public)).also {
             assertEquals(InviteTerms(key.keys.publicKey, 130, 2), it.value)
         }
-        assertEquals(Parsed.Ok("for Sam"), PublicParts.optionalText((EnvelopeChecks.payload(event) as Parsed.Ok).value, PublicParts.NOTE))
+        assertEquals(Parsed.Ok("for Sam"), PublicParts.optionalText((PayloadSealing.open(cipher, founder.keyRing, event) as Parsed.Ok).value, PublicParts.NOTE))
         assertTrue(founder.invite(circle, key, 130, 2, 100).encrypted.isEmpty())
     }
 
     @Test
     fun joinProofVerifiesWithTheInvitePublicKey() {
         val key = InviteKey(crypto.generateSigningKeyPair())
-        val joiner = EventAuthor(crypto, DeviceIdentity.generate(crypto))
+        val joiner = EventAuthor(crypto, DeviceIdentity.generate(crypto, cipher), cipher)
         val inviteId = EventId("ab".repeat(32))
         val event = joiner.join(circle, inviteId, key, day = 101)
         val terms = (PublicParts.join(event.public) as Parsed.Ok).value
@@ -72,12 +76,12 @@ class EventAuthorTest {
 
     @Test
     fun deviceAddRegistersTheNewDeviceButIsSignedByTheExistingOne() {
-        val newDevice = DeviceIdentity.generate(crypto, founder.identity.member)
+        val newDevice = DeviceIdentity.generate(crypto, cipher, founder.identity.member)
         val event = founder.deviceAdd(circle, newDevice, day = 102, label = "phone")
         assertEquals(newDevice.registration, registration(event))
         assertEquals(founder.identity.device, event.device)
         assertTrue(event.hasValidSignature(crypto, founder.identity.signing.publicKey))
-        assertEquals(Parsed.Ok("phone"), PublicParts.optionalText((EnvelopeChecks.payload(event) as Parsed.Ok).value, PublicParts.LABEL))
+        assertEquals(Parsed.Ok("phone"), PublicParts.optionalText((PayloadSealing.open(cipher, founder.keyRing, event) as Parsed.Ok).value, PublicParts.LABEL))
     }
 
     @Test

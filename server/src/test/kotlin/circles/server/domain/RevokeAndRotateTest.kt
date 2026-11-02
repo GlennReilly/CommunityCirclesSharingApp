@@ -1,5 +1,6 @@
 package circles.server.domain
 
+import circles.server.support.testCipher
 import circles.api.PushResult
 import circles.api.PushStatus
 import circles.crypto.LibsodiumCipher
@@ -27,7 +28,7 @@ import kotlin.test.assertTrue
 
 /** `device.revoke` and the key rotation that must follow it (spec 5, ADR 0021). */
 class RevokeAndRotateTest {
-    private val server = TestServer(allowPlaintext = false)
+    private val server = TestServer()
     private val crypto = server.crypto
     private val cipher = LibsodiumCipher()
     private val sync = server.services.sync
@@ -74,7 +75,7 @@ class RevokeAndRotateTest {
     @Test
     fun aMemberRevokesTheirOwnOtherDeviceAndItCanNoLongerPush() {
         val bea = setup()
-        val phone = author(DeviceIdentity.generate(crypto, bea.identity.member, cipher))
+        val phone = author(DeviceIdentity.generate(crypto, cipher, bea.identity.member))
         accept(bea.deviceAdd(circle, phone.identity, TODAY, "old phone"))
         accept(bea.deviceRevoke(circle, phone.identity.device, TODAY, "lost it"))
         assertNotNull(server.rows("SELECT revoked_seq FROM devices WHERE device_id = '${phone.identity.device.v}'").single()[0])
@@ -94,13 +95,13 @@ class RevokeAndRotateTest {
     @Test
     fun revokingAnUnknownDeviceOrOneInAnotherCircleIsRefused() {
         setup()
-        assertRejected(RejectionCode.UNKNOWN_DEVICE, push(founder.deviceRevoke(circle, DeviceIdentity.generate(crypto).device, TODAY)))
+        assertRejected(RejectionCode.UNKNOWN_DEVICE, push(founder.deviceRevoke(circle, DeviceIdentity.generate(crypto, testCipher).device, TODAY)))
     }
 
     @Test
     fun afterARotationTheRevokedDeviceCannotReadNewEventsButKeepsTheOldEpoch() {
         val bea = setup()
-        val ex = author(DeviceIdentity.generate(crypto, bea.identity.member, cipher))
+        val ex = author(DeviceIdentity.generate(crypto, cipher, bea.identity.member))
         accept(bea.deviceAdd(circle, ex.identity, TODAY))
         accept(bea.keyWrap(circle, ex.identity.registration, FIRST_EPOCH, key1, TODAY))
         ex.keyRing = ex.keyRing.with(FIRST_EPOCH, key1)
@@ -114,7 +115,7 @@ class RevokeAndRotateTest {
         val events = sync.pull(circle, 0, 100).events.map { assertIs<Parsed.Ok<Envelope>>(it.envelope.toEnvelope()).value }
         val wrapForBea = events.single { it.type == "key.wrap" && it.epoch == 2 && (CircleKeys.keyWrap(it.public) as Parsed.Ok).value.device == bea.identity.device }
         val terms = (CircleKeys.keyWrap(wrapForBea.public) as Parsed.Ok).value
-        val key2 = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(cipher, bea.identity.boxKeys!!, circle, 2, terms.wrapped)).value
+        val key2 = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(cipher, bea.identity.boxKeys, circle, 2, terms.wrapped)).value
         bea.keyRing = bea.keyRing.with(2, key2)
         assertEquals(2, bea.keyRing.latestEpoch)
 
@@ -132,7 +133,7 @@ class RevokeAndRotateTest {
     @Test
     fun recoverySharesGoOnlyFromAStewardToAStewardsDevice() {
         val bea = setup()
-        val founderPhone = author(DeviceIdentity.generate(crypto, founder.identity.member, cipher))
+        val founderPhone = author(DeviceIdentity.generate(crypto, cipher, founder.identity.member))
         accept(founder.deviceAdd(circle, founderPhone.identity, TODAY))
         val stewardDevices = listOf(founder.identity.registration, founderPhone.identity.registration)
         val shares = checkNotNull(founder.recoveryShares(circle, FIRST_EPOCH, stewardDevices, 2, TODAY))

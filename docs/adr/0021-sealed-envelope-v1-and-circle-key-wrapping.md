@@ -1,6 +1,6 @@
 # 0021. Sealed envelope `v = 1`, circle keys and key wrapping
 
-- Status: Accepted
+- Status: Accepted (point 7, the `v = 0` flag, is removed by ADR 0024)
 - Date: 2026-11-02
 
 ## Context

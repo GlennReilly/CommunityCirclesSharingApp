@@ -198,7 +198,7 @@ abstract class CircleFoldContract {
         w.start()
         w.joinCarol()
         val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
-        val phone = EventAuthor(w.crypto, DeviceIdentity.generate(w.crypto, w.founder.identity.member, w.cipher), cipher = w.cipher)
+        val phone = EventAuthor(w.crypto, DeviceIdentity.generate(w.crypto, w.cipher, w.founder.identity.member), cipher = w.cipher)
         val addPhone = w.founder.deviceAdd(w.circle, phone.identity, day)
         val first = w.founder.stewardAdd(w.circle, w.carol.identity.member, day + 7)
         val second = phone.stewardAdd(w.circle, w.carol.identity.member, day + 7)

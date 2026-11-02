@@ -1,5 +1,6 @@
 package circles.server.domain
 
+import circles.server.support.testCipher
 import circles.api.PushResult
 import circles.api.PushStatus
 import circles.crypto.LibsodiumCipher
@@ -32,7 +33,7 @@ import kotlin.test.assertTrue
 
 /** M2 end to end against a server that refuses the plaintext format (ADR 0021). */
 class SealedFlowTest {
-    private val server = TestServer(allowPlaintext = false)
+    private val server = TestServer()
     private val crypto = server.crypto
     private val cipher = LibsodiumCipher()
     private val sync = server.services.sync
@@ -84,14 +85,14 @@ class SealedFlowTest {
         val wrap = founder.author.keyWrap(circle, bea.identity.registration, FIRST_EPOCH, circleKey, TODAY)
         accepted(push(wrap).single())
         val label = "SECRET-LABEL-founders phone"
-        accepted(push(founder.author.deviceAdd(circle, DeviceIdentity.generate(crypto, founder.identity.member, cipher), TODAY, label)).single())
+        accepted(push(founder.author.deviceAdd(circle, DeviceIdentity.generate(crypto, cipher, founder.identity.member), TODAY, label)).single())
 
         // Bea pulls the log, opens her wrap, then reads the note.
         val events = sync.pull(circle, 0, 100).events.map { assertIs<Parsed.Ok<Envelope>>(it.envelope.toEnvelope()).value }
         assertEquals(setOf(PAYLOAD_VERSION_SEALED), events.map { it.v }.toSet())
         val beaWrap = events.single { it.type == "key.wrap" && (CircleKeys.keyWrap(it.public) as Parsed.Ok).value.device == bea.identity.device }
         val terms: KeyWrapTerms = (CircleKeys.keyWrap(beaWrap.public) as Parsed.Ok).value
-        val key = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(cipher, bea.identity.boxKeys!!, circle, beaWrap.epoch, terms.wrapped)).value
+        val key = assertIs<Parsed.Ok<ByteString>>(CircleKeys.unwrap(cipher, bea.identity.boxKeys, circle, beaWrap.epoch, terms.wrapped)).value
         val ring = KeyRing.EMPTY.with(beaWrap.epoch, key)
         val noteEvent = events.single { it.type == "member.invite" }
         val payload = assertIs<Parsed.Ok<CborMap>>(PayloadSealing.open(cipher, ring, noteEvent)).value
@@ -120,9 +121,12 @@ class SealedFlowTest {
     }
 
     @Test
-    fun thePlaintextFormatIsRefusedUnlessTheOperatorAllowsIt() {
-        val plain = EventAuthor(crypto, DeviceIdentity.generate(crypto)).circleCreate(circle, TODAY)
-        assertRejected(RejectionCode.UNSUPPORTED_VERSION, sync.submit(listOf(plain.toDto()), Entrance.Create).single())
+    fun everyFormatVersionButOneIsRefused() {
+        val create = founder.author.circleCreate(circle, TODAY)
+        listOf(0, 2, -1).forEach { v ->
+            val other = create.copy(v = v).signedBy(crypto, founder.identity.signing.secretSeed)
+            assertRejected(RejectionCode.UNSUPPORTED_VERSION, sync.submit(listOf(other.toDto()), Entrance.Create).single())
+        }
     }
 
     @Test

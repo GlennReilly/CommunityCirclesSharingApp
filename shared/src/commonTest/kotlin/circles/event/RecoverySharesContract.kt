@@ -27,7 +27,7 @@ abstract class RecoverySharesContract {
         fun opened(events: List<Envelope>, index: Int): RecoveryShare {
             val terms = (CircleKeys.keyWrap(events[index].public) as Parsed.Ok).value
             assertEquals(stewards[index].device, terms.device)
-            return assertIs<Parsed.Ok<RecoveryShare>>(RecoveryShares.open(cipher, stewards[index].boxKeys!!, circle, FIRST_EPOCH, terms.wrapped)).value
+            return assertIs<Parsed.Ok<RecoveryShare>>(RecoveryShares.open(cipher, stewards[index].boxKeys, circle, FIRST_EPOCH, terms.wrapped)).value
         }
     }
 
@@ -70,9 +70,9 @@ abstract class RecoverySharesContract {
         val s = setup()
         val events = s.events()
         val terms = (CircleKeys.keyWrap(events[0].public) as Parsed.Ok).value
-        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[1].boxKeys!!, s.circle, FIRST_EPOCH, terms.wrapped))
-        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys!!, s.circle, 2, terms.wrapped))
-        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys!!, newCircleId(s.crypto), FIRST_EPOCH, terms.wrapped))
+        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[1].boxKeys, s.circle, FIRST_EPOCH, terms.wrapped))
+        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys, s.circle, 2, terms.wrapped))
+        assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys, newCircleId(s.crypto), FIRST_EPOCH, terms.wrapped))
         assertFalse(terms.wrapped.toHex().contains(s.key.toHex()))
     }
 

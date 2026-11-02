@@ -9,7 +9,8 @@ import circles.policy.MemberId
 
 /**
  * One fixed envelope and its bytes, produced by an independent Python reference encoder (not this code), so the
- * encoding is pinned the same way on the JVM and in JS. The signed vector lives in the JVM tests.
+ * encoding is pinned the same way on the JVM and in JS. The signed vector lives in the JVM tests. `v = 0` is only an
+ * integer here (the plaintext format it once named was retired by ADR 0024); the bytes still pin the encoding.
  */
 object EnvelopeVectors {
     val circle = CircleId("11".repeat(16))

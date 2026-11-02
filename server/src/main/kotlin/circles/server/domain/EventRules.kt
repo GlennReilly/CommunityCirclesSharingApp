@@ -9,7 +9,6 @@ import circles.event.EnvelopeChecks
 import circles.event.EventId
 import circles.event.EventType
 import circles.event.FIRST_EPOCH
-import circles.event.PAYLOAD_VERSION_PLAINTEXT
 import circles.event.FOUNDING_STEWARD_DAY
 import circles.event.PublicParts
 import circles.event.StewardChange
@@ -47,22 +46,15 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
  */
 class EventRules(
     private val crypto: Crypto,
-    private val allowPlaintext: Boolean = false,
     private val stewardPolicy: StewardPolicy = StewardPolicy(),
 ) {
     fun decide(envelope: Envelope, id: EventId, today: Int, directory: Directory, creationAllowed: Boolean): Decision {
         val type = EventType.fromWire(envelope.type)?.takeIf { it in SUPPORTED_TYPES }
             ?: return reject(RejectionCode.UNSUPPORTED_TYPE, "type '${envelope.type}' is not supported yet")
         if (envelope.day > today + 1) return reject(RejectionCode.FUTURE_DAY, "day ${envelope.day} is after today ($today) plus one")
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT && !allowPlaintext) {
-            return reject(RejectionCode.UNSUPPORTED_VERSION, "the plaintext development format (v=0) is disabled on this server")
-        }
         epochProblem(envelope, type, directory)?.let { return it }
-        // A sealed payload is opaque to the server; only whether there is one is checked. A plaintext one is parsed (M1).
+        // A sealed payload is opaque to the server; only whether there is one is checked.
         val payloadEmpty = envelope.encrypted.isEmpty()
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT && (EnvelopeChecks.payload(envelope) as? Parsed.Ok) == null) {
-            return reject(RejectionCode.INVALID_PAYLOAD, "payload is not a CBOR map")
-        }
         return when (type) {
             EventType.CIRCLE_CREATE -> circleCreate(envelope, payloadEmpty, directory, creationAllowed)
             EventType.MEMBER_INVITE -> invite(envelope, id, directory)
@@ -83,7 +75,7 @@ class EventRules(
      */
     private fun epochProblem(envelope: Envelope, type: EventType, directory: Directory): Decision.Reject? {
         if (type == EventType.KEY_WRAP || type == EventType.KEY_ROTATE || type == EventType.RECOVERY_SHARE) return null
-        if (envelope.encrypted.isEmpty() || envelope.v == PAYLOAD_VERSION_PLAINTEXT) {
+        if (envelope.encrypted.isEmpty()) {
             return if (envelope.epoch == 0) null else reject(RejectionCode.MALFORMED, "epoch must be 0 when the event has no sealed secret part")
         }
         val current = directory.currentEpoch(envelope.circle)
@@ -119,7 +111,6 @@ class EventRules(
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.NOTE)?.let { return it }
         if (change == StewardChange.ADD && !directory.memberExists(envelope.circle, target)) {
             return reject(RejectionCode.INVALID_PUBLIC, "member is not in this circle")
         }
@@ -169,7 +160,6 @@ class EventRules(
         if (target.member != sender.member && !directory.isSteward(envelope.circle, sender.member)) {
             return reject(RejectionCode.NOT_STEWARD, "only a steward may revoke another member's device")
         }
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.REASON)?.let { return it }
         return Decision.Accept(listOf(Effect.RevokeDevice(envelope.circle, target.device)))
     }
 
@@ -208,7 +198,6 @@ class EventRules(
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
         if (terms.expiresDay < envelope.day) return reject(RejectionCode.INVALID_PUBLIC, "expiresDay is before the invite's own day")
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.NOTE)?.let { return it }
         return Decision.Accept(listOf(Effect.RecordInvite(envelope.circle, id, device.member, terms)))
     }
 
@@ -236,7 +225,6 @@ class EventRules(
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.LABEL)?.let { return it }
         if (registration.member != device.member) {
             if (!directory.isSteward(envelope.circle, device.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may add a device for another member")
             if (!directory.memberExists(envelope.circle, registration.member)) return reject(RejectionCode.INVALID_PUBLIC, "member is not in this circle")
@@ -274,11 +262,6 @@ class EventRules(
             !envelope.hasValidSignature(crypto, device.signPub) -> Checked.Refused(Rejection(RejectionCode.BAD_SIGNATURE, "signature does not verify"))
             else -> Checked.Passed(device)
         }
-    }
-
-    private fun noteProblem(envelope: Envelope, name: String): Decision.Reject? {
-        val payload = (EnvelopeChecks.payload(envelope) as Parsed.Ok).value
-        return (PublicParts.optionalText(payload, name) as? Parsed.Invalid)?.let { reject(RejectionCode.INVALID_PAYLOAD, it.reason) }
     }
 
     private fun reject(code: RejectionCode, detail: String): Decision.Reject = Decision.Reject(Rejection(code, detail))

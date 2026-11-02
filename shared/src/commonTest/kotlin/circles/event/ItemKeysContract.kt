@@ -52,14 +52,14 @@ abstract class ItemKeysContract {
         val circle = newCircleId(crypto)
         val key = ItemKeys.newKey(crypto)
         val phone = DeviceIdentity.generate(crypto, cipher = cipher)
-        val laptop = DeviceIdentity.generate(crypto, phone.member, cipher)
+        val laptop = DeviceIdentity.generate(crypto, cipher, phone.member)
         val other = DeviceIdentity.generate(crypto, cipher = cipher)
         val wraps = ItemKeys.wrapToDevices(cipher, listOf(phone.registration, laptop.registration), circle, item, key)
         assertEquals(2, wraps.size)
-        assertEquals(key, assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, phone.boxKeys!!, circle, item, wraps[0])).value)
-        assertEquals(key, assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, laptop.boxKeys!!, circle, item, wraps[1])).value)
-        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, other.boxKeys!!, circle, item, wraps[0]))
-        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, phone.boxKeys!!, circle, item, wraps[1]))
+        assertEquals(key, assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, phone.boxKeys, circle, item, wraps[0])).value)
+        assertEquals(key, assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, laptop.boxKeys, circle, item, wraps[1])).value)
+        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, other.boxKeys, circle, item, wraps[0]))
+        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, phone.boxKeys, circle, item, wraps[1]))
     }
 
     @Test
@@ -70,8 +70,8 @@ abstract class ItemKeysContract {
         val key = ItemKeys.newKey(crypto)
         val device = DeviceIdentity.generate(crypto, cipher = cipher)
         val wrapped = ItemKeys.wrap(cipher, device.boxPub, circle, item, key)
-        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, device.boxKeys!!, circle, "cd".repeat(16), wrapped))
-        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, device.boxKeys!!, newCircleId(crypto), item, wrapped))
-        assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, device.boxKeys!!, circle, item, wrapped))
+        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, device.boxKeys, circle, "cd".repeat(16), wrapped))
+        assertIs<Parsed.Invalid>(ItemKeys.unwrap(cipher, device.boxKeys, newCircleId(crypto), item, wrapped))
+        assertIs<Parsed.Ok<ByteString>>(ItemKeys.unwrap(cipher, device.boxKeys, circle, item, wrapped))
     }
 }

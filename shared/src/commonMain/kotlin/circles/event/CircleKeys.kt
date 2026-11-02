@@ -88,7 +88,7 @@ object CircleKeys {
     private fun epochOf(map: CborMap): Int? = (map[KEY_EPOCH] as? CborInt)?.value?.takeIf { it in FIRST_EPOCH..Int.MAX_VALUE }?.toInt()
 }
 
-/** Seals and opens the secret part of a `v = 1` event (ADR 0021). */
+/** Seals and opens the secret part of an event (ADR 0021). */
 object PayloadSealing {
     /** Returns [unsealed] with `v = 1`, its nonce and its ciphertext filled in; [unsealed.epoch] selects the key. */
     fun seal(cipher: Cipher, key: ByteString, unsealed: Envelope, payload: CborMap): Envelope {
@@ -101,9 +101,9 @@ object PayloadSealing {
         )
     }
 
-    /** The payload map of an event, whichever format it uses; invalid if the key is missing, wrong, or the event was altered. */
+    /** The payload map of an event; invalid if the key is missing, wrong, or the event was altered. */
     fun open(cipher: Cipher, keys: KeyRing, envelope: Envelope): Parsed<CborMap> {
-        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) return EnvelopeChecks.payload(envelope)
+        if (envelope.v != PAYLOAD_VERSION_SEALED) return Parsed.Invalid("unsupported format version ${envelope.v}")
         if (envelope.encrypted.isEmpty()) return Parsed.Ok(CborMap.EMPTY)
         val key = keys[envelope.epoch] ?: return Parsed.Invalid("no circle key for epoch ${envelope.epoch}")
         val joined = ByteString.of(envelope.nonce.toByteArray() + envelope.encrypted.toByteArray())

@@ -13,10 +13,7 @@ import circles.policy.MemberId
 /** Envelope layout name; part of every signed and hashed byte string (ADR 0012). */
 const val EVENT_DOMAIN = "circles/event/v1"
 
-/** `v` of the plaintext development format used by M1 (ADR 0014). */
-const val PAYLOAD_VERSION_PLAINTEXT = 0
-
-/** `v` of the sealed format: `encrypted` is XChaCha20-Poly1305 under the circle key (ADR 0021). */
+/** `v` of the only format: `encrypted` is XChaCha20-Poly1305 under the circle key (ADR 0021, 0024). */
 const val PAYLOAD_VERSION_SEALED = 1
 
 /** Domain string of the associated data that binds a sealed payload to its envelope (ADR 0021). */

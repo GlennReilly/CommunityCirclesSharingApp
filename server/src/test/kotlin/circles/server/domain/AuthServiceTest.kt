@@ -1,5 +1,6 @@
 package circles.server.domain
 
+import circles.server.support.testCipher
 import circles.api.SessionRequest
 import circles.api.SessionResponse
 import circles.encoding.ByteString
@@ -51,7 +52,7 @@ class AuthServiceTest {
 
     @Test
     fun anUnknownDeviceGetsANonceButCannotLogInAndNothingIsStored() {
-        val stranger = DeviceIdentity.generate(crypto)
+        val stranger = DeviceIdentity.generate(crypto, testCipher)
         val nonce = auth.challenge(stranger.device.v).nonce
         assertEquals(0, server.rows("SELECT 1 FROM challenges").size)
         assertEquals(SessionResult.Denied, auth.session(request(stranger, nonce)))
@@ -85,7 +86,7 @@ class AuthServiceTest {
     @Test
     fun aWrongSignatureIsDeniedAndBurnsTheNonce() {
         val nonce = auth.challenge(alice.identity.device.v).nonce
-        val imposter = DeviceIdentity.generate(crypto)
+        val imposter = DeviceIdentity.generate(crypto, testCipher)
         assertEquals(SessionResult.Denied, auth.session(request(alice.identity, nonce, signer = imposter)))
         assertEquals(SessionResult.Denied, auth.session(request(alice.identity, nonce)))
     }

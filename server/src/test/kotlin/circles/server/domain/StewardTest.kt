@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
 
 /** `steward.add` and `steward.remove` under the quorum of ADR 0023. */
 class StewardTest {
-    private val server = TestServer(allowPlaintext = false)
+    private val server = TestServer()
     private val crypto = server.crypto
     private val cipher = LibsodiumCipher()
     private val sync = server.services.sync
@@ -97,7 +97,7 @@ class StewardTest {
     @Test
     fun aStewardsSecondDeviceOrRepeatedVoteIsStillOneVote() {
         twoStewards()
-        val phone = author().let { EventAuthor(crypto, DeviceIdentity.generate(crypto, founder.identity.member, cipher), cipher = cipher) }
+        val phone = author().let { EventAuthor(crypto, DeviceIdentity.generate(crypto, cipher, founder.identity.member), cipher = cipher) }
         accept(founder.deviceAdd(circle, phone.identity, TODAY + COOL_OFF))
         accept(founder.stewardAdd(circle, carol.identity.member, TODAY + COOL_OFF))
         accept(phone.stewardAdd(circle, carol.identity.member, TODAY + COOL_OFF))

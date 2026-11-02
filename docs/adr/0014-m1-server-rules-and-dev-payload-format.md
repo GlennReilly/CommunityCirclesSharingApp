@@ -1,6 +1,6 @@
 # 0014. M1 server rules and the plaintext development payload format
 
-- Status: Accepted (the "No rate limiting in M1" decision is superseded by ADR 0015)
+- Status: Accepted (the "No rate limiting in M1" decision is superseded by ADR 0015; the payload format is retired by ADR 0024)
 - Date: 2026-11-02
 
 ## Context

@@ -6,7 +6,6 @@ import circles.crypto.Crypto
 import circles.crypto.SigningKeyPair
 import circles.encoding.ByteString
 import circles.encoding.CborMap
-import circles.encoding.CborEncoder
 import circles.encoding.CborText
 import circles.policy.CircleId
 import circles.policy.MemberId
@@ -17,24 +16,17 @@ class DeviceIdentity(
     val device: DeviceId,
     val signing: SigningKeyPair,
     val boxPub: ByteString,
-    /** The X25519 secret key behind [boxPub]; null for M1-style identities whose box key is random bytes. */
-    val boxSecret: ByteString? = null,
+    /** The X25519 secret key behind [boxPub]; it never leaves the device. */
+    val boxSecret: ByteString,
 ) {
     val registration: DeviceRegistration get() = DeviceRegistration(member, device, signing.publicKey, boxPub)
 
-    val boxKeys: BoxKeyPair? get() = boxSecret?.let { BoxKeyPair(it, boxPub) }
+    val boxKeys: BoxKeyPair get() = BoxKeyPair(boxSecret, boxPub)
 
     companion object {
-        /** Without a [cipher] the box key is random bytes (M1 tests); with one it is a real X25519 key pair (M2). */
-        fun generate(crypto: Crypto, member: MemberId = newMemberId(crypto), cipher: Cipher? = null): DeviceIdentity {
-            val box = cipher?.generateBoxKeyPair()
-            return DeviceIdentity(
-                member,
-                newDeviceId(crypto),
-                crypto.generateSigningKeyPair(),
-                box?.publicKey ?: crypto.randomBytes(circles.crypto.ED25519_KEY_BYTES),
-                box?.secretKey,
-            )
+        fun generate(crypto: Crypto, cipher: Cipher, member: MemberId = newMemberId(crypto)): DeviceIdentity {
+            val box = cipher.generateBoxKeyPair()
+            return DeviceIdentity(member, newDeviceId(crypto), crypto.generateSigningKeyPair(), box.publicKey, box.secretKey)
         }
     }
 }
@@ -43,14 +35,14 @@ class DeviceIdentity(
 class InviteKey(val keys: SigningKeyPair)
 
 /**
- * Builds and signs events for one device. Keeps the per-device counter (`ctr`). Without a [cipher] it writes the
- * plaintext `v = 0` development format; with one it writes sealed `v = 1` events using [keyRing] (ADR 0021).
+ * Builds and signs events for one device. Keeps the per-device counter (`ctr`). Secret parts are always sealed with
+ * the newest key in [keyRing] (ADR 0021, 0024); an event with a secret part needs a circle key first.
  */
 class EventAuthor(
     private val crypto: Crypto,
     val identity: DeviceIdentity,
+    private val cipher: Cipher,
     firstCounter: Long = 0,
-    private val cipher: Cipher? = null,
     var keyRing: KeyRing = KeyRing.EMPTY,
 ) {
     private var nextCounter = firstCounter
@@ -76,9 +68,8 @@ class EventAuthor(
      * (ADR 0020). Null if the parameters are invalid (threshold below 2 or above the number of stewards).
      */
     fun recoveryShares(circle: CircleId, epoch: Int, stewards: List<DeviceRegistration>, threshold: Int, day: Int): List<Envelope>? {
-        val sealer = requireNotNull(cipher) { "recovery.share needs a cipher" }
         val key = checkNotNull(keyRing[epoch]) { "no circle key for epoch $epoch" }
-        val sealed = RecoveryShares.split(crypto, sealer, circle, epoch, key, stewards, threshold) ?: return null
+        val sealed = RecoveryShares.split(crypto, cipher, circle, epoch, key, stewards, threshold) ?: return null
         return sealed.map { (device, wrapped) ->
             build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
         }
@@ -108,8 +99,7 @@ class EventAuthor(
 
     /** Wraps the circle key of [epoch] to [target]'s box key. The author must be able to send it (steward rules are the server's). */
     fun keyWrap(circle: CircleId, target: DeviceRegistration, epoch: Int, key: ByteString, day: Int): Envelope {
-        val sealer = requireNotNull(cipher) { "key.wrap needs a cipher" }
-        val wrapped = CircleKeys.wrap(sealer, target.boxPub, circle, epoch, key)
+        val wrapped = CircleKeys.wrap(cipher, target.boxPub, circle, epoch, key)
         return build(circle, EventType.KEY_WRAP, day, KeyWrapTerms(target.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
     }
 
@@ -120,24 +110,23 @@ class EventAuthor(
     private fun textPayload(name: String, text: String?): CborMap = if (text == null) CborMap.EMPTY else CborMap.of(name to CborText(text))
 
     private fun build(circle: CircleId, type: EventType, day: Int, public: CborMap, payload: CborMap, epoch: Int = 0): Envelope {
-        val sealer = cipher
         val secret = payload.entries.isNotEmpty()
-        val sealedEpoch = if (sealer != null && secret) keyRing.latestEpoch.also { check(it >= FIRST_EPOCH) { "no circle key yet: wrap one to this device first" } } else epoch
+        val eventEpoch = if (secret) keyRing.latestEpoch.also { check(it >= FIRST_EPOCH) { "no circle key yet: wrap one to this device first" } } else epoch
         val unsigned = Envelope(
-            v = PAYLOAD_VERSION_PLAINTEXT,
+            v = PAYLOAD_VERSION_SEALED,
             circle = circle,
             author = identity.member,
             device = identity.device,
             type = type.wire,
             day = day,
             ctr = nextCounter++,
-            epoch = sealedEpoch,
+            epoch = eventEpoch,
             public = public,
             nonce = ByteString.EMPTY,
-            encrypted = if (!secret || sealer != null) ByteString.EMPTY else ByteString.of(CborEncoder.encode(payload)),
+            encrypted = ByteString.EMPTY,
             sig = ByteString.EMPTY,
         )
-        val ready = if (sealer == null) unsigned else PayloadSealing.seal(sealer, keyRing[sealedEpoch] ?: ByteString.EMPTY, unsigned, payload)
-        return ready.signedBy(crypto, identity.signing.secretSeed)
+        val sealed = PayloadSealing.seal(cipher, keyRing[eventEpoch] ?: ByteString.EMPTY, unsigned, payload)
+        return sealed.signedBy(crypto, identity.signing.secretSeed)
     }
 }

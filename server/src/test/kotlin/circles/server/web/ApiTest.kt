@@ -1,5 +1,6 @@
 package circles.server.web
 
+import circles.server.support.testCipher
 import circles.api.API_PREFIX
 import circles.api.ApiJson
 import circles.api.MAX_PUSH_EVENTS
@@ -192,7 +193,7 @@ class ApiTest {
         val alice = Person(server.crypto)
         val circle = newCircleId(server.crypto)
         api.createCircle(alice.author.circleCreate(circle, TODAY))
-        val phone = DeviceIdentity.generate(server.crypto, alice.identity.member)
+        val phone = DeviceIdentity.generate(server.crypto, testCipher, alice.identity.member)
         val token = api.login(alice.identity)
         api.push(token, circle, listOf(alice.author.deviceAdd(circle, phone, TODAY)))
         val phoneToken = api.login(phone)
