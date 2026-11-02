@@ -21,12 +21,13 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0015](0015-rate-limiting-pulled-forward.md) | Rate limiting pulled forward from M5 | Accepted |
 | [0016](0016-structured-json-logging.md) | Structured JSON logging without a logging framework | Accepted |
 | [0017](0017-shadow-jar-for-single-file-deploy.md) | One runnable jar with the Shadow plugin | Accepted |
+| [0018](0018-m2-libsodium-bindings.md) | M2 libsodium bindings: lazysodium (test scope) on JVM, libsodium-wrappers on JS | Accepted |
 
 ## Open decisions still to record
 
 From the spec, section 11. Record each as an ADR when it is decided:
 
-1. libsodium binding for the JVM in M2 (M1 is settled by ADR 0010); Shamir implementation (own with test vectors vs a vetted library).
+1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Still open: Shamir implementation (own with test vectors vs a vetted library).
 2. Local replica store in the browser: IndexedDB vs SQLite-WASM on OPFS.
 3. Kotlin/JS bundle size outcome and the fallback plan if over budget.
 4. Recovery code wordlist and format.
