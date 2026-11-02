@@ -8,7 +8,12 @@ kotlin {
 
     // The same policy and encoding code runs on the server (JVM) and in the browser (JS).
     jvm()
-    js { nodejs() }
+    js {
+        nodejs {
+            // The seeded fuzz tests take about a second; the default 2 s limit failed on a cold, busy build.
+            testTask { useMocha { timeout = "20s" } }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {

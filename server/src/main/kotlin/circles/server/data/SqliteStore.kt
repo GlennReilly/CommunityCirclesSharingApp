@@ -8,6 +8,8 @@ import circles.event.Envelope
 import circles.event.EnvelopeDto
 import circles.event.EventId
 import circles.event.InviteTerms
+import circles.event.StewardChange
+import circles.event.StewardVote
 import circles.policy.CircleId
 import circles.policy.MemberId
 import circles.server.domain.ChallengeRecord
@@ -118,6 +120,18 @@ class SqliteStore(private val connection: Connection) : Store {
         override fun stewardCount(circle: CircleId): Int =
             query("SELECT COUNT(*) FROM stewards WHERE circle_id = ? AND removed_seq IS NULL", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
 
+        override fun stewardsWithDays(circle: CircleId): Map<MemberId, Int> =
+            query("SELECT member_id, added_day FROM stewards WHERE circle_id = ? AND removed_seq IS NULL", { it.setString(1, circle.v) }) { rows ->
+                buildMap { while (rows.next()) put(MemberId(rows.getString(1)), rows.getInt(2)) }
+            }
+
+        override fun stewardVotes(circle: CircleId, change: StewardChange, target: MemberId): List<StewardVote> =
+            query("SELECT voter, day FROM steward_votes WHERE circle_id = ? AND kind = ? AND target = ?", {
+                it.setString(1, circle.v)
+                it.setString(2, change.name)
+                it.setString(3, target.v)
+            }) { rows -> buildList { while (rows.next()) add(StewardVote(MemberId(rows.getString(1)), rows.getInt(2))) } }
+
         override fun currentEpoch(circle: CircleId): Int =
             query("SELECT current_epoch FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
 
@@ -176,10 +190,23 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setInt(2, effect.day)
                 }
                 is Effect.RegisterDevice -> registerDevice(effect.circle, effect.registration, serverSeq)
-                is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq) VALUES (?, ?, ?) ON CONFLICT (circle_id, member_id) DO UPDATE SET added_seq = excluded.added_seq, removed_seq = NULL") {
+                is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq, added_day) VALUES (?, ?, ?, ?) ON CONFLICT (circle_id, member_id) DO UPDATE SET added_seq = excluded.added_seq, added_day = excluded.added_day, removed_seq = NULL") {
                     it.setString(1, effect.circle.v)
                     it.setString(2, effect.member.v)
                     it.setLong(3, serverSeq)
+                    it.setInt(4, effect.day)
+                }
+                is Effect.RecordStewardVote -> update("INSERT INTO steward_votes (circle_id, server_seq, kind, target, voter, day) VALUES (?, ?, ?, ?, ?, ?)") {
+                    it.setString(1, effect.circle.v)
+                    it.setLong(2, serverSeq)
+                    it.setString(3, effect.change.name)
+                    it.setString(4, effect.target.v)
+                    it.setString(5, effect.voter.v)
+                    it.setInt(6, effect.day)
+                }
+                is Effect.ClearStewardVotes -> update("DELETE FROM steward_votes WHERE circle_id = ? AND target = ?") {
+                    it.setString(1, effect.circle.v)
+                    it.setString(2, effect.target.v)
                 }
                 is Effect.RecordInvite -> update("INSERT INTO invites (circle_id, event_id, author, invite_pub, expires_day, max_uses) VALUES (?, ?, ?, ?, ?, ?)") {
                     it.setString(1, effect.circle.v)

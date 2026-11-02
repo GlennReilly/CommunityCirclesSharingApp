@@ -5,6 +5,8 @@ import circles.encoding.ByteString
 import circles.event.DeviceId
 import circles.event.Envelope
 import circles.event.EventId
+import circles.event.StewardChange
+import circles.event.StewardVote
 import circles.policy.CircleId
 import circles.policy.MemberId
 
@@ -19,6 +21,12 @@ interface Directory {
     fun isSteward(circle: CircleId, member: MemberId): Boolean
 
     fun stewardCount(circle: CircleId): Int
+
+    /** Current stewards and the day each became one (ADR 0023). */
+    fun stewardsWithDays(circle: CircleId): Map<MemberId, Int>
+
+    /** Pending `steward.add` or `steward.remove` events for [target], as recorded by [Effect.RecordStewardVote]. */
+    fun stewardVotes(circle: CircleId, change: StewardChange, target: MemberId): List<StewardVote>
 
     /** The newest circle key epoch announced by a `key.wrap` or `key.rotate`; 0 before the first key. */
     fun currentEpoch(circle: CircleId): Int

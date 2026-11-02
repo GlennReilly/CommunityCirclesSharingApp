@@ -40,6 +40,14 @@ abstract class CircleFoldContract {
             return ((opened as? Parsed.Ok<CborMap>)?.value?.get("note") as? CborText)?.value
         }
 
+        /** Carol joins through a fresh invite, so she can be the target of steward changes. */
+        fun joinCarol() {
+            val key = InviteKey(crypto.generateSigningKeyPair())
+            val invite = founder.invite(circle, key, day + 30, 1, day)
+            log += invite
+            log += carol.join(circle, invite.eventId(crypto), key, day)
+        }
+
         /** Founder creates the circle and the first key, invites bea, bea joins, key wrapped to bea. */
         fun start() {
             log += founder.circleCreate(circle, day)
@@ -160,17 +168,53 @@ abstract class CircleFoldContract {
     }
 
     @Test
-    fun stewardChangesFollowTheRulesAndTheLastStewardStays() = runTest {
+    fun stewardChangesNeedAQuorumOfDistinctStewardsAndTheLastStewardStays() = runTest {
         val w = world()
         w.start()
-        val notYet = w.bea.stewardAdd(w.circle, w.carol.identity.member, day) // bea is not a steward yet
-        val removeLast = w.founder.stewardRemove(w.circle, w.founder.identity.member, day)
+        w.joinCarol()
         val unknown = w.founder.stewardAdd(w.circle, w.person().identity.member, day)
-        val view = w.fold(w.founder, w.log + listOf(notYet, removeLast, unknown))
-        assertEquals(setOf("only a steward may add a steward", "a circle keeps at least one steward", "member is not in the circle"), view.rejected.map { it.reason }.toSet())
-        val ok = w.fold(w.founder, w.log + listOf(w.founder.stewardAdd(w.circle, w.bea.identity.member, day), w.founder.stewardRemove(w.circle, w.founder.identity.member, day)))
-        assertEquals(setOf(w.bea.identity.member), ok.stewards)
-        assertEquals(emptyList(), ok.rejected)
+        val removeLast = w.founder.stewardRemove(w.circle, w.founder.identity.member, day)
+        val notYet = w.bea.stewardAdd(w.circle, w.carol.identity.member, day) // bea is not a steward
+        val bad = w.fold(w.founder, w.log + listOf(unknown, removeLast, notYet))
+        assertEquals(setOf("member is not in the circle", "a circle keeps at least one steward", "only a steward may change stewards"), bad.rejected.map { it.reason }.toSet())
+
+        // A lone steward adds bea alone; the next addition needs both, and bea waits out the cool-off.
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val pending = w.founder.stewardAdd(w.circle, w.carol.identity.member, day)
+        val tooSoon = w.bea.stewardAdd(w.circle, w.carol.identity.member, day + 6)
+        val view = w.fold(w.founder, w.log + listOf(addBea, pending, tooSoon))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), view.stewards)
+        assertEquals(listOf("a new steward cannot vote until day ${day + 7}"), view.rejected.map { it.reason })
+
+        val approve = w.bea.stewardAdd(w.circle, w.carol.identity.member, day + 7)
+        val done = w.fold(w.founder, w.log + listOf(addBea, pending, approve))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member, w.carol.identity.member), done.stewards)
+        assertEquals(emptyList(), done.rejected)
+    }
+
+    @Test
+    fun theSameStewardsSecondDeviceDoesNotMakeAQuorum() = runTest {
+        val w = world()
+        w.start()
+        w.joinCarol()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val phone = EventAuthor(w.crypto, DeviceIdentity.generate(w.crypto, w.founder.identity.member, w.cipher), cipher = w.cipher)
+        val addPhone = w.founder.deviceAdd(w.circle, phone.identity, day)
+        val first = w.founder.stewardAdd(w.circle, w.carol.identity.member, day + 7)
+        val second = phone.stewardAdd(w.circle, w.carol.identity.member, day + 7)
+        val view = w.fold(w.founder, w.log + listOf(addBea, addPhone, first, second))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), view.stewards)
+        assertEquals(emptyList(), view.rejected)
+    }
+
+    @Test
+    fun theStandingGateIsAClientOnlyRuleForNewStewards() = runTest {
+        val w = world()
+        w.start()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val gated = CircleFold(w.crypto, w.cipher, w.founder.identity, mayBecomeSteward = { false }).fold(w.circle, w.log + addBea)
+        assertEquals(setOf(w.founder.identity.member), gated.stewards)
+        assertEquals(listOf("member has not reached the steward standing tier"), gated.rejected.map { it.reason })
     }
 
     @Test

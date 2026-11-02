@@ -5,6 +5,7 @@ import circles.event.DeviceId
 import circles.event.DeviceRegistration
 import circles.event.EventId
 import circles.event.InviteTerms
+import circles.event.StewardChange
 import circles.policy.CircleId
 import circles.policy.MemberId
 
@@ -32,11 +33,16 @@ sealed interface Effect {
 
     data class RegisterDevice(val circle: CircleId, val registration: DeviceRegistration) : Effect
 
-    data class AddSteward(val circle: CircleId, val member: MemberId) : Effect
+    data class AddSteward(val circle: CircleId, val member: MemberId, val day: Int) : Effect
 
     data class RecordInvite(val circle: CircleId, val id: EventId, val author: MemberId, val terms: InviteTerms) : Effect
 
     data class UseInvite(val circle: CircleId, val id: EventId) : Effect
+
+    data class RecordStewardVote(val circle: CircleId, val change: StewardChange, val target: MemberId, val voter: MemberId, val day: Int) : Effect
+
+    /** Forget pending votes about [target] once a change has taken effect. */
+    data class ClearStewardVotes(val circle: CircleId, val target: MemberId) : Effect
 
     data class RemoveSteward(val circle: CircleId, val member: MemberId) : Effect
 

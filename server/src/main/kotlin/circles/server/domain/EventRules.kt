@@ -10,7 +10,12 @@ import circles.event.EventId
 import circles.event.EventType
 import circles.event.FIRST_EPOCH
 import circles.event.PAYLOAD_VERSION_PLAINTEXT
+import circles.event.FOUNDING_STEWARD_DAY
 import circles.event.PublicParts
+import circles.event.StewardChange
+import circles.event.StewardOutcome
+import circles.event.StewardPolicy
+import circles.event.StewardRules
 import circles.event.Rejection
 import circles.event.RejectionCode
 import circles.event.joinProofMessage
@@ -40,7 +45,11 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
  * Server-side validation of one pushed event (spec 3.1). These checks keep spam out; they are not a security
  * boundary, because clients re-validate everything they fold.
  */
-class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean = false) {
+class EventRules(
+    private val crypto: Crypto,
+    private val allowPlaintext: Boolean = false,
+    private val stewardPolicy: StewardPolicy = StewardPolicy(),
+) {
     fun decide(envelope: Envelope, id: EventId, today: Int, directory: Directory, creationAllowed: Boolean): Decision {
         val type = EventType.fromWire(envelope.type)?.takeIf { it in SUPPORTED_TYPES }
             ?: return reject(RejectionCode.UNSUPPORTED_TYPE, "type '${envelope.type}' is not supported yet")
@@ -62,7 +71,8 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             EventType.KEY_ROTATE -> keyRotate(envelope, payloadEmpty, directory)
             EventType.DEVICE_REVOKE -> deviceRevoke(envelope, directory)
             EventType.RECOVERY_SHARE -> recoveryShare(envelope, payloadEmpty, directory)
-            EventType.STEWARD_ADD, EventType.STEWARD_REMOVE -> stewardChange(envelope, type == EventType.STEWARD_ADD, directory)
+            EventType.STEWARD_ADD -> stewardChange(envelope, StewardChange.ADD, directory)
+            EventType.STEWARD_REMOVE -> stewardChange(envelope, StewardChange.REMOVE, directory)
             else -> deviceAdd(envelope, directory)
         }
     }
@@ -103,27 +113,30 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
         }
     }
 
-    private fun stewardChange(envelope: Envelope, adding: Boolean, directory: Directory): Decision {
+    private fun stewardChange(envelope: Envelope, change: StewardChange, directory: Directory): Decision {
         val sender = sender(envelope, directory).deviceOrReject { return it }
-        if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may change stewards")
-        val member = when (val parsed = PublicParts.steward(envelope.public)) {
+        val target = when (val parsed = PublicParts.steward(envelope.public)) {
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
         if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.NOTE)?.let { return it }
-        val isSteward = directory.isSteward(envelope.circle, member)
-        return if (adding) {
-            when {
-                !directory.memberExists(envelope.circle, member) -> reject(RejectionCode.INVALID_PUBLIC, "member is not in this circle")
-                isSteward -> reject(RejectionCode.INVALID_PUBLIC, "member is already a steward")
-                else -> Decision.Accept(listOf(Effect.AddSteward(envelope.circle, member)))
-            }
-        } else {
-            when {
-                !isSteward -> reject(RejectionCode.INVALID_PUBLIC, "member is not a steward")
-                directory.stewardCount(envelope.circle) <= 1 -> reject(RejectionCode.INVALID_PUBLIC, "a circle keeps at least one steward")
-                else -> Decision.Accept(listOf(Effect.RemoveSteward(envelope.circle, member)))
-            }
+        if (change == StewardChange.ADD && !directory.memberExists(envelope.circle, target)) {
+            return reject(RejectionCode.INVALID_PUBLIC, "member is not in this circle")
+        }
+        val stewards = directory.stewardsWithDays(envelope.circle)
+        val outcome = StewardRules.decide(
+            stewardPolicy, change, target, sender.member, envelope.day, stewards,
+            directory.stewardVotes(envelope.circle, change, target),
+        )
+        return when (outcome) {
+            is StewardOutcome.Refused -> reject(if (sender.member in stewards) RejectionCode.INVALID_PUBLIC else RejectionCode.NOT_STEWARD, outcome.reason)
+            StewardOutcome.Pending -> Decision.Accept(listOf(Effect.RecordStewardVote(envelope.circle, change, target, sender.member, envelope.day)))
+            StewardOutcome.Effective -> Decision.Accept(
+                listOf(
+                    if (change == StewardChange.ADD) Effect.AddSteward(envelope.circle, target, envelope.day) else Effect.RemoveSteward(envelope.circle, target),
+                    Effect.ClearStewardVotes(envelope.circle, target),
+                ),
+            )
         }
     }
 
@@ -183,7 +196,7 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             listOf(
                 Effect.CreateCircle(envelope.circle, envelope.day),
                 Effect.RegisterDevice(envelope.circle, registration),
-                Effect.AddSteward(envelope.circle, registration.member),
+                Effect.AddSteward(envelope.circle, registration.member, FOUNDING_STEWARD_DAY),
             ),
         )
     }
