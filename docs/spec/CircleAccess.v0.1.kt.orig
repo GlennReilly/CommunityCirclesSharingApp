@@ -1,0 +1,302 @@
+/**
+ * CircleAccess.kt - sketch of a non-punitive, access-based trust model for a
+ * neighbourhood lending / skill-share network.
+ *
+ * Ideas encoded here:
+ *  - Trust is local: standing is computed per circle, never as one global score.
+ *  - Access is graded (tiers). The floor tier is never "banned".
+ *  - Standing decays toward neutral (a baseline), it does not go negative.
+ *  - Vouching gives newcomers an on-ramp; the sponsor shares a little of the risk.
+ *  - Essentials are always borrowable by any member (need never depends on contribution).
+ *  - Owners always keep consent over their own items.
+ *  - Every decision carries human-readable reasons (no opaque scores).
+ *  - Pauses are the last resort: they need several reviewers, expire, and can be appealed.
+ *
+ * Pure functions, no I/O, so it is easy to unit test. Plain JVM Kotlin; the same
+ * model classes could be reused from Android.
+ */
+
+import java.time.Duration
+import java.time.Instant
+import kotlin.math.pow
+
+// ---------- Core entities ----------
+
+@JvmInline value class MemberId(val v: String)
+@JvmInline value class CircleId(val v: String)
+@JvmInline value class ItemId(val v: String)
+
+data class Member(val id: MemberId, val name: String)
+
+enum class Tier(val rank: Int) { NEWCOMER(0), NEIGHBOUR(1), TRUSTED(2), STEWARD(3) }
+
+/** What kind of thing is being shared. Drives the minimum tier needed. */
+enum class ItemClass(val minTier: Tier) {
+    ESSENTIAL(Tier.NEWCOMER),   // e.g. ladder, jump leads, spare phone charger: always open to members
+    EVERYDAY(Tier.NEWCOMER),    // crockpot, air mattress
+    VALUABLE(Tier.NEIGHBOUR),   // power tools, camping gear
+    HIGH_VALUE(Tier.TRUSTED)    // trailer, chainsaw, generator
+}
+
+data class Item(
+    val id: ItemId,
+    val owner: MemberId,
+    val name: String,
+    val itemClass: ItemClass,
+    /** Owner may require a higher tier than the class default, never a lower one. */
+    val ownerMinTier: Tier? = null,
+    val circles: Set<CircleId>
+)
+
+/** Circle-level knobs. Each circle can tune its own thresholds. */
+data class CircleConfig(
+    val id: CircleId,
+    val name: String,
+    /** Standing points needed for each tier above NEWCOMER. */
+    val thresholds: Map<Tier, Double> = mapOf(
+        Tier.NEIGHBOUR to 3.0,
+        Tier.TRUSTED to 10.0,
+        Tier.STEWARD to 25.0
+    ),
+    /** Standing points fade by half this often, so quiet members drift back to NEWCOMER, not below. */
+    val halfLife: Duration = Duration.ofDays(180),
+    /** How many vouches (from members at least this tier) lift a newcomer to NEIGHBOUR. */
+    val vouchesForNeighbour: Int = 2,
+    val voucherMinTier: Tier = Tier.NEIGHBOUR,
+    /** Reviewers needed to place any pause; protects against one person acting alone. */
+    val reviewersForPause: Int = 3
+)
+
+// ---------- Events that build standing ----------
+
+enum class EventKind(val weight: Double) {
+    LENT_ITEM_RETURNED_OK(1.0),
+    BORROWED_AND_RETURNED_OK(0.5),   // good borrowing counts, so newcomers can climb
+    SKILL_SHARE_HELPED(1.5),
+    HOSTED_OR_ORGANISED(2.0),
+    MENTORED_NEWCOMER(1.5),
+    RETURNED_LATE(-0.5),             // small and recoverable; decays like everything else
+    DAMAGED_OR_LOST_UNREPORTED(-2.0) // the only sizeable negative; honest reporting is NOT penalised
+}
+
+data class StandingEvent(
+    val member: MemberId,
+    val circle: CircleId,
+    val kind: EventKind,
+    val at: Instant
+)
+
+data class Vouch(
+    val voucher: MemberId,
+    val vouchee: MemberId,
+    val circle: CircleId,
+    val at: Instant,
+    val expiresAt: Instant
+)
+
+/** Last resort. Needs reviewers, an expiry, a stated reason and an appeal route. */
+data class Pause(
+    val member: MemberId,
+    val circle: CircleId,
+    val reason: String,
+    val reviewers: Set<MemberId>,
+    val from: Instant,
+    val until: Instant,
+    val appealOpen: Boolean = true
+)
+
+// ---------- Standing computation ----------
+
+data class Standing(
+    val points: Double,
+    val tier: Tier,
+    val reasons: List<String>
+)
+
+object StandingCalculator {
+
+    /** Exponential decay: weight halves every [halfLife]. */
+    private fun decay(weight: Double, age: Duration, halfLife: Duration): Double {
+        val halfLives = age.toMillis().toDouble() / halfLife.toMillis().toDouble()
+        return weight * 0.5.pow(halfLives)
+    }
+
+    fun compute(
+        member: MemberId,
+        cfg: CircleConfig,
+        events: List<StandingEvent>,
+        vouches: List<Vouch>,
+        tierOf: (MemberId) -> Tier,   // lets us check the voucher's own tier (avoid recursion by passing a snapshot)
+        now: Instant
+    ): Standing {
+        val reasons = mutableListOf<String>()
+
+        // Sum decayed events; clamp at zero so the score never goes below neutral.
+        val raw = events
+            .filter { it.member == member && it.circle == cfg.id && !it.at.isAfter(now) }
+            .sumOf { decay(it.kind.weight, Duration.between(it.at, now), cfg.halfLife) }
+        val points = raw.coerceAtLeast(0.0)
+        reasons += "Activity in this circle gives ${"%.1f".format(points)} standing points (older activity counts less)."
+
+        // Tier from points.
+        var tier = Tier.values()
+            .filter { it != Tier.NEWCOMER }
+            .sortedBy { it.rank }
+            .lastOrNull { t -> points >= (cfg.thresholds[t] ?: Double.MAX_VALUE) }
+            ?: Tier.NEWCOMER
+
+        // Vouching on-ramp: enough live vouches from members of sufficient tier lift to NEIGHBOUR.
+        val liveVouches = vouches.count {
+            it.vouchee == member && it.circle == cfg.id &&
+                it.expiresAt.isAfter(now) &&
+                tierOf(it.voucher).rank >= cfg.voucherMinTier.rank
+        }
+        if (tier.rank < Tier.NEIGHBOUR.rank && liveVouches >= cfg.vouchesForNeighbour) {
+            tier = Tier.NEIGHBOUR
+            reasons += "$liveVouches neighbours vouched for this member, which opens Neighbour access."
+        }
+
+        return Standing(points, tier, reasons)
+    }
+
+    /** Sponsor shares a little of the risk: a newcomer's serious negative event nudges the voucher too. */
+    fun sponsorPenalty(event: StandingEvent, vouches: List<Vouch>, now: Instant): List<StandingEvent> =
+        if (event.kind != EventKind.DAMAGED_OR_LOST_UNREPORTED) emptyList()
+        else vouches
+            .filter { it.vouchee == event.member && it.circle == event.circle && it.expiresAt.isAfter(now) }
+            .map { StandingEvent(it.voucher, it.circle, EventKind.RETURNED_LATE, now) } // deliberately mild
+}
+
+// ---------- Access decisions ----------
+
+sealed interface AccessDecision {
+    val reasons: List<String>
+
+    /** Eligible. The owner still has to say yes. */
+    data class Eligible(override val reasons: List<String>) : AccessDecision
+
+    /** Not yet. Says what would change that, so it is a path, not a wall. */
+    data class NotYet(override val reasons: List<String>, val howToUnlock: List<String>) : AccessDecision
+
+    /** Paused by circle review (rare). Always names the appeal route. */
+    data class Paused(override val reasons: List<String>, val until: Instant) : AccessDecision
+}
+
+object AccessPolicy {
+
+    fun canBorrow(
+        borrower: MemberId,
+        item: Item,
+        circle: CircleConfig,
+        standing: Standing,
+        pauses: List<Pause>,
+        now: Instant
+    ): AccessDecision {
+        if (circle.id !in item.circles) {
+            return AccessDecision.NotYet(
+                listOf("${item.name} is not shared in ${circle.name}."),
+                listOf("Ask ${"the owner"} to share it with this circle.")
+            )
+        }
+
+        // 1. Pause check applies to everything except essentials.
+        val pause = pauses.firstOrNull {
+            it.member == borrower && it.circle == circle.id &&
+                !now.isBefore(it.from) && now.isBefore(it.until)
+        }
+
+        // 2. Essentials are always open to members, even during a pause. Need is not a reward.
+        if (item.itemClass == ItemClass.ESSENTIAL) {
+            return AccessDecision.Eligible(listOf("Essentials are open to every member of the circle."))
+        }
+
+        if (pause != null) {
+            return AccessDecision.Paused(
+                listOf(
+                    "Access is paused until ${pause.until}: ${pause.reason}",
+                    "Placed by ${pause.reviewers.size} reviewers. Appeal ${if (pause.appealOpen) "is open" else "has closed"}."
+                ),
+                pause.until
+            )
+        }
+
+        // 3. Tier check. Owner may raise the bar for their own item, never lower it.
+        val needed = maxOf(item.itemClass.minTier, item.ownerMinTier ?: Tier.NEWCOMER, compareBy { it.rank })
+        if (standing.tier.rank >= needed.rank) {
+            return AccessDecision.Eligible(
+                standing.reasons + "Your tier (${standing.tier}) meets what ${item.name} needs ($needed)."
+            )
+        }
+
+        val gap = (circle.thresholds[needed] ?: 0.0) - standing.points
+        return AccessDecision.NotYet(
+            standing.reasons + "${item.name} needs $needed; you are ${standing.tier}.",
+            buildList {
+                add("Borrow and return everyday items; about ${"%.1f".format(gap.coerceAtLeast(0.0))} more points opens it.")
+                add("Or get ${circle.vouchesForNeighbour} neighbours of tier ${circle.voucherMinTier} or above to vouch for you.")
+                add("Or offer a skill share or help at a circle event.")
+            }
+        )
+    }
+
+    /** Pausing needs enough distinct reviewers, an expiry, and a reason. Returns null if the request is not valid. */
+    fun tryPause(
+        member: MemberId,
+        cfg: CircleConfig,
+        reason: String,
+        reviewers: Set<MemberId>,
+        now: Instant,
+        duration: Duration = Duration.ofDays(30)
+    ): Pause? =
+        if (member in reviewers) null                       // can't review your own pause
+        else if (reviewers.size < cfg.reviewersForPause) null
+        else if (reason.isBlank()) null
+        else Pause(member, cfg.id, reason, reviewers, now, now.plus(duration))
+}
+
+// ---------- Tiny demo ----------
+
+fun main() {
+    val now = Instant.parse("2026-11-02T00:00:00Z")
+    val street = CircleConfig(CircleId("street"), "Our Street")
+
+    val alice = MemberId("alice")   // established
+    val bea = MemberId("bea")
+    val cal = MemberId("cal")       // newcomer, vouched by alice + bea
+    val dee = MemberId("dee")       // newcomer, no vouches
+
+    val trailer = Item(ItemId("trailer"), alice, "Box trailer", ItemClass.HIGH_VALUE, circles = setOf(street.id))
+    val drill = Item(ItemId("drill"), alice, "Cordless drill", ItemClass.VALUABLE, circles = setOf(street.id))
+    val ladder = Item(ItemId("ladder"), alice, "Extension ladder", ItemClass.ESSENTIAL, circles = setOf(street.id))
+
+    fun ev(m: MemberId, k: EventKind, daysAgo: Long) =
+        StandingEvent(m, street.id, k, now.minus(Duration.ofDays(daysAgo)))
+
+    val events = buildList {
+        repeat(12) { add(ev(alice, EventKind.LENT_ITEM_RETURNED_OK, 20L * it + 5)) }
+        repeat(5) { add(ev(bea, EventKind.SKILL_SHARE_HELPED, 30L * it + 10)) }
+        add(ev(cal, EventKind.BORROWED_AND_RETURNED_OK, 14))
+    }
+    val vouches = listOf(
+        Vouch(alice, cal, street.id, now.minus(Duration.ofDays(10)), now.plus(Duration.ofDays(170))),
+        Vouch(bea, cal, street.id, now.minus(Duration.ofDays(9)), now.plus(Duration.ofDays(171)))
+    )
+
+    // First pass computes everyone's tier without vouching influence on vouchers (snapshot).
+    val snapshot = listOf(alice, bea, cal, dee).associateWith {
+        StandingCalculator.compute(it, street, events, emptyList(), { Tier.NEWCOMER }, now).tier
+    }
+    fun standing(m: MemberId) =
+        StandingCalculator.compute(m, street, events, vouches, { snapshot.getValue(it) }, now)
+
+    for ((who, label) in listOf(alice to "Alice", cal to "Cal (vouched)", dee to "Dee (no vouches)")) {
+        val s = standing(who)
+        println("== $label: ${s.tier} (${"%.1f".format(s.points)} pts)")
+        for (item in listOf(ladder, drill, trailer)) {
+            val d = AccessPolicy.canBorrow(who, item, street, s, emptyList(), now)
+            println("  ${item.name}: ${d::class.simpleName}")
+            d.reasons.forEach { println("     - $it") }
+            (d as? AccessDecision.NotYet)?.howToUnlock?.forEach { println("     > $it") }
+        }
+    }
+}
