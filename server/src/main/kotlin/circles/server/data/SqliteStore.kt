@@ -186,6 +186,11 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setInt(5, effect.terms.expiresDay)
                     it.setInt(6, effect.terms.maxUses)
                 }
+                is Effect.RevokeDevice -> update("UPDATE devices SET revoked_seq = ? WHERE device_id = ? AND circle_id = ? AND revoked_seq IS NULL") {
+                    it.setLong(1, serverSeq)
+                    it.setString(2, effect.device.v)
+                    it.setString(3, effect.circle.v)
+                }
                 is Effect.SetEpoch -> update("UPDATE circles SET current_epoch = ? WHERE id = ?") {
                     it.setInt(1, effect.epoch)
                     it.setString(2, effect.circle.v)

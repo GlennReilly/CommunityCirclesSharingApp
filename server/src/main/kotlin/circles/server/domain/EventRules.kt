@@ -30,6 +30,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.DEVICE_ADD,
     EventType.KEY_WRAP,
     EventType.KEY_ROTATE,
+    EventType.DEVICE_REVOKE,
 )
 
 /**
@@ -56,6 +57,7 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             EventType.MEMBER_JOIN -> join(envelope, payloadEmpty, directory)
             EventType.KEY_WRAP -> keyWrap(envelope, payloadEmpty, directory)
             EventType.KEY_ROTATE -> keyRotate(envelope, payloadEmpty, directory)
+            EventType.DEVICE_REVOKE -> deviceRevoke(envelope, directory)
             else -> deviceAdd(envelope, directory)
         }
     }
@@ -94,6 +96,21 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             terms.epoch in FIRST_EPOCH..current -> Decision.Accept(emptyList())
             else -> reject(RejectionCode.MALFORMED, "epoch ${terms.epoch} has not been started (current $current)")
         }
+    }
+
+    private fun deviceRevoke(envelope: Envelope, directory: Directory): Decision {
+        val sender = sender(envelope, directory).deviceOrReject { return it }
+        val target = when (val parsed = PublicParts.revoke(envelope.public)) {
+            is Parsed.Ok -> directory.device(parsed.value)
+            is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
+        }
+        if (target == null || target.circle != envelope.circle) return reject(RejectionCode.UNKNOWN_DEVICE, "the device is not in this circle")
+        if (target.isRevoked) return reject(RejectionCode.DEVICE_REVOKED, "the device is already revoked")
+        if (target.member != sender.member && !directory.isSteward(envelope.circle, sender.member)) {
+            return reject(RejectionCode.NOT_STEWARD, "only a steward may revoke another member's device")
+        }
+        if (envelope.v == PAYLOAD_VERSION_PLAINTEXT) noteProblem(envelope, PublicParts.REASON)?.let { return it }
+        return Decision.Accept(listOf(Effect.RevokeDevice(envelope.circle, target.device)))
     }
 
     private fun keyRotate(envelope: Envelope, payloadEmpty: Boolean, directory: Directory): Decision {

@@ -71,6 +71,22 @@ class EventAuthor(
     fun deviceAdd(circle: CircleId, newDevice: DeviceIdentity, day: Int, label: String? = null): Envelope =
         build(circle, EventType.DEVICE_ADD, day, newDevice.registration.toPublic(), textPayload(PublicParts.LABEL, label))
 
+    /** Revokes [target]. Allowed for a member's own devices and, for any device, to a steward. */
+    fun deviceRevoke(circle: CircleId, target: DeviceId, day: Int, reason: String? = null): Envelope =
+        build(circle, EventType.DEVICE_REVOKE, day, PublicParts.revokePublic(target), textPayload(PublicParts.REASON, reason))
+
+    /**
+     * Starts [epoch] with a fresh key and wraps it to each of [devices] (the circle's current, non-revoked devices,
+     * this one included if it should keep reading). Required after a revoke or a member leaving (spec 5). Returns
+     * the `key.rotate` followed by one `key.wrap` per device, and adds the new key to [keyRing].
+     */
+    fun rotateKeys(circle: CircleId, epoch: Int, devices: List<DeviceRegistration>, day: Int): List<Envelope> {
+        val key = KeyRing.newCircleKey(crypto)
+        val events = listOf(keyRotate(circle, epoch, day)) + devices.map { keyWrap(circle, it, epoch, key, day) }
+        keyRing = keyRing.with(epoch, key)
+        return events
+    }
+
     /** Wraps the circle key of [epoch] to [target]'s box key. The author must be able to send it (steward rules are the server's). */
     fun keyWrap(circle: CircleId, target: DeviceRegistration, epoch: Int, key: ByteString, day: Int): Envelope {
         val sealer = requireNotNull(cipher) { "key.wrap needs a cipher" }

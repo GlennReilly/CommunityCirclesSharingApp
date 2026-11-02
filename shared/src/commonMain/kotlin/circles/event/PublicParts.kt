@@ -82,6 +82,15 @@ object PublicParts {
         return Parsed.Ok(JoinTerms(registration, EventId(invite), proof))
     }
 
+    /** `public` of `device.revoke`: just the device being revoked. */
+    fun revoke(map: CborMap): Parsed<DeviceId> {
+        exactKeys(map, setOf(KEY_DEVICE))?.let { return Parsed.Invalid(it) }
+        val device = (map[KEY_DEVICE] as? CborText)?.value?.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("device must be 32 lowercase hex characters")
+        return Parsed.Ok(DeviceId(device))
+    }
+
+    fun revokePublic(device: DeviceId): CborMap = CborMap.of(KEY_DEVICE to CborText(device.v))
+
     /** The optional text of a payload (`note` for invites, `label` for devices); an empty payload gives null. */
     fun optionalText(payload: CborMap, name: String): Parsed<String?> {
         exactKeysAtMost(payload, setOf(name))?.let { return Parsed.Invalid(it) }
@@ -93,6 +102,7 @@ object PublicParts {
 
     const val NOTE: String = KEY_NOTE
     const val LABEL: String = KEY_LABEL
+    const val REASON: String = "reason"
 
     private fun readRegistration(map: CborMap): Parsed<DeviceRegistration> {
         val member = (map[KEY_MEMBER] as? CborText)?.value?.takeIf { isValidRandomId(it) }
