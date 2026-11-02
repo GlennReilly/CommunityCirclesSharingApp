@@ -129,7 +129,7 @@ class SyncServiceTest {
     @Test
     fun otherVersionsTypesAndEpochsAreRefused() {
         val create = founder.author.circleCreate(circle, TODAY)
-        assertRejected(RejectionCode.UNSUPPORTED_VERSION, push(create.copy(v = 1).signedBy(crypto, founder.identity.signing.secretSeed)).single())
+        assertRejected(RejectionCode.UNSUPPORTED_VERSION, push(create.copy(v = 2).signedBy(crypto, founder.identity.signing.secretSeed)).single())
         assertRejected(RejectionCode.UNSUPPORTED_TYPE, push(create.copy(type = "vouch").signedBy(crypto, founder.identity.signing.secretSeed)).single())
         assertRejected(RejectionCode.UNSUPPORTED_TYPE, push(create.copy(type = "made.up").signedBy(crypto, founder.identity.signing.secretSeed)).single())
         assertRejected(RejectionCode.MALFORMED, push(create.copy(epoch = 1).signedBy(crypto, founder.identity.signing.secretSeed)).single())

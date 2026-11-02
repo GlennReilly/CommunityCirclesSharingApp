@@ -24,6 +24,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0018](0018-m2-libsodium-bindings.md) | M2 libsodium bindings: lazysodium (test scope) on JVM, libsodium-wrappers on JS | Accepted |
 | [0019](0019-cipher-separate-from-crypto.md) | Encryption lives in a separate `Cipher` interface (amends 0018 point 1) | Accepted |
 | [0020](0020-shamir-own-implementation.md) | Shamir secret sharing: own implementation with independent vectors | Accepted |
+| [0021](0021-sealed-envelope-v1-and-circle-key-wrapping.md) | Sealed envelope v = 1, circle keys and key wrapping | Accepted |
 
 ## Open decisions still to record
 

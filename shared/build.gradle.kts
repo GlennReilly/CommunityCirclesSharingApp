@@ -27,6 +27,10 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+        jvmTest {
+            // LibsodiumCipher is shared with the server tests (ADR 0018, 0019).
+            kotlin.srcDir("testFixtures/kotlin")
+        }
         jvmTest.dependencies {
             implementation(libs.junit.jupiter)
             implementation(libs.mockk)

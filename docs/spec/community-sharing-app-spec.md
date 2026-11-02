@@ -3,6 +3,7 @@
 Status: draft v0.2, 2026-11-02. Read `community-sharing-app-design.md` first for rationale. This document says what to build. Where it says "decide", pick the simplest option that meets the constraints and record the choice in `docs/adr/` as a short ADR (`NNNN-slug.md`, with a `README.md` index and a `template.md`).
 
 M1 amendments (2026-11-02, ADRs 0010-0014): `UNIQUE(device, ctr)` and the counter check are dropped; `events` gains `v`; `stewards` and `invites` tables; `POST /circles` for `circle.create`; `v = 0` is the plaintext development payload format used until M2; JVM crypto is the JDK plus BouncyCastle.
+M2 amendments (2026-11-02, ADRs 0018-0021): encryption is a separate `Cipher` interface (libsodium on JS, lazysodium in JVM tests only); the associated data of a sealed payload excludes `nonce` as well as `encrypted` and `sig`; the first circle key is epoch 1 and epoch 0 means "no key"; `key.wrap` public is `{device, epoch, wrapped}` with `wrapped` bound to circle and epoch; the server stores `current_epoch` per circle (migration V2) and refuses `v = 0` unless `CIRCLES_ALLOW_PLAINTEXT_DEV=true`; Shamir is our own implementation (ADR 0020).
 
 v0.2 changes: envelope split into `public` and `encrypted` (3.1, 3.2); optimistic loan returns and `loan.dispute` / `loan.resolve` (3.3); policy corrections C1-C13 with tests (2.1); ADR folder renamed to `docs/adr/`.
 

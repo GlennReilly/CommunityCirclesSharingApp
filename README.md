@@ -47,6 +47,7 @@ Settings (environment variables, all optional):
 | `CIRCLES_ALLOW_CREATE` | `true` | `false` stops strangers creating circles |
 | `CIRCLES_RATE_LIMIT` | `true` | Per-address and per-device request limits ([ADR 0015](docs/adr/0015-rate-limiting-pulled-forward.md)) |
 | `CIRCLES_TRUST_PROXY` | `false` | Behind a reverse proxy, take the client address from the last `X-Forwarded-For` entry; otherwise every client looks like the proxy and shares one limit |
+| `CIRCLES_ALLOW_PLAINTEXT_DEV` | `false` | Accept the plaintext `v = 0` development format; leave off on any real server ([ADR 0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md)) |
 | `CIRCLES_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
 Logs are one JSON object per line on stdout. They never contain bodies, headers, tokens, keys, client addresses or exception messages ([ADR 0016](docs/adr/0016-structured-json-logging.md)).

@@ -17,6 +17,7 @@ const val ENV_ALLOW_CREATE = "CIRCLES_ALLOW_CREATE"
 const val ENV_LOG_LEVEL = "CIRCLES_LOG_LEVEL"
 const val ENV_TRUST_PROXY = "CIRCLES_TRUST_PROXY"
 const val ENV_RATE_LIMIT = "CIRCLES_RATE_LIMIT"
+const val ENV_ALLOW_PLAINTEXT_DEV = "CIRCLES_ALLOW_PLAINTEXT_DEV"
 
 /** Settings from the `CIRCLES_*` environment variables (spec 7). */
 data class ServerConfig(
@@ -27,6 +28,8 @@ data class ServerConfig(
     val logLevel: LogLevel = LogLevel.INFO,
     val trustProxy: Boolean = false,
     val rateLimit: Boolean = true,
+    /** Accept the plaintext `v = 0` development format (ADR 0014, 0021). Off by default. */
+    val allowPlaintextDev: Boolean = false,
 )
 
 sealed interface ConfigResult {
@@ -47,6 +50,7 @@ object ServerConfigReader {
         val allowCreate = flag(env, ENV_ALLOW_CREATE, default = true, problems)
         val trustProxy = flag(env, ENV_TRUST_PROXY, default = false, problems)
         val rateLimit = flag(env, ENV_RATE_LIMIT, default = true, problems)
+        val allowPlaintextDev = flag(env, ENV_ALLOW_PLAINTEXT_DEV, default = false, problems)
         val logLevel = env[ENV_LOG_LEVEL]?.let { text ->
             LogLevel.fromWire(text) ?: run {
                 problems += "$ENV_LOG_LEVEL must be one of ${LogLevel.entries.joinToString { it.wire }}, not '$text'"
@@ -55,7 +59,7 @@ object ServerConfigReader {
         } ?: LogLevel.INFO
         val bind = env[ENV_BIND]?.takeIf { it.isNotBlank() } ?: DEFAULT_BIND
         val dataDir = env[ENV_DATA_DIR]?.takeIf { it.isNotBlank() } ?: DEFAULT_DATA_DIR
-        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit)) else ConfigResult.Invalid(problems)
+        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit, allowPlaintextDev)) else ConfigResult.Invalid(problems)
     }
 
     private fun flag(env: Map<String, String>, name: String, default: Boolean, problems: MutableList<String>): Boolean =

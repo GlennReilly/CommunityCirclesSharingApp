@@ -6,7 +6,7 @@ import java.sql.Connection
 data class Migration(val version: Int, val resource: String)
 
 /** All migrations in order. Add new ones at the end; never edit a released one. */
-val MIGRATIONS: List<Migration> = listOf(Migration(1, "V1__init.sql"))
+val MIGRATIONS: List<Migration> = listOf(Migration(1, "V1__init.sql"), Migration(2, "V2__circle_epoch.sql"))
 
 /** What a database looks like against the migrations this build knows. */
 sealed interface SchemaState {

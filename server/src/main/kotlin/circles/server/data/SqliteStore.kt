@@ -115,6 +115,9 @@ class SqliteStore(private val connection: Connection) : Store {
                 it.setString(2, member.v)
             }) { it.next() }
 
+        override fun currentEpoch(circle: CircleId): Int =
+            query("SELECT current_epoch FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getInt(1) else 0 }
+
         override fun invite(circle: CircleId, id: EventId): InviteRecord? =
             query("SELECT author, invite_pub, expires_day, max_uses, used FROM invites WHERE circle_id = ? AND event_id = ?", {
                 it.setString(1, circle.v)
@@ -182,6 +185,10 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setBytes(4, effect.terms.invitePub.toByteArray())
                     it.setInt(5, effect.terms.expiresDay)
                     it.setInt(6, effect.terms.maxUses)
+                }
+                is Effect.SetEpoch -> update("UPDATE circles SET current_epoch = ? WHERE id = ?") {
+                    it.setInt(1, effect.epoch)
+                    it.setString(2, effect.circle.v)
                 }
                 is Effect.UseInvite -> update("UPDATE invites SET used = used + 1 WHERE circle_id = ? AND event_id = ?") {
                     it.setString(1, effect.circle.v)

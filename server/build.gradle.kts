@@ -7,6 +7,9 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
+// LibsodiumCipher lives in shared/testFixtures; only tests compile it, so the server jar has no libsodium (ADR 0018).
+sourceSets.test { kotlin.srcDir("../shared/testFixtures/kotlin") }
+
 application { mainClass = "circles.server.MainKt" }
 
 dependencies {
@@ -23,6 +26,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.server.test.host)
+    testImplementation(libs.lazysodium.java)
+    testImplementation(libs.jna)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 

@@ -54,6 +54,8 @@ class ServerConfigTest {
         assertEquals(circles.server.logging.LogLevel.INFO, defaults.logLevel)
         assertEquals(false, defaults.trustProxy)
         assertEquals(true, defaults.rateLimit)
+        assertEquals(false, defaults.allowPlaintextDev)
+        assertEquals(true, valid(mapOf(ENV_ALLOW_PLAINTEXT_DEV to "true")).allowPlaintextDev)
         val changed = valid(mapOf(ENV_LOG_LEVEL to "debug", ENV_TRUST_PROXY to "true", ENV_RATE_LIMIT to "false"))
         assertEquals(circles.server.logging.LogLevel.DEBUG, changed.logLevel)
         assertEquals(true, changed.trustProxy)
@@ -65,6 +67,7 @@ class ServerConfigTest {
         assertTrue(problems(mapOf(ENV_LOG_LEVEL to "LOUD")).single().contains(ENV_LOG_LEVEL))
         assertTrue(problems(mapOf(ENV_TRUST_PROXY to "yes")).single().contains(ENV_TRUST_PROXY))
         assertTrue(problems(mapOf(ENV_RATE_LIMIT to "0")).single().contains(ENV_RATE_LIMIT))
+        assertTrue(problems(mapOf(ENV_ALLOW_PLAINTEXT_DEV to "yes")).single().contains(ENV_ALLOW_PLAINTEXT_DEV))
         assertEquals(3, problems(mapOf(ENV_LOG_LEVEL to "x", ENV_TRUST_PROXY to "x", ENV_RATE_LIMIT to "x")).size)
     }
 }

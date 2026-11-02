@@ -26,7 +26,7 @@ class EnvelopeChecksTest {
 
     @Test
     fun refusesOtherPayloadVersions() {
-        assertEquals(RejectionCode.UNSUPPORTED_VERSION, code(ok.copy(v = 1)))
+        assertEquals(RejectionCode.UNSUPPORTED_VERSION, code(ok.copy(v = 2)))
         assertEquals(RejectionCode.UNSUPPORTED_VERSION, code(ok.copy(v = -1)))
     }
 

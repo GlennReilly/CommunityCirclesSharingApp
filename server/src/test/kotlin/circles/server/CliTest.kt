@@ -83,11 +83,11 @@ class CliTest {
         val env = mapOf(ENV_DATA_DIR to dir.toString())
         val first = run("migrate", env = env)
         assertEquals(EXIT_OK, first.code)
-        assertTrue(first.out.contains("Applied migrations 1"), first.out)
+        assertTrue(first.out.contains("Applied migrations 1, 2"), first.out)
         val second = run("migrate", env = env)
         assertEquals(EXIT_OK, second.code)
         assertTrue(second.out.contains("up to date"), second.out)
-        Database.openFile(dir).use { assertEquals(1, Migrator(it).currentVersion()) }
+        Database.openFile(dir).use { assertEquals(2, Migrator(it).currentVersion()) }
     }
 
     @Test
@@ -103,7 +103,7 @@ class CliTest {
         assertEquals(true, started.getValue("rate_limit").jsonPrimitive.boolean)
         assertEquals(false, started.getValue("trust_proxy").jsonPrimitive.boolean)
         assertTrue(r.out.contains("database_migrated"))
-        Database.openFile(dir).use { assertEquals(1, Migrator(it).currentVersion()) }
+        Database.openFile(dir).use { assertEquals(2, Migrator(it).currentVersion()) }
     }
 
     @Test

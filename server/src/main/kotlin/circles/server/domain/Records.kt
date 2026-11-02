@@ -37,4 +37,6 @@ sealed interface Effect {
     data class RecordInvite(val circle: CircleId, val id: EventId, val author: MemberId, val terms: InviteTerms) : Effect
 
     data class UseInvite(val circle: CircleId, val id: EventId) : Effect
+
+    data class SetEpoch(val circle: CircleId, val epoch: Int) : Effect
 }

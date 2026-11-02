@@ -16,6 +16,12 @@ const val EVENT_DOMAIN = "circles/event/v1"
 /** `v` of the plaintext development format used by M1 (ADR 0014). */
 const val PAYLOAD_VERSION_PLAINTEXT = 0
 
+/** `v` of the sealed format: `encrypted` is XChaCha20-Poly1305 under the circle key (ADR 0021). */
+const val PAYLOAD_VERSION_SEALED = 1
+
+/** Domain string of the associated data that binds a sealed payload to its envelope (ADR 0021). */
+const val EVENT_AAD_DOMAIN = "circles/event-aad/v1"
+
 /** The signed envelope of spec section 3.1. [type] is kept as text so unknown types can be refused, not crash. */
 data class Envelope(
     val v: Int,
@@ -34,6 +40,12 @@ data class Envelope(
     /** The bytes that are signed: the domain string, then the CBOR map of every field except `sig`. */
     fun signingBytes(): ByteArray = EVENT_DOMAIN.encodeToByteArray() + CborEncoder.encode(toCbor(includeSig = false))
 
+    /**
+     * Associated data for sealing and opening `encrypted` (ADR 0021): every field except `nonce`, `encrypted` and `sig`,
+     * so the public part and the epoch cannot be moved onto another event's ciphertext.
+     */
+    fun associatedData(): ByteArray = EVENT_AAD_DOMAIN.encodeToByteArray() + CborEncoder.encode(toCbor(includeSig = false, includeSealed = false))
+
     /** The bytes that are hashed to make the id: the same, with `sig` included. */
     fun canonicalBytes(): ByteArray = EVENT_DOMAIN.encodeToByteArray() + CborEncoder.encode(toCbor(includeSig = true))
 
@@ -46,7 +58,7 @@ data class Envelope(
 
     fun hasValidSignature(crypto: Crypto, publicKey: ByteString): Boolean = crypto.verify(publicKey, signingBytes(), sig)
 
-    private fun toCbor(includeSig: Boolean): CborMap {
+    private fun toCbor(includeSig: Boolean, includeSealed: Boolean = true): CborMap {
         val fields = mutableMapOf(
             "v" to CborInt(v.toLong()),
             "circle" to CborText(circle.v),
@@ -57,9 +69,11 @@ data class Envelope(
             "ctr" to CborInt(ctr),
             "epoch" to CborInt(epoch.toLong()),
             "public" to public,
-            "nonce" to CborBytes(nonce),
-            "encrypted" to CborBytes(encrypted),
         )
+        if (includeSealed) {
+            fields["nonce"] = CborBytes(nonce)
+            fields["encrypted"] = CborBytes(encrypted)
+        }
         if (includeSig) fields["sig"] = CborBytes(sig)
         return CborMap(fields)
     }
