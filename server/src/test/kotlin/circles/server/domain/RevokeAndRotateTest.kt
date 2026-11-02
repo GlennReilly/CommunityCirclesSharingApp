@@ -127,6 +127,32 @@ class RevokeAndRotateTest {
         assertTrue(PayloadSealing.open(cipher, ex.keyRing, secretAt(FIRST_EPOCH)) is Parsed.Ok)
     }
 
+    // ---- recovery.share (the server only has one steward until steward.add arrives, so the split is 2-of-2 over two devices of the founder) ----
+
+    @Test
+    fun recoverySharesGoOnlyFromAStewardToAStewardsDevice() {
+        val bea = setup()
+        val founderPhone = author(DeviceIdentity.generate(crypto, founder.identity.member, cipher))
+        accept(founder.deviceAdd(circle, founderPhone.identity, TODAY))
+        val stewardDevices = listOf(founder.identity.registration, founderPhone.identity.registration)
+        val shares = checkNotNull(founder.recoveryShares(circle, FIRST_EPOCH, stewardDevices, 2, TODAY))
+        accept(*shares.toTypedArray())
+
+        bea.keyRing = bea.keyRing.with(FIRST_EPOCH, key1)
+        assertRejected(RejectionCode.NOT_STEWARD, push(checkNotNull(bea.recoveryShares(circle, FIRST_EPOCH, stewardDevices, 2, TODAY)).first()))
+        val toBea = checkNotNull(founder.recoveryShares(circle, FIRST_EPOCH, listOf(founder.identity.registration, bea.identity.registration), 2, TODAY))
+        assertEquals(PushStatus.ACCEPTED, push(toBea[0]).status)
+        assertRejected(RejectionCode.NOT_STEWARD, push(toBea[1]))
+    }
+
+    @Test
+    fun aRecoveryShareForAnEpochNotStartedIsRefused() {
+        setup()
+        founder.keyRing = founder.keyRing.with(2, KeyRing.newCircleKey(crypto))
+        val ahead = checkNotNull(founder.recoveryShares(circle, 2, listOf(founder.identity.registration, founder.identity.registration), 2, TODAY))
+        assertRejected(RejectionCode.MALFORMED, push(ahead[0]))
+    }
+
     private fun secretAt(epoch: Int): Envelope {
         val older = author(DeviceIdentity.generate(crypto, cipher = cipher))
         older.keyRing = KeyRing.EMPTY.with(epoch, key1)

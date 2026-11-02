@@ -31,6 +31,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.KEY_WRAP,
     EventType.KEY_ROTATE,
     EventType.DEVICE_REVOKE,
+    EventType.RECOVERY_SHARE,
 )
 
 /**
@@ -58,6 +59,7 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             EventType.KEY_WRAP -> keyWrap(envelope, payloadEmpty, directory)
             EventType.KEY_ROTATE -> keyRotate(envelope, payloadEmpty, directory)
             EventType.DEVICE_REVOKE -> deviceRevoke(envelope, directory)
+            EventType.RECOVERY_SHARE -> recoveryShare(envelope, payloadEmpty, directory)
             else -> deviceAdd(envelope, directory)
         }
     }
@@ -67,7 +69,7 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
      * against the circle's current epoch in their own rules. A secret part needs a key epoch the circle has reached.
      */
     private fun epochProblem(envelope: Envelope, type: EventType, directory: Directory): Decision.Reject? {
-        if (type == EventType.KEY_WRAP || type == EventType.KEY_ROTATE) return null
+        if (type == EventType.KEY_WRAP || type == EventType.KEY_ROTATE || type == EventType.RECOVERY_SHARE) return null
         if (envelope.encrypted.isEmpty() || envelope.v == PAYLOAD_VERSION_PLAINTEXT) {
             return if (envelope.epoch == 0) null else reject(RejectionCode.MALFORMED, "epoch must be 0 when the event has no sealed secret part")
         }
@@ -96,6 +98,24 @@ class EventRules(private val crypto: Crypto, private val allowPlaintext: Boolean
             terms.epoch in FIRST_EPOCH..current -> Decision.Accept(emptyList())
             else -> reject(RejectionCode.MALFORMED, "epoch ${terms.epoch} has not been started (current $current)")
         }
+    }
+
+    private fun recoveryShare(envelope: Envelope, payloadEmpty: Boolean, directory: Directory): Decision {
+        val sender = sender(envelope, directory).deviceOrReject { return it }
+        if (!payloadEmpty) return reject(RejectionCode.INVALID_PAYLOAD, "recovery.share has no secret part")
+        if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may send recovery shares")
+        val terms = when (val parsed = CircleKeys.keyWrap(envelope.public)) {
+            is Parsed.Ok -> parsed.value
+            is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
+        }
+        if (terms.epoch != envelope.epoch) return reject(RejectionCode.INVALID_PUBLIC, "public epoch must equal the envelope epoch")
+        val target = directory.device(terms.device)
+        if (target == null || target.circle != envelope.circle) return reject(RejectionCode.UNKNOWN_DEVICE, "the target device is not in this circle")
+        if (target.isRevoked) return reject(RejectionCode.DEVICE_REVOKED, "the target device has been revoked")
+        if (!directory.isSteward(envelope.circle, target.member)) return reject(RejectionCode.NOT_STEWARD, "a recovery share may only go to a steward's device")
+        val current = directory.currentEpoch(envelope.circle)
+        return if (terms.epoch in FIRST_EPOCH..current) Decision.Accept(emptyList())
+        else reject(RejectionCode.MALFORMED, "epoch ${terms.epoch} has not been started (current $current)")
     }
 
     private fun deviceRevoke(envelope: Envelope, directory: Directory): Decision {

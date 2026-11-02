@@ -71,6 +71,19 @@ class EventAuthor(
     fun deviceAdd(circle: CircleId, newDevice: DeviceIdentity, day: Int, label: String? = null): Envelope =
         build(circle, EventType.DEVICE_ADD, day, newDevice.registration.toPublic(), textPayload(PublicParts.LABEL, label))
 
+    /**
+     * Splits the circle key of [epoch] k-of-n over [stewards] and returns one `recovery.share` per steward device
+     * (ADR 0020). Null if the parameters are invalid (threshold below 2 or above the number of stewards).
+     */
+    fun recoveryShares(circle: CircleId, epoch: Int, stewards: List<DeviceRegistration>, threshold: Int, day: Int): List<Envelope>? {
+        val sealer = requireNotNull(cipher) { "recovery.share needs a cipher" }
+        val key = checkNotNull(keyRing[epoch]) { "no circle key for epoch $epoch" }
+        val sealed = RecoveryShares.split(crypto, sealer, circle, epoch, key, stewards, threshold) ?: return null
+        return sealed.map { (device, wrapped) ->
+            build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
+        }
+    }
+
     /** Revokes [target]. Allowed for a member's own devices and, for any device, to a steward. */
     fun deviceRevoke(circle: CircleId, target: DeviceId, day: Int, reason: String? = null): Envelope =
         build(circle, EventType.DEVICE_REVOKE, day, PublicParts.revokePublic(target), textPayload(PublicParts.REASON, reason))
