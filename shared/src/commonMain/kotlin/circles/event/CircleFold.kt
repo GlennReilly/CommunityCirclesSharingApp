@@ -5,6 +5,7 @@ import circles.crypto.Crypto
 import circles.encoding.CborMap
 import circles.encoding.Parsed
 import circles.policy.CircleId
+import circles.policy.ItemId
 import circles.policy.MemberId
 
 /** A device as the log has shaped it: its keys and whether it has been revoked. */
@@ -24,6 +25,7 @@ class CircleView(
     val keys: KeyRing,
     val events: List<OpenedEvent>,
     val rejected: List<RejectedEvent>,
+    val market: MarketView,
 )
 
 /**
@@ -43,6 +45,11 @@ class CircleFold(
      * check must be supplied before steward changes are relied on.
      */
     private val mayBecomeSteward: (MemberId) -> Boolean = { true },
+    /**
+     * Client-only access rule for new loan requests (ADR 0025): may this member ask to borrow this item? The real check
+     * (tier, pause, cooldown from `AccessPolicy.canBorrow`) arrives with standing in M4; until then everyone may.
+     */
+    private val mayBorrow: (MemberId, ItemId) -> Boolean = { _, _ -> true },
 ) {
     fun fold(circle: CircleId, log: List<Envelope>): CircleView {
         val state = State(circle)
@@ -53,7 +60,12 @@ class CircleFold(
             if (problem == null) accepted += id to envelope else state.rejected += RejectedEvent(id, envelope.type, problem)
         }
         val opened = accepted.map { (id, envelope) -> OpenedEvent(id, envelope, PayloadSealing.open(cipher, state.keys, envelope)) }
-        return CircleView(state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys, opened, state.rejected.toList())
+        val market = MarketFold(cipher, me, circle, state.devices, mayBorrow).fold(opened)
+        val refused = opened.filter { it.id in market.rejected }.map { RejectedEvent(it.id, it.envelope.type, market.rejected.getValue(it.id)) }
+        return CircleView(
+            state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
+            opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view,
+        )
     }
 
     private inner class State(val circle: CircleId) {

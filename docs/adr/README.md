@@ -28,6 +28,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0022](0022-steward-changes-without-a-quorum.md) | Steward changes: any steward acts, the last steward stays | Superseded by 0023 |
 | [0023](0023-steward-changes-need-a-quorum.md) | Steward changes need a quorum of distinct stewards | Accepted |
 | [0024](0024-retire-the-plaintext-v0-format.md) | Retire the plaintext v = 0 format (amends 0014, 0021) | Accepted |
+| [0025](0025-item-and-loan-event-payloads.md) | Item and loan event payloads and folding rules | Accepted |
 
 ## Open decisions still to record
 

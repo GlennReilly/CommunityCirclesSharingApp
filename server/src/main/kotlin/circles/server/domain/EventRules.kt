@@ -38,6 +38,19 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.RECOVERY_SHARE,
     EventType.STEWARD_ADD,
     EventType.STEWARD_REMOVE,
+    EventType.ITEM_UPSERT,
+    EventType.ITEM_RETIRE,
+    EventType.ITEM_DETAIL,
+    EventType.LOAN_REQUEST,
+    EventType.LOAN_RESPOND,
+    EventType.LOAN_HANDOVER,
+    EventType.LOAN_RETURN,
+)
+
+/** Types whose whole payload is secret: empty `public`, a sealed `encrypted` (spec 3.2, ADR 0025). */
+private val OPAQUE_TYPES: Set<EventType> = SUPPORTED_TYPES - setOf(
+    EventType.CIRCLE_CREATE, EventType.MEMBER_INVITE, EventType.MEMBER_JOIN, EventType.DEVICE_ADD, EventType.DEVICE_REVOKE,
+    EventType.KEY_WRAP, EventType.KEY_ROTATE, EventType.RECOVERY_SHARE, EventType.STEWARD_ADD, EventType.STEWARD_REMOVE,
 )
 
 /**
@@ -63,6 +76,7 @@ class EventRules(
             EventType.KEY_ROTATE -> keyRotate(envelope, payloadEmpty, directory)
             EventType.DEVICE_REVOKE -> deviceRevoke(envelope, directory)
             EventType.RECOVERY_SHARE -> recoveryShare(envelope, payloadEmpty, directory)
+            in OPAQUE_TYPES -> opaque(envelope, payloadEmpty, directory)
             EventType.STEWARD_ADD -> stewardChange(envelope, StewardChange.ADD, directory)
             EventType.STEWARD_REMOVE -> stewardChange(envelope, StewardChange.REMOVE, directory)
             else -> deviceAdd(envelope, directory)
@@ -103,6 +117,14 @@ class EventRules(
             terms.epoch in FIRST_EPOCH..current -> Decision.Accept(emptyList())
             else -> reject(RejectionCode.MALFORMED, "epoch ${terms.epoch} has not been started (current $current)")
         }
+    }
+
+    /** Item and loan events: the server can only check the sender, that nothing is public, and that a sealed payload exists. */
+    private fun opaque(envelope: Envelope, payloadEmpty: Boolean, directory: Directory): Decision {
+        sender(envelope, directory).deviceOrReject { return it }
+        if (envelope.public.entries.isNotEmpty()) return reject(RejectionCode.INVALID_PUBLIC, "${envelope.type} has no public part")
+        if (payloadEmpty) return reject(RejectionCode.INVALID_PAYLOAD, "${envelope.type} needs a sealed payload")
+        return Decision.Accept(emptyList())
     }
 
     private fun stewardChange(envelope: Envelope, change: StewardChange, directory: Directory): Decision {

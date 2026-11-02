@@ -8,7 +8,10 @@ import circles.encoding.ByteString
 import circles.encoding.CborMap
 import circles.encoding.CborText
 import circles.policy.CircleId
+import circles.policy.ItemClass
+import circles.policy.ItemId
 import circles.policy.MemberId
+import circles.policy.Tier
 
 /** A device's identity: ids plus keys. In M1 the box key is random bytes, because X25519 arrives with M2. */
 class DeviceIdentity(
@@ -74,6 +77,59 @@ class EventAuthor(
             build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
         }
     }
+
+    /** Creates or changes an item. [itemKey] is wrapped to [ownerDevices] so every device of the owner can read the detail. */
+    fun itemUpsert(
+        circle: CircleId,
+        day: Int,
+        item: ItemId,
+        name: String,
+        itemClass: ItemClass,
+        detailKeyId: String,
+        itemKey: ByteString,
+        ownerDevices: List<DeviceRegistration>,
+        minTier: Tier? = null,
+    ): Envelope {
+        val wraps = ownerDevices.map { DeviceKeyWrap(it.device, ItemKeys.wrap(cipher, it.boxPub, circle, item.v, itemKey)) }
+        return build(circle, EventType.ITEM_UPSERT, day, CborMap.EMPTY, MarketPayloads.itemUpsert(ItemUpsert(item, name, itemClass, minTier, detailKeyId, wraps)))
+    }
+
+    fun itemRetire(circle: CircleId, day: Int, item: ItemId): Envelope =
+        build(circle, EventType.ITEM_RETIRE, day, CborMap.EMPTY, MarketPayloads.itemRetire(ItemRetire(item)))
+
+    /** Seals [detail] with the item key, so only the owner and approved borrowers can read it (spec 5). */
+    fun itemDetail(circle: CircleId, day: Int, item: ItemId, detailKeyId: String, itemKey: ByteString, detail: CborMap): Envelope {
+        val sealed = ItemKeys.sealDetail(cipher, itemKey, circle, item.v, detail)
+        return build(circle, EventType.ITEM_DETAIL, day, CborMap.EMPTY, MarketPayloads.itemDetail(ItemDetail(item, detailKeyId, sealed)))
+    }
+
+    fun loanRequest(circle: CircleId, day: Int, loan: LoanId, item: ItemId, fromDay: Int, toDay: Int, note: String? = null): Envelope =
+        build(circle, EventType.LOAN_REQUEST, day, CborMap.EMPTY, MarketPayloads.loanRequest(LoanRequest(loan, item, fromDay, toDay, note)))
+
+    /** Approves a loan, wrapping [itemKey] to each of the borrower's devices in [borrowerDevices]. */
+    fun loanApprove(
+        circle: CircleId,
+        day: Int,
+        loan: LoanId,
+        item: ItemId,
+        fromDay: Int,
+        toDay: Int,
+        itemKey: ByteString,
+        borrowerDevices: List<DeviceRegistration>,
+        note: String? = null,
+    ): Envelope {
+        val wraps = borrowerDevices.map { DeviceKeyWrap(it.device, ItemKeys.wrap(cipher, it.boxPub, circle, item.v, itemKey)) }
+        return build(circle, EventType.LOAN_RESPOND, day, CborMap.EMPTY, MarketPayloads.loanRespond(LoanRespond(loan, true, fromDay, toDay, note, wraps)))
+    }
+
+    fun loanDecline(circle: CircleId, day: Int, loan: LoanId, fromDay: Int, toDay: Int, note: String? = null): Envelope =
+        build(circle, EventType.LOAN_RESPOND, day, CborMap.EMPTY, MarketPayloads.loanRespond(LoanRespond(loan, false, fromDay, toDay, note, emptyList())))
+
+    fun loanHandover(circle: CircleId, day: Int, loan: LoanId): Envelope =
+        build(circle, EventType.LOAN_HANDOVER, day, CborMap.EMPTY, MarketPayloads.loanHandover(LoanHandover(loan)))
+
+    fun loanReturn(circle: CircleId, day: Int, loan: LoanId, outcome: ReturnOutcome): Envelope =
+        build(circle, EventType.LOAN_RETURN, day, CborMap.EMPTY, MarketPayloads.loanReturn(LoanReturn(loan, outcome)))
 
     fun stewardAdd(circle: CircleId, member: MemberId, day: Int, note: String? = null): Envelope =
         build(circle, EventType.STEWARD_ADD, day, PublicParts.stewardPublic(member), textPayload(PublicParts.NOTE, note))
