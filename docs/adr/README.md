@@ -22,6 +22,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0016](0016-structured-json-logging.md) | Structured JSON logging without a logging framework | Accepted |
 | [0017](0017-shadow-jar-for-single-file-deploy.md) | One runnable jar with the Shadow plugin | Accepted |
 | [0018](0018-m2-libsodium-bindings.md) | M2 libsodium bindings: lazysodium (test scope) on JVM, libsodium-wrappers on JS | Accepted |
+| [0019](0019-cipher-separate-from-crypto.md) | Encryption lives in a separate `Cipher` interface (amends 0018 point 1) | Accepted |
 
 ## Open decisions still to record
 
