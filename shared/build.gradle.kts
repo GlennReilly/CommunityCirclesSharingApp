@@ -27,6 +27,9 @@ kotlin {
             implementation(libs.junit.jupiter)
             implementation(libs.mockk)
             runtimeOnly(libs.junit.platform.launcher)
+            // ADR 0018: libsodium for the JVM test clients only, never in the server jar.
+            implementation(libs.lazysodium.java)
+            implementation(libs.jna)
         }
     }
 }
