@@ -1,6 +1,6 @@
 # 0046. Adding another device
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 
 ## Context
@@ -21,13 +21,21 @@ The new device must send its public keys to the existing one, and the existing o
 5. **Revoking a device and the key.** Revoking a device that held the circle key calls for a rotation, as in ADR 0044. A steward who removes a device rotates the key in the same action; a member who is not a steward revokes, and every steward then sees the same "Change the key" prompt on the Members page. (The prompt now appears after any revocation that no rotation has followed, not only after a whole member leaves.)
 6. **Limits.** A borrower's new device cannot read the details of items they are already approved to borrow until the owner approves again; stewards can add a device for another member (existing rule); a new device sees the whole history it has keys for, which is every epoch the existing device holds.
 
-## Decisions for the owner
+## Decisions for the owner (answered 2026-11-03: A1, B1, C1)
 
-**A. How the member confirms the new device.** **A1 (recommended): compare the fingerprint on both screens**, as in decision 2. **A2: no comparison**; the member just pastes and adds. Faster, but whoever can alter the pasted text gets the account. A QR code to scan instead of reading would be a later convenience.
+**A. How the member confirms the new device. Chosen: A1.** **A1 (recommended): compare the fingerprint on both screens**, as in decision 2. **A2: no comparison**; the member just pastes and adds. Faster, but whoever can alter the pasted text gets the account. A QR code to scan instead of reading would be a later convenience.
 
-**B. A steward revoking a device.** **B1 (recommended): rotate at once** in the same batch, as in decision 5. **B2: never automatic**; the prompt appears for everyone including the steward who revoked, and a second click rotates. One more step, no surprise bulk of wraps.
+**B. A steward revoking a device. Chosen: B1.** **B1 (recommended): rotate at once** in the same batch, as in decision 5. **B2: never automatic**; the prompt appears for everyone including the steward who revoked, and a second click rotates. One more step, no surprise bulk of wraps.
 
-**C. The member's own items on the new device.** **C1 (recommended): re-wrap automatically** (decision 3), one event per owned item. **C2: not automatic**; the new device can see the items but not their private details until the owner edits each item. Fewer events, but a confusing half-working device.
+**C. The member's own items on the new device. Chosen: C1.** **C1 (recommended): re-wrap automatically** (decision 3), one event per owned item. **C2: not automatic**; the new device can see the items but not their private details until the owner edits each item. Fewer events, but a confusing half-working device.
+
+## Details settled while building
+
+- The fingerprint is the 20-character code of the Members page, now one shared function (`Fingerprint`).
+- A device waiting to be added is marked in its stored identity (`pairing`), not guessed from the log: a member who joined by invite also has no registration in the log until their join is accepted, and must not be mistaken for a pairing device. A waiting device checks every 15 seconds, no faster, because the server limits logins.
+- The device code is `device.signKey.boxKey` (base64url) and the link `{origin}/#/device/{circle}/{member}`; both parsers are strict.
+- The "Change the key" prompt of ADR 0044 now appears after any revoked device that no rotation has followed, not only after a whole member left.
+- The new device's name is sealed in the `device.add` and read back from it.
 
 ## Consequences
 

@@ -4,6 +4,9 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
+import circles.app.DeviceLink
+import circles.app.DeviceSummary
+import circles.app.MAX_DEVICE_NAME_CHARS
 import circles.app.ProposalSummary
 import circles.event.StewardChange
 import circles.event.MAX_STEWARD_FALLBACK_DELAY_DAYS
@@ -100,6 +103,19 @@ const val FIELD_QUORUM = "quorum"
 const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_REMOVE_DEVICE = "remove-device"
+const val ACTION_CHECK_NOW = "check-now"
+const val ACTION_COPY_FIELD = "copy-field"
+const val ATTR_FROM = "data-from"
+const val ATTR_DEVICE_ID = "data-device-id"
+const val FORM_PAIR = "pair-form"
+const val FORM_ADD_DEVICE = "add-device-form"
+const val FIELD_DEVICE_CODE = "device-code"
+const val FIELD_DEVICE_NAME = "device-name"
+const val FIELD_CHECKED = "fingerprints-match"
+const val ID_DEVICE_PREVIEW = "device-preview"
+const val ID_DEVICE_LINK = "device-link"
+const val ID_THIS_DEVICE_CODE = "this-device-code"
 const val ACTION_REMOVE_MEMBER = "remove-member"
 const val ACTION_ROTATE_KEY = "rotate-key"
 const val ACTION_LEAVE = "leave-circle"
@@ -195,10 +211,11 @@ fun FlowContent.shell(state: AppState) {
             }
             AppModel.NoIdentity -> newcomer(state)
             is AppModel.Locked -> signIn()
+            is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
-                Screen.Settings -> settings(model.home)
+                Screen.Settings -> settings(model.home, state)
                 Screen.Standing -> standing(model.home.standing)
                 Screen.Stewards -> stewards(model.home)
                 Screen.Items -> items(model.home)
@@ -262,6 +279,7 @@ private fun FlowContent.newcomer(state: AppState) {
     when (state.screen) {
         Screen.StartCircle -> startCircle()
         Screen.JoinCircle -> joinCircle(state)
+        Screen.PairDevice -> pairDevice(state)
         else -> welcome()
     }
 }
@@ -855,8 +873,9 @@ private fun FlowContent.passwordInput(field: String, label: String, autocomplete
 }
 
 /** This browser's own settings: passphrase, locking, and forgetting the device. */
-private fun FlowContent.settings(home: HomeData) {
+private fun FlowContent.settings(home: HomeData, state: AppState) {
     h1 { +Screen.Settings.title }
+    devicesSection(home, state)
     section {
         h2 { +"Passphrase" }
         p { +"Your passphrase protects your keys on this device. Changing it does not change your identity in the circle." }
@@ -1067,6 +1086,141 @@ private fun FlowContent.stewards(home: HomeData) {
                 }
                 formSubmit("Propose these rules")
             }
+        }
+    }
+}
+
+/** The page a link to add another device opens in a browser that has no identity yet. */
+private fun FlowContent.pairDevice(state: AppState) {
+    h1 { +Screen.PairDevice.title }
+    if (state.pendingDevice == null) {
+        p { +"To add this browser to your account, open the link shown on your other device: Settings, then Add another device." }
+    } else {
+        p { +"This browser will become another device of your account. Choose a passphrase to protect its keys here. Your other device finishes the job." }
+        form {
+            id = FORM_PAIR
+            passphraseField("new-password", hint = true)
+            formSubmit("Continue")
+        }
+    }
+    backToWelcome()
+}
+
+/** A new device of an existing member, waiting for that member to add it. */
+private fun FlowContent.awaiting(model: AppModel.AwaitingApproval) {
+    h1 { +Screen.PairDevice.title }
+    p { +"On your other device, open Settings and Add another device, then paste this code there." }
+    label {
+        attributes["for"] = ID_THIS_DEVICE_CODE
+        +"Device code: "
+    }
+    input(type = InputType.text) {
+        id = ID_THIS_DEVICE_CODE
+        value = model.code
+        readonly = true
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+        attributes[ATTR_FROM] = ID_THIS_DEVICE_CODE
+        +"Copy"
+    }
+    p { +"Fingerprint: ${model.fingerprint}" }
+    p { +"Your other device will show a fingerprint too. Check that the two match before you add this device there." }
+    p {
+        role = "status"
+        +"Waiting for your other device. This page checks every few seconds."
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_CHECK_NOW
+        +"Check now"
+    }
+    details {
+        summary { +"Forget this device" }
+        p { +"This removes the keys made here. Start again from the link on your other device." }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_ERASE
+            +"Forget this device"
+        }
+    }
+}
+
+private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
+    section {
+        h2 { +"Your devices" }
+        ul {
+            for (device in home.myDevices) {
+                li {
+                    +(device.name ?: "Unnamed device")
+                    if (device.isThisOne) +" (this device)"
+                    if (!device.isThisOne) {
+                        details {
+                            summary { +"Remove this device" }
+                            p { +"It is cut off at once and the circle's key is changed, so it cannot read anything new. What it already read stays on it." }
+                            button(type = ButtonType.button) {
+                                attributes[ATTR_ACTION] = ACTION_REMOVE_DEVICE
+                                attributes[ATTR_DEVICE_ID] = device.device.v
+                                +"Remove it"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    section {
+        h2 { +"Add another device" }
+        p { +"Open this link in the other browser. It holds no secrets." }
+        val link = DeviceLink(home.circle, home.me).format(state.origin)
+        label {
+            attributes["for"] = ID_DEVICE_LINK
+            +"Link: "
+        }
+        input(type = InputType.text) {
+            id = ID_DEVICE_LINK
+            value = link
+            readonly = true
+        }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+            attributes[ATTR_FROM] = ID_DEVICE_LINK
+            +"Copy"
+        }
+        p { +"Then paste the code the other browser shows, and check that its fingerprint matches the one below." }
+        form {
+            id = FORM_ADD_DEVICE
+            label {
+                attributes["for"] = FIELD_DEVICE_CODE
+                +"Device code: "
+            }
+            input(type = InputType.text, name = FIELD_DEVICE_CODE) {
+                id = FIELD_DEVICE_CODE
+                required = true
+                attributes[ATTR_MIN] = "1"
+                attributes["autocomplete"] = "off"
+                attributes["spellcheck"] = "false"
+            }
+            p {
+                id = ID_DEVICE_PREVIEW
+                attributes["aria-live"] = "polite"
+            }
+            label {
+                attributes["for"] = FIELD_DEVICE_NAME
+                +"Name of the device: "
+            }
+            input(type = InputType.text, name = FIELD_DEVICE_NAME) {
+                id = FIELD_DEVICE_NAME
+                attributes["maxlength"] = MAX_DEVICE_NAME_CHARS.toString()
+                attributes["autocomplete"] = "off"
+            }
+            label {
+                attributes["for"] = FIELD_CHECKED
+                +"The fingerprint above matches the one on the new device: "
+            }
+            input(type = InputType.checkBox, name = FIELD_CHECKED) {
+                id = FIELD_CHECKED
+                required = true
+            }
+            formSubmit("Add this device")
         }
     }
 }

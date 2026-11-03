@@ -6,6 +6,10 @@ import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.ItemResult
 import circles.app.LoanResult
+import circles.app.AddDeviceResult
+import circles.app.DeviceLink
+import circles.app.DeviceRemoval
+import circles.app.Fingerprint
 import circles.app.LeaveResult
 import circles.app.RemoveResult
 import circles.app.StewardResult
@@ -628,5 +632,85 @@ class CircleAppEndToEndTest {
         assertFalse(home(alice.app).needsRotation)
         assertEquals(RemoveResult.NotAllowed, alice.app.rotateKeyNow(), "nothing left to rotate for")
         assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
+    }
+
+    @Test
+    fun aSecondDeviceIsPairedReadsEverythingAndIsRemovedWithTheKeyChanged() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+        val aliceId = home(alice.app).me
+
+        // 1. The existing device shows a link of public ids; the new browser opens it and shows its code and fingerprint.
+        val link = assertNotNull(DeviceLink.parse(assertNotNull(alice.app.deviceLink("https://circles.example"))))
+        assertEquals(aliceId, link.member)
+        val phone = browser(transport, crypto)
+        phone.app.open()
+        assertIs<StartResult.Started>(phone.app.startOnNewDevice(link, PASSPHRASE))
+        val waiting = assertIs<AppModel.AwaitingApproval>(phone.app.model.value)
+        assertEquals(link.circle, waiting.circle)
+        assertEquals(SyncState.SignedOut, assertNotNull(phone.app.syncOnce()).state, "not registered yet, so the server refuses the login")
+        assertIs<AppModel.AwaitingApproval>(phone.app.model.value)
+
+        // 2. The member checks the fingerprint, then adds it with a name. Bad input is refused first.
+        val preview = assertNotNull(alice.app.previewDeviceCode(waiting.code))
+        assertEquals(waiting.fingerprint, preview.fingerprint, "the two screens show the same fingerprint")
+        assertNull(alice.app.previewDeviceCode("not a code"))
+        assertEquals(AddDeviceResult.BadCode, alice.app.addDevice("nonsense", "Phone"))
+        assertEquals(AddDeviceResult.NameTooLong, alice.app.addDevice(waiting.code, "n".repeat(41)))
+        val added = assertIs<AddDeviceResult.Added>(alice.app.addDevice(waiting.code, "Phone"))
+        assertEquals(1, added.keysWrapped); assertEquals(1, added.itemsShared)
+        assertEquals(AddDeviceResult.AlreadyKnown, alice.app.addDevice(waiting.code, "Phone again"))
+        listOf(alice, phone, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        phone.app.syncOnce()
+
+        // 3. The phone is in: same member, reads the circle and the member's own private item details.
+        val phoneHome = home(phone.app)
+        assertEquals(aliceId, phoneHome.me)
+        assertTrue(phoneHome.isSteward && phoneHome.canRead)
+        assertEquals("Garage at the back", phoneHome.items.single { it.item == ladder }.description)
+        assertEquals(2, home(alice.app).myDevices.size)
+        assertEquals(setOf(null, "Phone"), home(alice.app).myDevices.map { it.name }.toSet())
+        assertEquals("Phone", home(phone.app).myDevices.single { it.isThisOne }.name)
+        assertEquals(2, home(bea.app).people.single { it.member == aliceId }.devices)
+
+        // 4. Removing a device: only your own other devices; a steward changes the key in the same batch.
+        val phoneDevice = home(alice.app).myDevices.single { it.name == "Phone" }.device
+        assertEquals(DeviceRemoval.NotAllowed, alice.app.removeDevice(home(alice.app).myDevices.single { it.isThisOne }.device), "not this device")
+        assertEquals(DeviceRemoval.NotAllowed, alice.app.removeDevice(home(bea.app).myDevices.single().device), "not someone else's")
+        assertEquals(DeviceRemoval.Removed, alice.app.removeDevice(phoneDevice))
+        assertFalse(home(alice.app).needsRotation, "the steward's removal rotated the key at once")
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(SyncState.SignedOut, assertNotNull(phone.app.syncOnce()).state, "the removed device is signed out")
+        assertEquals(1, home(alice.app).myDevices.size)
+
+        // 5. A member who is not a steward removes a device: no rotation of her own, a steward is prompted.
+        val beaLink = assertNotNull(DeviceLink.parse(assertNotNull(bea.app.deviceLink("https://circles.example"))))
+        val beaTablet = browser(transport, crypto)
+        beaTablet.app.open(); beaTablet.app.startOnNewDevice(beaLink, PASSPHRASE)
+        val tabletCode = assertIs<AppModel.AwaitingApproval>(beaTablet.app.model.value).code
+        assertIs<AddDeviceResult.Added>(bea.app.addDevice(tabletCode, ""))
+        bea.app.syncOnce(); beaTablet.app.syncOnce(); beaTablet.app.syncOnce(); alice.app.syncOnce()
+        assertEquals(null, home(bea.app).myDevices.single { !it.isThisOne }.name, "no name typed")
+        assertEquals(DeviceRemoval.Removed, bea.app.removeDevice(home(bea.app).myDevices.single { !it.isThisOne }.device))
+        bea.app.syncOnce(); alice.app.syncOnce()
+        assertTrue(home(alice.app).needsRotation, "a steward is asked to change the key after Bea removed a device")
+        assertEquals(RemoveResult.Removed, alice.app.rotateKeyNow())
+        assertFalse(home(alice.app).needsRotation)
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        assertEquals(Fingerprint.of(crypto, crypto.generateSigningKeyPair().publicKey).length, 24, "five groups of four and four spaces")
     }
 }

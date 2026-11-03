@@ -71,8 +71,11 @@ class EventAuthor(
         return build(circle, EventType.MEMBER_JOIN, day, JoinTerms(registration, invite, proof).toPublic(), CborMap.EMPTY)
     }
 
-    fun deviceAdd(circle: CircleId, newDevice: DeviceIdentity, day: Int, label: String? = null): Envelope =
-        build(circle, EventType.DEVICE_ADD, day, newDevice.registration.toPublic(), textPayload(PublicParts.LABEL, label))
+    fun deviceAdd(circle: CircleId, newDevice: DeviceIdentity, day: Int, label: String? = null): Envelope = deviceAdd(circle, newDevice.registration, day, label)
+
+    /** Registers another device of this member from its public keys alone (ADR 0046). */
+    fun deviceAdd(circle: CircleId, registration: DeviceRegistration, day: Int, label: String? = null): Envelope =
+        build(circle, EventType.DEVICE_ADD, day, registration.toPublic(), textPayload(PublicParts.LABEL, label))
 
     /**
      * Splits the circle key of [epoch] k-of-n over [stewards] and returns one `recovery.share` per steward device

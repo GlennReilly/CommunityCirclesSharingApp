@@ -14,6 +14,8 @@ data class StoredIdentity(
     val circle: String? = null,
     /** Minutes of inactivity before locking; 0 means only when the tab closes; null means the default. */
     val autoLockMinutes: Int? = null,
+    /** True for a browser added as another device of an existing member: it waits until that member registers it (ADR 0046). */
+    val pairing: Boolean = false,
 ) {
     val memberId: MemberId get() = MemberId(member)
     val deviceId: DeviceId get() = DeviceId(device)

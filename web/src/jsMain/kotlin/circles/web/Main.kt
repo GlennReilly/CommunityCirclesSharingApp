@@ -3,7 +3,10 @@ package circles.web
 import circles.app.AppModel
 import circles.app.CircleApp
 import circles.app.InviteLink
+import circles.app.AddDeviceResult
 import circles.app.CalendarDay
+import circles.app.DeviceLink
+import circles.app.DeviceRemoval
 import circles.app.ItemResult
 import circles.app.LoanResult
 import circles.app.VouchResult
@@ -15,6 +18,7 @@ import circles.event.ReturnOutcome
 import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.LeaveResult
+import circles.app.MAX_DEVICE_NAME_CHARS
 import circles.app.RemoveResult
 import circles.app.StartResult
 import circles.app.StewardResult
@@ -52,6 +56,7 @@ private const val MILLIS_PER_DAY = 86_400_000.0
 private const val POLL_MILLIS = 60_000
 private const val UPDATE_CHECK_MILLIS = 60 * 60 * 1000
 private const val WORKER_PATH = "/sw.js"
+private const val PAIRING_CHECK_MILLIS = 15_000
 private const val MIN_PASSPHRASE_NOTICE = "Choose a longer passphrase: at least %d characters."
 
 /**
@@ -84,12 +89,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
 
     suspend fun start() {
         render(screenChanged = false)
+        dispatch(AppAction.OriginKnown(window.location.origin))
         registerServiceWorker()
         InviteLink.parse(window.location.hash)?.let { link ->
             dispatch(AppAction.InviteSeen(link))
             // The secret in the link must not stay in the address bar or the history entry (ADR 0040).
             window.history.replaceState(null, "", window.location.pathname + window.location.search)
         }
+        DeviceLink.parse(window.location.hash)?.let { link ->
+            dispatch(AppAction.DeviceLinkSeen(link))
+            window.history.replaceState(null, "", window.location.pathname + window.location.search)
+        }
+        // A device waiting to be added looks again every 15 seconds (the server limits logins, so not faster).
+        window.setInterval({ if (state.model is AppModel.AwaitingApproval) app?.syncNow(SyncTrigger.MANUAL) }, PAIRING_CHECK_MILLIS)
         window.addEventListener("hashchange", { dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash))) })
         // Until the event stream is read (ADR 0026), look for news once a minute; the scheduler spreads and backs off.
         window.setInterval({ app?.syncNow(SyncTrigger.HINT) }, POLL_MILLIS)
@@ -143,6 +155,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
 
     /** A form's button appears only once every field that needs text has enough of it (`data-min`, in the views). */
     private fun onInput(event: Event) {
+        (event.target as? HTMLInputElement)?.takeIf { it.id == FIELD_DEVICE_CODE }?.let { field ->
+            val preview = app?.previewDeviceCode(field.value)
+            document.getElementById(ID_DEVICE_PREVIEW)?.textContent = when {
+                field.value.isBlank() -> ""
+                preview == null -> "That does not look like a device code."
+                else -> "Fingerprint of this code: ${preview.fingerprint}"
+            }
+        }
         val form = (event.target as? Element)?.closest("form") as? HTMLFormElement ?: return
         val button = form.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
         var ready = true
@@ -218,6 +238,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (quorum == null || inactive == null || fallback == null) dispatch(AppAction.Notice("Fill in all three numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback))
                 }
+                FORM_PAIR -> state.pendingDevice?.let { report(circleApp.startOnNewDevice(it, field(FIELD_PASSPHRASE))) }
+                FORM_ADD_DEVICE -> dispatch(
+                    AppAction.Notice(
+                        when (val result = circleApp.addDevice(field(FIELD_DEVICE_CODE), field(FIELD_DEVICE_NAME))) {
+                            is AddDeviceResult.Added -> "Added. The new device will open as soon as it checks in."
+                            AddDeviceResult.BadCode -> "That does not look like a device code. Copy the whole code shown on the new device."
+                            AddDeviceResult.AlreadyKnown -> "That device is already part of the circle."
+                            AddDeviceResult.NameTooLong -> "Keep the name to $MAX_DEVICE_NAME_CHARS characters or fewer."
+                            AddDeviceResult.NotLetInYet -> "A steward needs to let you in before you can add a device."
+                            AddDeviceResult.NotAllowed -> "That cannot be done right now."
+                        },
+                    ),
+                )
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
@@ -308,6 +341,16 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         },
                     ),
                 )
+                ACTION_REMOVE_DEVICE -> target.getAttribute(ATTR_DEVICE_ID)?.let { id ->
+                    dispatch(AppAction.Notice(if (circleApp?.removeDevice(DeviceId(id)) == DeviceRemoval.Removed) "Removed. The circle's key is being changed." else "That device cannot be removed."))
+                }
+                ACTION_CHECK_NOW -> circleApp?.syncNow(SyncTrigger.MANUAL)
+                ACTION_COPY_FIELD -> target.getAttribute(ATTR_FROM)?.let { id ->
+                    (document.getElementById(id) as? HTMLInputElement)?.let {
+                        window.navigator.asDynamic().clipboard.writeText(it.value)
+                        dispatch(AppAction.Notice("Copied."))
+                    }
+                }
                 ACTION_VOUCH -> target.getAttribute(ATTR_MEMBER)?.let { id ->
                     dispatch(
                         AppAction.Notice(

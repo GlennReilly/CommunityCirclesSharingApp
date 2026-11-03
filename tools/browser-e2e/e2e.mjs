@@ -1,7 +1,7 @@
 import { startServer, startChrome, sleep } from './lib.mjs';
 const PASS = 'correct horse battery staple';
 const PASS_NEW = 'second passphrase for alice';
-const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334);
+const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334); const phone = await startChrome(9336);
 const text = c => c.evaluate('document.getElementById("app").innerText');
 async function until(c, expr, what, ms = 20000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await sleep(250); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
 // Types into the form's fields like a person would (an input event per field), then submits.
@@ -167,6 +167,30 @@ try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
   await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'That passphrase did not work'), 'old passphrase refused'); ok('the old passphrase no longer works');
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked with the new passphrase, circle intact with 2 members');
+  // A second device: alice's phone is paired from her laptop, checks the fingerprint, reads her things, and is removed again.
+  await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.getElementById("device-link") !== null', 'settings with the device link');
+  const deviceLink = await alice.evaluate('document.getElementById("device-link").value');
+  if (!/\/#\/device\/[0-9a-f]{32}\/[0-9a-f]{32}$/.test(deviceLink)) throw new Error('device link: ' + deviceLink); ok('settings shows a device link of public ids only');
+  await phone.goto(deviceLink); await until(phone, has(phone, 'Add this device') + ' && document.getElementById("pair-form") !== null', 'pair page');
+  if (await phone.evaluate('location.hash') !== '') throw new Error('the device link stayed in the address bar');
+  if (!(await buttonHidden(phone, 'pair-form'))) throw new Error('pair button visible before a passphrase');
+  await submit(phone, 'pair-form', { passphrase: PASS });
+  await until(phone, has(phone, 'Waiting for your other device') + ' && document.getElementById("this-device-code") !== null', 'phone waits'); ok('the new browser makes its keys and waits to be added');
+  const code = await phone.evaluate('document.getElementById("this-device-code").value');
+  const phoneFingerprint = await phone.evaluate('document.body.innerText.match(/Fingerprint: ([0-9a-f ]+)/)[1].trim()');
+  await setField(alice, 'add-device-form', 'device-code', 'garbage'); await until(alice, has(alice, 'does not look like a device code'), 'bad code noticed');
+  await setField(alice, 'add-device-form', 'device-code', code); await until(alice, has(alice, 'Fingerprint of this code: ' + phoneFingerprint), 'fingerprints shown');
+  ok('the existing device shows the same fingerprint as the new one: ' + phoneFingerprint);
+  await setField(alice, 'add-device-form', 'device-name', 'Phone');
+  await alice.evaluate('(() => { const f = document.getElementById("add-device-form"); f.elements.namedItem("fingerprints-match").checked = true; f.requestSubmit(); return true; })()');
+  await until(alice, has(alice, 'Added. The new device will open'), 'device added'); await sleep(1500); await click(alice, 'sync');
+  await click(phone, 'check-now'); await until(phone, has(phone, 'Circle home'), 'phone is in', 25000); ok('the phone was added and opened the circle');
+  await phone.evaluate('location.hash = "#/items"'); await until(phone, has(phone, 'Drill') + ' && ' + has(phone, 'Yours'), 'phone sees alice\'s own items'); ok('the phone sees alice\'s own items as hers');
+  await phone.evaluate('location.hash = "#/settings"'); await until(phone, has(phone, 'Phone (this device)'), 'phone names itself'); ok('the phone lists itself by the name alice gave it');
+  await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=remove-device]") !== null', 'alice sees the phone to remove');
+  await alice.evaluate('document.querySelector("[data-action=remove-device]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key is being changed.'), 'phone removed');
+  await sleep(1500); await click(alice, 'sync'); await click(phone, 'sync');
+  await until(phone, has(phone, 'Cannot sign in to the circle'), 'phone cut off'); ok('the removed phone is told it cannot sign in');
   // Removal: Bea steps down as a steward, Alice removes her as a member; Bea can no longer sign in.
   await bea.evaluate('location.hash = "#/stewards"'); await until(bea, 'document.querySelector("[data-action=steward-remove]") !== null', 'bea step down button');
   await bea.evaluate('(() => { const mine = [...document.querySelectorAll("li")].find(li => li.textContent.includes("Step down as steward")); mine.querySelector("button").click(); return true; })()');
@@ -184,4 +208,4 @@ try {
   console.log('\nALICE LOGS:\n' + alice.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
   console.log('BEA LOGS:\n' + bea.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
 } catch (e) { console.log('FAILED:', e.message); console.log('ALICE LOGS:\n' + alice.logs.join('\n')); console.log('BEA LOGS:\n' + bea.logs.join('\n')); console.log('SERVER:\n' + server.log().slice(-1500)); process.exitCode = 1; }
-finally { alice.stop(); bea.stop(); server.stop(); }
+finally { alice.stop(); bea.stop(); phone.stop(); server.stop(); }

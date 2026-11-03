@@ -1,6 +1,7 @@
 package circles.web
 
 import circles.app.AppModel
+import circles.app.DeviceLink
 import circles.app.InviteLink
 import circles.policy.ItemId
 import circles.sync.SyncState
@@ -21,6 +22,10 @@ data class AppState(
     val editing: ItemId? = null,
     /** The item being asked for on the Ask to borrow page. */
     val borrowing: ItemId? = null,
+    /** A link to add this browser as another device of a member, found in the address (ADR 0046). */
+    val pendingDevice: DeviceLink? = null,
+    /** The address this page was served from, for the links it shows. */
+    val origin: String = "",
 ) {
     val signedIn: Boolean get() = model is AppModel.Open
 }
@@ -30,6 +35,8 @@ sealed interface AppAction {
     data class ModelChanged(val model: AppModel) : AppAction
     data class SyncChanged(val state: SyncState) : AppAction
     data class InviteSeen(val link: InviteLink?) : AppAction
+    data class DeviceLinkSeen(val link: DeviceLink?) : AppAction
+    data class OriginKnown(val origin: String) : AppAction
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
@@ -57,7 +64,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             // Leaving the open state forgets anything that was only meant for the open screens.
             newInvite = if (open) state.newInvite else null,
             // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
-            pendingInvite = if (action.model is AppModel.Locked || action.model is AppModel.Open) null else state.pendingInvite,
+            pendingInvite = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingInvite,
+            pendingDevice = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingDevice,
         )
     }
     is AppAction.SyncChanged -> state.copy(sync = action.state)
@@ -66,6 +74,11 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         pendingInvite = action.link,
         screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.JoinCircle else state.screen,
     )
+    is AppAction.DeviceLinkSeen -> state.copy(
+        pendingDevice = action.link,
+        screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.PairDevice else state.screen,
+    )
+    is AppAction.OriginKnown -> state.copy(origin = action.origin)
     is AppAction.Notice -> state.copy(notice = action.text)
     is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)
@@ -78,6 +91,7 @@ private fun allowed(model: AppModel, screen: Screen): Screen = when (model) {
     is AppModel.Locked -> Screen.SignIn
     AppModel.NoIdentity -> if (screen in Screen.newcomer) screen else Screen.Welcome
     AppModel.Loading -> if (screen in Screen.newcomer) screen else Screen.Welcome
+    is AppModel.AwaitingApproval -> Screen.PairDevice
 }
 
 /** The sentence for the status line (spec section 6): "Up to date", "Syncing", "Offline, 3 changes waiting", ... */

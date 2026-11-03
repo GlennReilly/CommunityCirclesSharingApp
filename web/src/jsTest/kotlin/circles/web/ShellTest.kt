@@ -10,6 +10,8 @@ import circles.event.LoanId
 import circles.event.LoanStatus
 import circles.event.ReturnOutcome
 import circles.app.AccessSummary
+import circles.app.DeviceLink
+import circles.app.DeviceSummary
 import circles.app.ProposalSummary
 import circles.app.StewardInfo
 import circles.app.StewardSettingsSummary
@@ -84,7 +86,7 @@ class ScreenTest {
         for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
         for (screen in Screen.subPages) assertFalse(screen in Screen.navigation, screen.name)
         assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size, Screen.navigation.size)
-        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle), Screen.newcomer)
+        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice), Screen.newcomer)
     }
 }
 
@@ -257,7 +259,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 3, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 3 + 4, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -775,6 +777,77 @@ class ShellViewTest {
         val steward = render(open(home(steward = true)).copy(screen = Screen.Settings))
         assertFalse("""$ATTR_ACTION="$ACTION_LEAVE"""" in steward)
         assertTrue("Step down on the Stewards page first" in steward)
+    }
+
+    private val deviceLink = DeviceLink(circle, me)
+    private val waiting = AppModel.AwaitingApproval(circle, "d".repeat(32) + ".AAAA.BBBB", "ab12 cd34 ef56 7890 1234")
+
+    @Test fun aDeviceLinkLeadsToTheAddThisDevicePage() {
+        val seen = reduce(AppState(model = AppModel.NoIdentity), AppAction.DeviceLinkSeen(deviceLink))
+        assertEquals(Screen.PairDevice, seen.screen)
+        assertEquals(deviceLink, seen.pendingDevice)
+        // It is read before the app reports its first model (Loading) and must survive that.
+        val early = reduce(AppState(), AppAction.DeviceLinkSeen(deviceLink))
+        assertEquals(Screen.PairDevice, reduce(early, AppAction.ModelChanged(AppModel.NoIdentity)).screen)
+        assertEquals(deviceLink, reduce(early, AppAction.ModelChanged(AppModel.Loading)).pendingDevice)
+        assertNull(reduce(seen, AppAction.ModelChanged(AppModel.Locked(circle))).pendingDevice)
+    }
+
+    @Test fun aWaitingDeviceSeesOnlyItsOwnPage() {
+        val state = AppState(model = waiting)
+        for (screen in Screen.entries) assertEquals(Screen.PairDevice, reduce(state, AppAction.Navigate(screen)).screen, screen.name)
+        assertEquals(Screen.PairDevice, reduce(AppState(model = AppModel.NoIdentity), AppAction.ModelChanged(waiting)).screen)
+        assertEquals(Screen.Home, reduce(state, AppAction.ModelChanged(AppModel.Open(home()))).screen, "once added it opens the circle")
+    }
+
+    @Test fun thePairPageAsksForAPassphraseOnlyWhenALinkWasOpenedAndHasNoStartOption() {
+        val without = newcomer(Screen.PairDevice)
+        assertFalse("""id="$FORM_PAIR"""" in without)
+        assertTrue("open the link shown on your other device" in without)
+        val withLink = render(AppState(screen = Screen.PairDevice, model = AppModel.NoIdentity, pendingDevice = deviceLink))
+        assertTrue("""id="$FORM_PAIR"""" in withLink)
+        assertTrue("""$ATTR_MIN="12"""" in withLink && "new-password" in withLink)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(withLink)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertFalse("Start a circle" in withLink)
+    }
+
+    @Test fun aWaitingDeviceShowsItsCodeAndFingerprintAndCanCheckOrForgetItself() {
+        val html = render(AppState(screen = Screen.PairDevice, model = waiting))
+        assertTrue("""value="${waiting.code}"""" in html && "readonly" in html)
+        assertTrue("Device code: " in html)
+        assertTrue("Fingerprint: ab12 cd34 ef56 7890 1234" in html)
+        assertTrue("Waiting for your other device" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_CHECK_NOW"""" in html && """$ATTR_ACTION="$ACTION_COPY_FIELD"""" in html && """$ATTR_ACTION="$ACTION_ERASE"""" in html)
+        assertFalse("<nav" in html)
+        assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in html, "no header buttons before the device is added")
+    }
+
+    private fun settingsWith(devices: List<DeviceSummary>, origin: String = "https://circles.example") =
+        render(open(home().copy(myDevices = devices)).copy(screen = Screen.Settings, origin = origin))
+
+    @Test fun settingsListsMyDevicesAndOffersRemovalOnlyForTheOthers() {
+        val here = DeviceSummary(DeviceId("1".repeat(32)), isThisOne = true, name = null)
+        val phone = DeviceSummary(DeviceId("2".repeat(32)), isThisOne = false, name = "Phone")
+        val html = settingsWith(listOf(here, phone))
+        assertTrue("Unnamed device (this device)" in html)
+        assertTrue("Phone" in html)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_REMOVE_DEVICE"""").findAll(html).count())
+        assertTrue("""$ATTR_DEVICE_ID="${phone.device.v}"""" in html)
+        assertTrue(html.indexOf("<details") < html.indexOf(ACTION_REMOVE_DEVICE), "a second click is needed")
+        assertTrue("the circle's key is changed" in html)
+    }
+
+    @Test fun settingsShowsTheDeviceLinkAndTheAddDeviceForm() {
+        val html = settingsWith(emptyList())
+        assertTrue("""value="https://circles.example/#/device/${circle.v}/${me.v}"""" in html)
+        assertTrue("""id="$FORM_ADD_DEVICE"""" in html)
+        for (label in listOf("Link: ", "Device code: ", "Name of the device: ", "The fingerprint above matches the one on the new device: ")) assertTrue(label in html, label)
+        assertTrue("""id="$ID_DEVICE_PREVIEW"""" in html && """aria-live="polite"""" in html)
+        assertTrue("""type="checkbox"""" in html && "required" in html.substringAfter(FIELD_CHECKED))
+        assertTrue("""maxlength="40"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_ADD_DEVICE))?.value ?: error("no button")
+        assertTrue("hidden" in button)
     }
 
     @Test fun statusLineIsALiveRegion() {

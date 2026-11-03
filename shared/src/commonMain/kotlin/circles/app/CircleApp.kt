@@ -80,8 +80,6 @@ const val MAX_ITEM_DESCRIPTION_CHARS = 500
 
 /** How long a vouch made here lasts; the circle's rules cap it too (ADR 0042). */
 const val VOUCH_DAYS = 180
-private const val FINGERPRINT_HEX_CHARS = 20
-private const val FINGERPRINT_GROUP = 4
 private const val DETAIL_DESCRIPTION = "description"
 
 /** An item as the Items screen shows it. [description] is null unless this device holds the item's key (owner or approved borrower). */
@@ -273,6 +271,8 @@ data class HomeData(
     val stewardCount: Int = 0,
     /** A steward is told when someone left or was removed and the key has not been rotated since (ADR 0044). */
     val needsRotation: Boolean = false,
+    /** This member's devices (ADR 0046). */
+    val myDevices: List<DeviceSummary> = emptyList(),
     val stewardList: List<StewardInfo> = emptyList(),
     val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
     val proposals: List<ProposalSummary> = emptyList(),
@@ -282,6 +282,28 @@ data class HomeData(
     val autoLockMinutes: Int = circles.keys.DEFAULT_IDLE_LOCK_MINUTES,
 )
 
+/** One of this member's devices, as Settings lists it. [name] is what was typed when it was added, if anything. */
+data class DeviceSummary(val device: DeviceId, val isThisOne: Boolean, val name: String?)
+
+sealed interface AddDeviceResult {
+    data class Added(val keysWrapped: Int, val itemsShared: Int) : AddDeviceResult
+    data object BadCode : AddDeviceResult
+    data object AlreadyKnown : AddDeviceResult
+    data object NameTooLong : AddDeviceResult
+    data object NotLetInYet : AddDeviceResult
+    data object NotAllowed : AddDeviceResult
+}
+
+sealed interface DeviceRemoval {
+    data object Removed : DeviceRemoval
+    data object NotAllowed : DeviceRemoval
+}
+
+/** The code pasted on an existing device, as it will be shown for checking. */
+data class DevicePreview(val device: DeviceId, val fingerprint: String)
+
+const val MAX_DEVICE_NAME_CHARS = 40
+
 sealed interface AppModel {
     data object Loading : AppModel
 
@@ -289,6 +311,9 @@ sealed interface AppModel {
     data object NoIdentity : AppModel
 
     data class Locked(val circle: CircleId?) : AppModel
+
+    /** This browser has an identity for a member who has not added it yet: it shows its code and waits (ADR 0046). */
+    data class AwaitingApproval(val circle: CircleId, val code: String, val fingerprint: String) : AppModel
 
     data class Open(val home: HomeData) : AppModel
 }
@@ -328,7 +353,7 @@ class CircleApp(
 
     private var session: Session? = null
 
-    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler, val hints: HintListener?)
+    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler, val hints: HintListener?, val pairing: Boolean)
 
     suspend fun open() {
         vault.open()
@@ -450,6 +475,79 @@ class CircleApp(
         }
         erase()
         return LeaveResult.Left
+    }
+
+    /** A new browser on this member's account: makes its own keys for [link]'s member and waits to be added (ADR 0046). */
+    suspend fun startOnNewDevice(link: DeviceLink, passphrase: String): StartResult {
+        val identity = when (val created = vault.create(passphrase, link.member)) {
+            is CreateResult.Created -> created.identity
+            is CreateResult.PassphraseTooShort -> return StartResult.PassphraseTooShort(created.minimum)
+            CreateResult.AlreadyHasIdentity -> return StartResult.AlreadyHasIdentity
+        }
+        keyStore.load()?.let { keyStore.save(it.copy(circle = link.circle.v, pairing = true)) }
+        activate(identity, link.circle)
+        refresh()
+        return StartResult.Started(link.circle)
+    }
+
+    /** The link an existing device shows for a new browser to open (public ids only). Null while locked. */
+    fun deviceLink(origin: String): String? = session?.let { DeviceLink(it.circle, it.identity.member).format(origin) }
+
+    /** What a pasted device code names, for the member to compare with the other screen; null if it is not a device code. */
+    fun previewDeviceCode(text: String): DevicePreview? =
+        DeviceCode.parse(text)?.let { DevicePreview(it.device, Fingerprint.of(crypto, it.signPub)) }
+
+    /**
+     * Adds the device named by [codeText] to this member (ADR 0046): `device.add` with its name sealed, a wrap of every circle
+     * key this device holds, and a wrap of the key of each item this member owns, all in one batch.
+     */
+    suspend fun addDevice(codeText: String, name: String): AddDeviceResult {
+        val s = session ?: return AddDeviceResult.NotAllowed
+        val code = DeviceCode.parse(codeText) ?: return AddDeviceResult.BadCode
+        if (name.trim().length > MAX_DEVICE_NAME_CHARS) return AddDeviceResult.NameTooLong
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return AddDeviceResult.NotLetInYet
+        if (view.devices.containsKey(code.device)) return AddDeviceResult.AlreadyKnown
+        val me = s.identity.member
+        val registration = circles.event.DeviceRegistration(me, code.device, code.signPub, code.boxPub)
+        val day = today()
+        s.author.keyRing = view.keys
+        val events = mutableListOf(s.author.deviceAdd(s.circle, registration, day, name.trim().ifEmpty { null }))
+        var wrapped = 0
+        for (epoch in FIRST_EPOCH..view.keys.latestEpoch) {
+            val key = view.keys[epoch] ?: continue
+            events += s.author.keyWrap(s.circle, registration, epoch, key, day)
+            wrapped++
+        }
+        var shared = 0
+        for (item in view.market.items.values.filter { it.owner == me && !it.retired }) {
+            val itemKey = view.market.itemKeys[item.item to item.detailKeyId] ?: continue
+            events += s.author.itemUpsert(s.circle, day, item.item, item.name, item.itemClass, item.detailKeyId, itemKey, listOf(registration), item.minTier)
+            shared++
+        }
+        events.forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return AddDeviceResult.Added(wrapped, shared)
+    }
+
+    /** Removes one of this member's other devices; a steward also changes the circle key in the same batch (ADR 0046, 0044). */
+    suspend fun removeDevice(device: DeviceId): DeviceRemoval {
+        val s = session ?: return DeviceRemoval.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val me = s.identity.member
+        val target = view.devices[device]?.takeIf { !it.revoked && it.registration.member == me && device != s.identity.device } ?: return DeviceRemoval.NotAllowed
+        val day = today()
+        s.author.keyRing = view.keys
+        val events = mutableListOf(s.author.deviceRevoke(s.circle, target.registration.device, day))
+        if (me in view.stewards && view.currentEpoch >= FIRST_EPOCH) {
+            val remaining = view.devices.values.filter { !it.revoked && it.registration.device != device }.map { it.registration }
+            events += s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day)
+        }
+        events.forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return DeviceRemoval.Removed
     }
 
     /** Syncs now and waits for the result (a "sync now" button, tests). Null while locked. */
@@ -769,6 +867,14 @@ class CircleApp(
         val waiting = if (view.currentEpoch < FIRST_EPOCH) emptyList() else view.devices.values
             .filter { !it.revoked && (it.registration.device to view.currentEpoch) !in wrapped }
             .map { WaitingDevice(it.registration.device, it.registration.member) }
+        if (s.pairing && !view.devices.containsKey(s.identity.device)) {
+            // Not registered yet: a new device of an existing member waits here until that member adds it (ADR 0046).
+            val registration = s.identity.registration
+            mutableModel.value = AppModel.AwaitingApproval(
+                s.circle, DeviceCode(registration.device, registration.signPub, registration.boxPub).format(), Fingerprint.of(crypto, registration.signPub),
+            )
+            return
+        }
         val cfg = StandingRules.defaultConfig(s.circle)
         val now = today()
         val loansNow = view.market.loans.values
@@ -795,6 +901,9 @@ class CircleApp(
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
+                myDevices = view.devices.values.filter { !it.revoked && it.registration.member == me }.map { state ->
+                    DeviceSummary(state.registration.device, state.registration.device == s.identity.device, deviceNames(view)[state.registration.device])
+                },
                 stewardList = view.stewardSince.map { (member, since) ->
                     val coolOffEnds = if (since == circles.event.FOUNDING_STEWARD_DAY || view.stewardSettings.quorum == 1) null else since + DEFAULT_STEWARD_COOL_OFF_DAYS
                     StewardInfo(member, member == me, since.takeIf { it != circles.event.FOUNDING_STEWARD_DAY }, coolOffEnds?.takeIf { it > now })
@@ -910,9 +1019,18 @@ class CircleApp(
         if (next.rank <= Tier.NEIGHBOUR.rank) add("Or get ${cfg.vouchesForNeighbour} neighbours to vouch for you (on the Members page).")
     }
 
+    /** The names typed when devices were added: from the sealed label of each `device.add`. */
+    private fun deviceNames(view: circles.event.CircleView): Map<DeviceId, String> = buildMap {
+        for (event in view.events) {
+            if (event.envelope.type != EventType.DEVICE_ADD.wire) continue
+            val device = (circles.event.PublicParts.registration(event.envelope.public) as? Parsed.Ok)?.value?.device ?: continue
+            val label = ((event.payload as? Parsed.Ok)?.value?.get(circles.event.PublicParts.LABEL) as? CborText)?.value ?: continue
+            put(device, label)
+        }
+    }
+
     /** Twenty hex characters of the key's hash in groups of four, easy to read out loud. */
-    private fun fingerprint(signPub: circles.encoding.ByteString): String =
-        crypto.hash256(signPub.toByteArray()).toHex().take(FINGERPRINT_HEX_CHARS).chunked(FINGERPRINT_GROUP).joinToString(" ")
+    private fun fingerprint(signPub: circles.encoding.ByteString): String = Fingerprint.of(crypto, signPub)
 
     // ---- internals ----
 
@@ -933,7 +1051,7 @@ class CircleApp(
             }
         }
         val author = EventAuthor(crypto, identity, cipher, firstCounter = nextCounter(identity, circle))
-        return Session(identity, circle, author, engine, scheduler, hints).also {
+        return Session(identity, circle, author, engine, scheduler, hints, keyStore.load()?.pairing == true).also {
             session = it
             scheduler.start()
         }

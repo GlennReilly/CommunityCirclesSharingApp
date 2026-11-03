@@ -33,7 +33,7 @@ class CircleView(
     val stewardSince: Map<MemberId, Int> = emptyMap(),
     /** Steward proposals that are valid but have not yet reached their quorum (ADR 0027), in log order. */
     val pendingStewardVotes: List<PendingStewardVote> = emptyList(),
-    /** Members who left or were removed and whose departure no `key.rotate` has followed yet (ADR 0044). */
+    /** Members who lost a device or left, with no `key.rotate` since (ADR 0044, 0046). */
     val unrotatedRemovals: Set<MemberId> = emptySet(),
 )
 
@@ -120,11 +120,9 @@ class CircleFold(
         private val revokedAt = mutableMapOf<DeviceId, Long>()
         private var lastRotatePosition = -1L
 
-        /** Members whose every device is revoked, the latest of those revocations coming after the last key rotation. */
+        /** Members with a device revoked after the last key rotation (a whole member leaving, or just one device lost; ADR 0044, 0046). */
         fun unrotatedRemovals(): Set<MemberId> =
-            devices.values.groupBy { it.registration.member }
-                .filter { (_, own) -> own.all { it.revoked } && own.maxOf { revokedAt[it.registration.device] ?: -1L } > lastRotatePosition }
-                .keys
+            devices.values.filter { it.revoked && (revokedAt[it.registration.device] ?: -1L) > lastRotatePosition }.map { it.registration.member }.toSet()
 
         val invites = mutableMapOf<EventId, Pair<InviteTerms, Int>>()
         var keys: KeyRing = KeyRing.EMPTY

@@ -49,7 +49,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0043](0043-confirmation-disputes-and-resolution.md) | Owner confirmation, disputes and their resolution (M4, second slice) | Accepted |
 | [0044](0044-removing-members-and-rotating-the-circle-key.md) | Removing a member and rotating the circle key | Accepted |
 | [0045](0045-circle-key-commitments.md) | Circle key commitments | Accepted |
-| [0046](0046-adding-another-device.md) | Adding another device | Proposed |
+| [0046](0046-adding-another-device.md) | Adding another device | Accepted |
 
 ## Open decisions still to record
 
