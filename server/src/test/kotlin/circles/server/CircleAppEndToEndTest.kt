@@ -5,6 +5,11 @@ import circles.app.CircleApp
 import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.ItemResult
+import circles.app.LoanResult
+import circles.app.LoanRole
+import circles.event.LoanStatus
+import circles.event.MAX_LOAN_DAYS
+import circles.event.ReturnOutcome
 import circles.app.MAX_ITEM_DESCRIPTION_CHARS
 import circles.app.StartResult
 import circles.crypto.JvmCrypto
@@ -225,5 +230,82 @@ class CircleAppEndToEndTest {
         assertEquals(emptyList(), home(alice.app).items)
         assertEquals(emptyList(), home(bea.app).items)
         assertEquals(ItemResult.NotAllowed, alice.app.editItem(saved.item, "Back again", ItemClass.EVERYDAY, ""))
+    }
+
+    @Test
+    fun anItemIsBorrowedHandedOverAndReturned() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        val item = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back, ring first") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertNull(home(bea.app).items.single().description)
+
+        // Bad requests are refused before anything is queued.
+        assertEquals(LoanResult.BadDates(MAX_LOAN_DAYS), bea.app.requestLoan(item, TODAY - 1, TODAY + 3, ""))
+        assertEquals(LoanResult.BadDates(MAX_LOAN_DAYS), bea.app.requestLoan(item, TODAY + 5, TODAY + 3, ""))
+        assertEquals(LoanResult.BadDates(MAX_LOAN_DAYS), bea.app.requestLoan(item, TODAY, TODAY + MAX_LOAN_DAYS + 1, ""))
+        assertEquals(LoanResult.NoteTooLong(256), bea.app.requestLoan(item, TODAY, TODAY + 1, "n".repeat(257)))
+        assertEquals(LoanResult.NotAllowed, alice.app.requestLoan(item, TODAY, TODAY + 1, ""), "not your own item")
+        assertEquals(0, home(bea.app).changesWaiting)
+
+        // Bea asks; Alice sees the request with the note, declines the first, and Bea asks again.
+        val declined = (bea.app.requestLoan(item, TODAY + 1, TODAY + 3, "for the fence") as LoanResult.Done).loan
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+        alice.app.syncOnce()
+        val request = home(alice.app).loans.single()
+        assertEquals(LoanRole.OWNER, request.role)
+        assertEquals(LoanStatus.REQUESTED, request.status)
+        assertEquals("for the fence", request.note)
+        assertEquals(LoanResult.NotAllowed, bea.app.respondToLoan(declined, approve = true, note = ""), "only the owner answers")
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(declined, approve = false, note = "away that week"))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(LoanStatus.DECLINED, home(bea.app).loans.single().status)
+        assertEquals(LoanResult.NotAllowed, alice.app.respondToLoan(declined, approve = true, note = ""), "already answered")
+        assertNull(home(bea.app).items.single().description)
+
+        val loan = (bea.app.requestLoan(item, TODAY + 1, TODAY + 3, "") as LoanResult.Done).loan
+        bea.app.syncOnce(); alice.app.syncOnce()
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(loan, approve = true, note = ""))
+        alice.app.syncOnce(); bea.app.syncOnce()
+
+        // Approval is what gives Bea the private details.
+        val approved = home(bea.app).loans.single { it.loan == loan }
+        assertEquals(LoanStatus.APPROVED, approved.status)
+        assertEquals("Garage at the back, ring first", approved.description)
+        assertEquals("Garage at the back, ring first", home(bea.app).items.single().description)
+
+        // Hand-over needs both people; one confirmation is not enough.
+        assertEquals(LoanResult.NotAllowed, bea.app.returnLoan(loan, ReturnOutcome.OK), "not active yet")
+        assertIs<LoanResult.Done>(bea.app.confirmHandover(loan))
+        assertEquals(LoanResult.NotAllowed, bea.app.confirmHandover(loan), "only once")
+        bea.app.syncOnce(); alice.app.syncOnce()
+        assertEquals(LoanStatus.APPROVED, home(alice.app).loans.single { it.loan == loan }.status)
+        assertTrue(home(alice.app).loans.single { it.loan == loan }.otherConfirmedHandover)
+        assertIs<LoanResult.Done>(alice.app.confirmHandover(loan))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(LoanStatus.ACTIVE, home(bea.app).loans.single { it.loan == loan }.status)
+
+        // Only the borrower reports the return, and reporting damage is accepted as it is.
+        assertEquals(LoanResult.NotAllowed, alice.app.returnLoan(loan, ReturnOutcome.OK))
+        assertIs<LoanResult.Done>(bea.app.returnLoan(loan, ReturnOutcome.DAMAGED_REPORTED))
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+        alice.app.syncOnce()
+        val returned = home(alice.app).loans.single { it.loan == loan }
+        assertEquals(LoanStatus.RETURNED, returned.status)
+        assertEquals(ReturnOutcome.DAMAGED_REPORTED, returned.outcome)
+        assertEquals(0, home(alice.app).refusedChanges)
+        assertEquals(0, home(bea.app).refusedChanges)
+
+        // The server never saw the dates, notes or outcomes in the clear.
+        val dump = server.rows("SELECT public, encrypted FROM events").joinToString { row -> row.joinToString { (it as? ByteArray)?.decodeToString().orEmpty() } }
+        assertFalse("fence" in dump || "away that week" in dump || "DAMAGED" in dump)
     }
 }

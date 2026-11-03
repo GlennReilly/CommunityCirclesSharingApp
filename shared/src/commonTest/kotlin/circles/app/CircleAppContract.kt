@@ -12,6 +12,7 @@ import circles.keys.KeyVault
 import circles.keys.PasswordHasher
 import circles.keys.UnlockResult
 import circles.policy.CircleId
+import circles.policy.ItemClass
 import circles.sync.ApiOutcome
 import circles.sync.InMemoryReplica
 import circles.sync.SyncApi
@@ -114,5 +115,20 @@ abstract class CircleAppContract {
         app.lock()
         runCurrent()
         assertIs<AppModel.Locked>(app.model.value)
+    }
+
+    @Test fun ownChangesShowAtOnceEvenWhenTheServerCannotBeReached() = runTest {
+        val (app, _, _) = fixture()
+        app.startCircle(PASSPHRASE)
+        val home = assertIs<AppModel.Open>(app.model.value).home
+        assertTrue(home.isSteward && home.canRead, "the founder is already a steward and can read, from the queued events")
+        assertEquals(1, home.members)
+        val saved = assertIs<ItemResult.Saved>(app.addItem("Ladder", ItemClass.EVERYDAY, "Garage"))
+        val after = assertIs<AppModel.Open>(app.model.value).home
+        assertEquals("Ladder", after.items.single().name)
+        assertEquals("Garage", after.items.single().description)
+        assertEquals(4, after.changesWaiting)
+        assertIs<ItemResult.Saved>(app.retireItem(saved.item))
+        assertEquals(emptyList(), assertIs<AppModel.Open>(app.model.value).home.items)
     }
 }

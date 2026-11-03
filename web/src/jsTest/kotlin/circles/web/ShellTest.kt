@@ -3,6 +3,11 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.InviteLink
+import circles.app.LoanRole
+import circles.app.LoanSummary
+import circles.event.LoanId
+import circles.event.LoanStatus
+import circles.event.ReturnOutcome
 import circles.app.ItemSummary
 import circles.app.WaitingDevice
 import circles.encoding.ByteString
@@ -34,10 +39,16 @@ private fun home(
     waiting: List<WaitingDevice> = emptyList(),
     refused: Int = 0,
     items: List<ItemSummary> = emptyList(),
-) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items)
+    loans: List<LoanSummary> = emptyList(),
+) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759)
 
 private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVERYDAY, me, ownedByMe = true, description = "Garage at the back")
 private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null)
+
+private fun loan(
+    id: String, role: LoanRole, status: LoanStatus, mine: Boolean = false, theirs: Boolean = false, outcome: ReturnOutcome? = null,
+    description: String? = null, note: String? = null,
+) = LoanSummary(LoanId(id.repeat(32)), ladder.item, "Ladder", role, bea, 20_760, 20_762, status, mine, theirs, outcome, description, note)
 
 private val link = InviteLink(circle, EventId("e".repeat(64)), ByteString.of(ByteArray(32) { it.toByte() }))
 private fun open(home: HomeData = home()) = AppState(screen = Screen.Home, model = AppModel.Open(home))
@@ -117,6 +128,16 @@ class ReduceTest {
         assertEquals(Screen.EditItem, reduce(state, AppAction.Navigate(Screen.EditItem)).screen)
         assertEquals(Screen.AddItem, reduce(open(), AppAction.Navigate(Screen.AddItem)).screen)
         assertEquals(AppState(model = AppModel.NoIdentity), reduce(AppState(model = AppModel.NoIdentity), AppAction.EditItem(ladder.item)))
+    }
+
+    @Test fun askingToBorrowRemembersTheItemAndGoesToItsPage() {
+        val state = reduce(open(), AppAction.BorrowItem(drill.item))
+        assertEquals(drill.item, state.borrowing)
+        assertEquals(Screen.RequestLoan, state.screen)
+        assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.RequestLoan)).screen, "no item chosen, so back to the list")
+        assertEquals(Screen.RequestLoan, reduce(state, AppAction.Navigate(Screen.RequestLoan)).screen)
+        assertFalse(Screen.RequestLoan in Screen.navigation)
+        assertEquals(AppState(model = AppModel.Locked(circle)), reduce(AppState(model = AppModel.Locked(circle)), AppAction.BorrowItem(drill.item)))
     }
 
     @Test fun noticesAndMadeInvitesAreStoredAndCleared() {
@@ -207,6 +228,8 @@ class ShellViewTest {
             render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
             render(open().copy(newInvite = "https://x")),
             render(open().copy(screen = Screen.AddItem)),
+            render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item)),
+            borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
         )
         var labels = 0
         for (html in pages) {
@@ -215,7 +238,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8, labels)
+        assertEquals(8 + 3 + 1, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -340,7 +363,7 @@ class ShellViewTest {
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EDIT_ITEM"""").findAll(html).count())
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_RETIRE_ITEM"""").findAll(html).count())
         assertTrue("""$ATTR_ITEM="${ladder.item.v}"""" in html)
-        assertFalse("""$ATTR_ITEM="${drill.item.v}"""" in html)
+        // Someone else's item may be asked for, but is never offered for change or removal (the counts above are 1).
         assertEquals(1, Regex("Details:").findAll(html).count(), "someone else's item shows no details")
     }
 
@@ -378,6 +401,92 @@ class ShellViewTest {
         assertTrue("""href="#/items"""" in html)
         assertFalse("""href="#/items/add"""" in html.substringBefore("</nav>"))
         assertFalse("""href="#/items/edit"""" in html)
+    }
+
+    @Test fun otherPeoplesItemsOfferToBorrowAndYourOwnDoNot() {
+        val html = items(home(items = listOf(ladder, drill)))
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_BORROW_ITEM"""").findAll(html).count())
+        assertTrue("""$ATTR_ITEM="${drill.item.v}"""" in html)
+    }
+
+    @Test fun theRequestPageHasTwoDatesAndANoteAndAHiddenButton() {
+        val html = render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item))
+        assertTrue("""id="$FORM_LOAN_REQUEST"""" in html)
+        assertTrue("You are asking to borrow: Drill" in html)
+        assertEquals(2, Regex("""type="date"""").findAll(html).count())
+        assertTrue("""min="2026-11-02"""" in html, "earliest date is today")
+        assertTrue("""for="$FIELD_FROM"""" in html && """for="$FIELD_TO"""" in html && """for="$FIELD_NOTE"""" in html)
+        assertTrue("""maxlength="256"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("""$ATTR_MIN="10"""" in html)
+    }
+
+    @Test fun theRequestPageForAnItemThatIsGoneSaysSo() {
+        val html = render(open().copy(screen = Screen.RequestLoan, borrowing = drill.item))
+        assertTrue("no longer on the list" in html)
+        assertFalse("""id="$FORM_LOAN_REQUEST"""" in html)
+    }
+
+    @Test fun theBorrowPageSaysWhenYouAreNotLetInYetAndWhenThereAreNoLoans() {
+        assertTrue("A steward needs to let you in" in render(open(home(canRead = false)).copy(screen = Screen.Borrow)))
+        val empty = render(open(home()).copy(screen = Screen.Borrow))
+        assertTrue("No loans yet." in empty)
+        assertTrue("""href="${Screen.Items.fragment}"""" in empty)
+    }
+
+    private fun borrow(vararg loans: LoanSummary) = render(open(home(loans = loans.toList())).copy(screen = Screen.Borrow))
+
+    @Test fun anOwnerSeesRequestsWithTheNoteAndCanApproveOrDecline() {
+        val html = borrow(loan("a", LoanRole.OWNER, LoanStatus.REQUESTED, note = "for the fence"))
+        assertTrue("Requests to answer" in html)
+        assertTrue("Note: for the fence" in html)
+        assertTrue("2026-11-03 to 2026-11-05" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_APPROVE_LOAN"""" in html && """$ATTR_ACTION="$ACTION_DECLINE_LOAN"""" in html)
+        assertTrue("""$ATTR_LOAN="${"a".repeat(32)}"""" in html)
+    }
+
+    @Test fun aBorrowerWaitingForAnAnswerHasNoButtons() {
+        val html = borrow(loan("b", LoanRole.BORROWER, LoanStatus.REQUESTED))
+        assertTrue("Waiting for an answer" in html)
+        assertFalse("<button" in html.substringAfter("<main"))
+    }
+
+    @Test fun handoverNeedsBothPeopleAndTheBorrowerSeesTheDetailsOnceApproved() {
+        val first = borrow(loan("c", LoanRole.BORROWER, LoanStatus.APPROVED, description = "Garage at the back"))
+        assertTrue("Ready to hand over" in first)
+        assertTrue("Details: Garage at the back" in first)
+        assertTrue("""$ATTR_ACTION="$ACTION_HANDOVER"""" in first)
+        val waiting = borrow(loan("c", LoanRole.BORROWER, LoanStatus.APPROVED, mine = true))
+        assertTrue("You have confirmed" in waiting)
+        assertFalse(ACTION_HANDOVER in waiting)
+        val theirTurn = borrow(loan("c", LoanRole.OWNER, LoanStatus.APPROVED, theirs = true))
+        assertTrue("has confirmed" in theirTurn)
+        assertTrue("""$ATTR_ACTION="$ACTION_HANDOVER"""" in theirTurn)
+        assertFalse("Details:" in theirTurn, "the owner's own details are on the Items page")
+    }
+
+    @Test fun onlyTheBorrowerGetsTheReturnFormAndItNamesNoPenaltyForTellingTheTruth() {
+        val mine = borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE, description = "Garage"))
+        assertTrue("""id="$FORM_RETURN_PREFIX${"d".repeat(32)}"""" in mine)
+        for (outcome in ReturnOutcome.entries) assertTrue("""value="${outcome.name}"""" in mine, outcome.name)
+        assertTrue("no penalty for telling" in mine)
+        assertTrue("How did it go: " in mine)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(mine)?.value ?: error("no button")
+        assertFalse("hidden" in button, "a choice is already selected, so the button shows")
+        val theirs = borrow(loan("d", LoanRole.OWNER, LoanStatus.ACTIVE))
+        assertFalse(FORM_RETURN_PREFIX in theirs)
+        assertTrue("They will report it back" in theirs)
+    }
+
+    @Test fun finishedLoansShowHowTheyEnded() {
+        val html = borrow(
+            loan("e", LoanRole.BORROWER, LoanStatus.DECLINED),
+            loan("f", LoanRole.BORROWER, LoanStatus.RETURNED, outcome = ReturnOutcome.DAMAGED_REPORTED),
+        )
+        assertTrue("Finished" in html)
+        assertTrue("Declined." in html)
+        assertTrue("damage reported" in html)
     }
 
     @Test fun statusLineIsALiveRegion() {

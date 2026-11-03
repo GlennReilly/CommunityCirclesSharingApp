@@ -3,7 +3,13 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
+import circles.app.CalendarDay
 import circles.app.ItemSummary
+import circles.app.LoanRole
+import circles.app.LoanSummary
+import circles.event.LoanStatus
+import circles.event.MAX_LOAN_NOTE_CHARS
+import circles.event.ReturnOutcome
 import circles.app.MAX_ITEM_DESCRIPTION_CHARS
 import circles.event.MAX_ITEM_NAME_CHARS
 import circles.policy.ItemClass
@@ -21,6 +27,7 @@ import kotlinx.html.div
 import kotlinx.html.form
 import kotlinx.html.h1
 import kotlinx.html.h2
+import kotlinx.html.h3
 import kotlinx.html.header
 import kotlinx.html.id
 import kotlinx.html.input
@@ -62,6 +69,18 @@ const val FIELD_KIND = "kind"
 const val FIELD_DETAILS = "details"
 const val ATTR_ITEM = "data-item"
 const val ATTR_MIN = "data-min"
+const val ATTR_LOAN = "data-loan"
+const val ACTION_BORROW_ITEM = "borrow-item"
+const val ACTION_APPROVE_LOAN = "approve-loan"
+const val ACTION_DECLINE_LOAN = "decline-loan"
+const val ACTION_HANDOVER = "handover-loan"
+const val FORM_LOAN_REQUEST = "loan-request-form"
+const val FORM_RETURN_PREFIX = "return-form-"
+const val FIELD_FROM = "from"
+const val FIELD_TO = "to"
+const val FIELD_NOTE = "note"
+const val FIELD_OUTCOME = "outcome"
+private const val ISO_DATE_CHARS = 10
 const val ATTR_ACTION = "data-action"
 const val ATTR_DEVICE = "data-device"
 private const val ID_INVITE_OUTPUT = "invite-output"
@@ -138,6 +157,8 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
+                Screen.Borrow -> borrow(model.home)
+                Screen.RequestLoan -> requestForm(model.home.items.firstOrNull { it.item == state.borrowing }, model.home)
                 else -> comingSoon(state.screen)
             }
         }
@@ -364,6 +385,13 @@ private fun FlowContent.items(home: HomeData) {
                 p { +itemClassLabel(item.itemClass).substringBefore(":") }
                 p { +(if (item.ownedByMe) "Yours" else "Shared by member ${item.owner.v.take(MEMBER_SHORT_CHARS)}") }
                 item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
+                if (!item.ownedByMe) {
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
+                        attributes[ATTR_ITEM] = item.item.v
+                        +"Ask to borrow"
+                    }
+                }
                 if (item.ownedByMe) {
                     button(type = ButtonType.button) {
                         attributes[ATTR_ACTION] = ACTION_EDIT_ITEM
@@ -437,4 +465,170 @@ private fun FlowContent.itemForm(existing: ItemSummary?) {
     p {
         a(href = Screen.Items.fragment) { +"Back to items" }
     }
+}
+
+private fun outcomeLabel(outcome: ReturnOutcome): String = when (outcome) {
+    ReturnOutcome.OK -> "Returned, all good"
+    ReturnOutcome.LATE -> "Returned late"
+    ReturnOutcome.DAMAGED_REPORTED -> "Returned, damage reported (no penalty for telling)"
+    ReturnOutcome.LOST_REPORTED -> "Lost, reported (no penalty for telling)"
+}
+
+private fun window(loan: LoanSummary): String = "${CalendarDay.format(loan.fromDay)} to ${CalendarDay.format(loan.toDay)}"
+
+private fun who(loan: LoanSummary): String = "member ${loan.other.v.take(MEMBER_SHORT_CHARS)}"
+
+private fun FlowContent.loanHeading(loan: LoanSummary) {
+    h3 { +loan.itemName }
+    p { +"${if (loan.role == LoanRole.OWNER) "Asked by" else "Owned by"} ${who(loan)}, ${window(loan)}" }
+    loan.note?.let { p { +"Note: $it" } }
+}
+
+private fun FlowContent.loanButton(action: String, loan: LoanSummary, text: String) {
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = action
+        attributes[ATTR_LOAN] = loan.loan.v
+        +text
+    }
+}
+
+/** Everything about loans, grouped by what needs doing next. */
+private fun FlowContent.borrow(home: HomeData) {
+    h1 { +Screen.Borrow.title }
+    if (!home.canRead) {
+        p {
+            role = "status"
+            +"A steward needs to let you in before you can borrow or lend."
+        }
+        return
+    }
+    if (home.loans.isEmpty()) {
+        p { +"No loans yet. " }
+        p { a(href = Screen.Items.fragment) { +"Find something on the Items page." } }
+        return
+    }
+    val toAnswer = home.loans.filter { it.role == LoanRole.OWNER && it.status == LoanStatus.REQUESTED }
+    val waiting = home.loans.filter { it.role == LoanRole.BORROWER && it.status == LoanStatus.REQUESTED }
+    val handovers = home.loans.filter { it.status == LoanStatus.APPROVED }
+    val out = home.loans.filter { it.status == LoanStatus.ACTIVE }
+    val finished = home.loans.filter { it.status == LoanStatus.RETURNED || it.status == LoanStatus.DECLINED }
+    if (toAnswer.isNotEmpty()) {
+        section {
+            h2 { +"Requests to answer" }
+            for (loan in toAnswer) {
+                div {
+                    loanHeading(loan)
+                    loanButton(ACTION_APPROVE_LOAN, loan, "Approve and share the details")
+                    loanButton(ACTION_DECLINE_LOAN, loan, "Decline")
+                }
+            }
+        }
+    }
+    if (handovers.isNotEmpty()) {
+        section {
+            h2 { +"Ready to hand over" }
+            for (loan in handovers) {
+                div {
+                    loanHeading(loan)
+                    loan.description?.takeIf { loan.role == LoanRole.BORROWER && it.isNotBlank() }?.let { p { +"Details: $it" } }
+                    if (loan.iConfirmedHandover) {
+                        p { +"You have confirmed. Waiting for ${who(loan)} to confirm too." }
+                    } else {
+                        if (loan.otherConfirmedHandover) p { +"${who(loan).replaceFirstChar { it.uppercase() }} has confirmed." }
+                        loanButton(ACTION_HANDOVER, loan, "We handed it over")
+                    }
+                }
+            }
+        }
+    }
+    if (out.isNotEmpty()) {
+        section {
+            h2 { +"Out now" }
+            for (loan in out) {
+                div {
+                    loanHeading(loan)
+                    if (loan.role == LoanRole.BORROWER) {
+                        loan.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
+                        form {
+                            id = FORM_RETURN_PREFIX + loan.loan.v
+                            attributes[ATTR_LOAN] = loan.loan.v
+                            label {
+                                attributes["for"] = "$FIELD_OUTCOME-${loan.loan.v}"
+                                +"How did it go: "
+                            }
+                            select {
+                                id = "$FIELD_OUTCOME-${loan.loan.v}"
+                                name = FIELD_OUTCOME
+                                for (outcome in ReturnOutcome.entries) {
+                                    option {
+                                        value = outcome.name
+                                        +outcomeLabel(outcome)
+                                    }
+                                }
+                            }
+                            formSubmit("Report it back", ready = true)
+                        }
+                    } else {
+                        p { +"With ${who(loan)}. They will report it back." }
+                    }
+                }
+            }
+        }
+    }
+    if (waiting.isNotEmpty()) {
+        section {
+            h2 { +"Waiting for an answer" }
+            for (loan in waiting) div { loanHeading(loan) }
+        }
+    }
+    if (finished.isNotEmpty()) {
+        section {
+            h2 { +"Finished" }
+            for (loan in finished) {
+                div {
+                    loanHeading(loan)
+                    p {
+                        +(if (loan.status == LoanStatus.DECLINED) "Declined." else loan.outcome?.let { outcomeLabel(it) + "." } ?: "Returned.")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The page for asking to borrow one item. */
+private fun FlowContent.requestForm(item: ItemSummary?, home: HomeData) {
+    h1 { +Screen.RequestLoan.title }
+    if (item == null) {
+        p { +"That item is no longer on the list." }
+        p { a(href = Screen.Items.fragment) { +"Back to items" } }
+        return
+    }
+    p { +"You are asking to borrow: ${item.name}" }
+    form {
+        id = FORM_LOAN_REQUEST
+        for ((field, text) in listOf(FIELD_FROM to "From: ", FIELD_TO to "To: ")) {
+            label {
+                attributes["for"] = field
+                +text
+            }
+            input(type = InputType.date, name = field) {
+                id = field
+                required = true
+                attributes["min"] = CalendarDay.format(home.today)
+                attributes[ATTR_MIN] = ISO_DATE_CHARS.toString()
+            }
+        }
+        label {
+            attributes["for"] = FIELD_NOTE
+            +"Note for the owner: "
+        }
+        input(type = InputType.text, name = FIELD_NOTE) {
+            id = FIELD_NOTE
+            attributes["maxlength"] = MAX_LOAN_NOTE_CHARS.toString()
+            attributes["autocomplete"] = "off"
+        }
+        formSubmit("Send request")
+    }
+    p { a(href = Screen.Items.fragment) { +"Back to items" } }
 }

@@ -39,6 +39,8 @@ data class LoanState(
     val ownerConfirmedHandover: Boolean,
     val borrowerConfirmedHandover: Boolean,
     val outcome: ReturnOutcome?,
+    /** The borrower's note on the request, if any. */
+    val requestNote: String? = null,
 )
 
 /** Items, loans and what this device can read of them. */
@@ -138,7 +140,7 @@ internal class MarketFold(
         if (item.owner == author) return "a member cannot borrow their own item"
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
-        loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null)
+        loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, v.note)
         return null
     }
 

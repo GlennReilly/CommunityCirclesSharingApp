@@ -3,7 +3,11 @@ package circles.web
 import circles.app.AppModel
 import circles.app.CircleApp
 import circles.app.InviteLink
+import circles.app.CalendarDay
 import circles.app.ItemResult
+import circles.app.LoanResult
+import circles.event.LoanId
+import circles.event.ReturnOutcome
 import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.StartResult
@@ -130,6 +134,12 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             else -> ""
         }
         scope.launch {
+            if (form.id.startsWith(FORM_RETURN_PREFIX)) {
+                val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
+                val outcome = ReturnOutcome.entries.firstOrNull { it.name == field(FIELD_OUTCOME) }
+                if (loan != null && outcome != null) reportLoan(circleApp.returnLoan(loan, outcome), "Thank you. Reported back.", null)
+                return@launch
+            }
             when (form.id) {
                 FORM_START -> report(circleApp.startCircle(field(FIELD_PASSPHRASE)))
                 FORM_JOIN -> state.pendingInvite?.let { report(circleApp.join(it, field(FIELD_PASSPHRASE))) }
@@ -140,6 +150,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 }
                 FORM_ITEM_ADD -> reportItem(circleApp.addItem(field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS)))
                 FORM_ITEM_EDIT -> state.editing?.let { reportItem(circleApp.editItem(it, field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS))) }
+                FORM_LOAN_REQUEST -> {
+                    val from = CalendarDay.parse(field(FIELD_FROM))
+                    val to = CalendarDay.parse(field(FIELD_TO))
+                    val item = state.borrowing
+                    if (from == null || to == null || item == null) dispatch(AppAction.Notice("Choose both dates."))
+                    else reportLoan(circleApp.requestLoan(item, from, to, field(FIELD_NOTE)), "Request sent.", Screen.Borrow)
+                }
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
@@ -165,6 +182,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    private fun reportLoan(result: LoanResult, doneText: String, thenGo: Screen?) {
+        when (result) {
+            is LoanResult.Done -> {
+                dispatch(AppAction.Notice(doneText))
+                thenGo?.let { window.location.hash = it.fragment }
+            }
+            is LoanResult.BadDates -> dispatch(AppAction.Notice("Choose dates from today on, with the end not before the start and at most ${result.maximumDays} days."))
+            is LoanResult.NoteTooLong -> dispatch(AppAction.Notice("Keep the note to ${result.maximum} characters or fewer."))
+            LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
+            LoanResult.NotAllowed -> dispatch(AppAction.Notice("That cannot be done right now. Try syncing, then again."))
+        }
+    }
+
     private fun report(result: StartResult) {
         when (result) {
             is StartResult.Started -> dispatch(AppAction.Notice(null))
@@ -181,6 +211,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()
+                ACTION_BORROW_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
+                    dispatch(AppAction.BorrowItem(ItemId(it)))
+                    window.location.hash = Screen.RequestLoan.fragment
+                }
+                ACTION_APPROVE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), true, "") ?: LoanResult.NotAllowed, "Approved. They can now read the details.", null) }
+                ACTION_DECLINE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), false, "") ?: LoanResult.NotAllowed, "Declined.", null) }
+                ACTION_HANDOVER -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmHandover(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed.", null) }
                 ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.EditItem(ItemId(it)))
                     window.location.hash = Screen.EditItem.fragment

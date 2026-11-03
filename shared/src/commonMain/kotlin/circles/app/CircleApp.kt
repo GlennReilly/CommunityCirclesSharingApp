@@ -12,7 +12,13 @@ import circles.event.FIRST_EPOCH
 import circles.event.InviteKey
 import circles.event.ItemKeys
 import circles.event.MAX_ITEM_NAME_CHARS
+import circles.event.LoanId
+import circles.event.LoanStatus
+import circles.event.MAX_LOAN_DAYS
+import circles.event.MAX_LOAN_NOTE_CHARS
+import circles.event.ReturnOutcome
 import circles.event.newDetailKeyId
+import circles.event.newLoanId
 import circles.event.newItemId
 import circles.encoding.CborMap
 import circles.encoding.CborText
@@ -61,6 +67,41 @@ data class ItemSummary(
     val description: String?,
 )
 
+enum class LoanRole { BORROWER, OWNER }
+
+/** A loan this member is part of, as the Borrow screen shows it. */
+data class LoanSummary(
+    val loan: LoanId,
+    val item: ItemId,
+    val itemName: String,
+    val role: LoanRole,
+    /** The other member: the owner when I borrow, the borrower when I lend. */
+    val other: MemberId,
+    val fromDay: Int,
+    val toDay: Int,
+    val status: LoanStatus,
+    val iConfirmedHandover: Boolean,
+    val otherConfirmedHandover: Boolean,
+    val outcome: ReturnOutcome?,
+    /** The item's private details, once this device can read them (the owner always; a borrower after approval). */
+    val description: String?,
+    val note: String? = null,
+)
+
+sealed interface LoanResult {
+    data class Done(val loan: LoanId) : LoanResult
+
+    /** Dates in the past, the end before the start, or a window longer than [MAX_LOAN_DAYS] days. */
+    data class BadDates(val maximumDays: Int) : LoanResult
+
+    data class NoteTooLong(val maximum: Int) : LoanResult
+
+    data object NotLetInYet : LoanResult
+
+    /** Your own item, a retired item, someone else's loan, or a step the loan is not ready for. */
+    data object NotAllowed : LoanResult
+}
+
 sealed interface ItemResult {
     data class Saved(val item: ItemId) : ItemResult
 
@@ -89,6 +130,10 @@ data class HomeData(
     val refusedChanges: Int,
     /** Items that are not retired, newest events last. */
     val items: List<ItemSummary> = emptyList(),
+    /** Loans this member borrows or lends, in the order they were asked for. */
+    val loans: List<LoanSummary> = emptyList(),
+    /** Today as a day number, for date pickers. */
+    val today: Int = 0,
 )
 
 sealed interface AppModel {
@@ -283,6 +328,74 @@ class CircleApp(
         return ItemResult.Saved(item)
     }
 
+    /** Asks to borrow someone else's item from [fromDay] to [toDay] (day numbers; see [CalendarDay]). */
+    suspend fun requestLoan(item: ItemId, fromDay: Int, toDay: Int, note: String): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        windowProblem(fromDay, toDay, mustStartTodayOrLater = true)?.let { return it }
+        if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
+        val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member } ?: return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        val loan = newLoanId(crypto)
+        s.engine.enqueue(s.circle, s.author.loanRequest(s.circle, today(), loan, state.item, fromDay, toDay, note.trim().ifEmpty { null }))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** The owner answers a request. Approving wraps the item's key to the borrower's devices, so they can read its details. */
+    suspend fun respondToLoan(loan: LoanId, approve: Boolean, note: String): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.loans[loan]?.takeIf { it.owner == s.identity.member && it.status == LoanStatus.REQUESTED } ?: return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        val reply = note.trim().ifEmpty { null }
+        val event = if (approve) {
+            val item = view.market.items[state.item] ?: return LoanResult.NotAllowed
+            val key = view.market.itemKeys[state.item to item.detailKeyId] ?: return LoanResult.NotAllowed
+            val borrowerDevices = view.devices.values.filter { !it.revoked && it.registration.member == state.borrower }.map { it.registration }
+            s.author.loanApprove(s.circle, today(), loan, state.item, state.fromDay, state.toDay, key, borrowerDevices, reply)
+        } else {
+            s.author.loanDecline(s.circle, today(), loan, state.fromDay, state.toDay, reply)
+        }
+        s.engine.enqueue(s.circle, event)
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** Either side confirms the item changed hands; the loan becomes active when both have. */
+    suspend fun confirmHandover(loan: LoanId): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.loans[loan]?.takeIf { it.status == LoanStatus.APPROVED } ?: return LoanResult.NotAllowed
+        val me = s.identity.member
+        val already = (me == state.owner && state.ownerConfirmedHandover) || (me == state.borrower && state.borrowerConfirmedHandover)
+        if ((me != state.owner && me != state.borrower) || already) return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.loanHandover(s.circle, today(), loan))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** The borrower reports the item back. Reporting damage or loss carries no penalty (spec 6). */
+    suspend fun returnLoan(loan: LoanId, outcome: ReturnOutcome): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        view.market.loans[loan]?.takeIf { it.borrower == s.identity.member && it.status == LoanStatus.ACTIVE } ?: return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.loanReturn(s.circle, today(), loan, outcome))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    private fun windowProblem(fromDay: Int, toDay: Int, mustStartTodayOrLater: Boolean): LoanResult.BadDates? =
+        if (fromDay > toDay || toDay - fromDay > MAX_LOAN_DAYS || (mustStartTodayOrLater && fromDay < today())) LoanResult.BadDates(MAX_LOAN_DAYS) else null
+
     private fun checkFields(name: String, description: String): ItemResult? = when {
         name.isBlank() || name.trim().length > MAX_ITEM_NAME_CHARS -> ItemResult.BadName
         description.trim().length > MAX_ITEM_DESCRIPTION_CHARS -> ItemResult.DescriptionTooLong(MAX_ITEM_DESCRIPTION_CHARS)
@@ -307,9 +420,10 @@ class CircleApp(
         val s = session ?: return
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         s.author.keyRing = view.keys
-        val wrapped = replica.entries(s.circle).mapNotNull { entry ->
-            if (EventType.fromWire(entry.envelope.type) != EventType.KEY_WRAP) null
-            else (CircleKeys.keyWrap(entry.envelope.public) as? Parsed.Ok)?.value?.let { it.device to it.epoch }
+        // Wraps still in the outbox count, so a steward's list updates the moment they let someone in.
+        val wrapped = (replica.entries(s.circle).map { it.envelope } + replica.outbox(s.circle)).mapNotNull { envelope ->
+            if (EventType.fromWire(envelope.type) != EventType.KEY_WRAP) null
+            else (CircleKeys.keyWrap(envelope.public) as? Parsed.Ok)?.value?.let { it.device to it.epoch }
         }.toSet()
         val waiting = if (view.currentEpoch < FIRST_EPOCH) emptyList() else view.devices.values
             .filter { !it.revoked && (it.registration.device to view.currentEpoch) !in wrapped }
@@ -324,6 +438,26 @@ class CircleApp(
                 waiting = waiting,
                 changesWaiting = replica.outbox(s.circle).size,
                 refusedChanges = replica.refused(s.circle).size,
+                today = today(),
+                loans = view.market.loans.values.filter { it.owner == s.identity.member || it.borrower == s.identity.member }.map { loan ->
+                    val item = view.market.items[loan.item]
+                    val iAmOwner = loan.owner == s.identity.member
+                    LoanSummary(
+                        loan = loan.loan,
+                        item = loan.item,
+                        itemName = item?.name.orEmpty(),
+                        role = if (iAmOwner) LoanRole.OWNER else LoanRole.BORROWER,
+                        other = if (iAmOwner) loan.borrower else loan.owner,
+                        fromDay = loan.fromDay,
+                        toDay = loan.toDay,
+                        status = loan.status,
+                        iConfirmedHandover = if (iAmOwner) loan.ownerConfirmedHandover else loan.borrowerConfirmedHandover,
+                        otherConfirmedHandover = if (iAmOwner) loan.borrowerConfirmedHandover else loan.ownerConfirmedHandover,
+                        outcome = loan.outcome,
+                        note = loan.requestNote,
+                        description = ((view.market.details[loan.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
+                    )
+                },
                 items = view.market.items.values.filter { !it.retired }.map { state ->
                     ItemSummary(
                         item = state.item,
