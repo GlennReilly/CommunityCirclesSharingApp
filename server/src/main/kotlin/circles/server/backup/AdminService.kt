@@ -73,7 +73,6 @@ class AdminService(
     private val clock: Clock,
     private val exporter: CircleExporter,
     private val importer: CircleImporter,
-    private val creationAllowed: Boolean,
     private val tempDir: Path,
     private val nonces: NonceMemory = NonceMemory(clock),
 ) {
@@ -94,13 +93,13 @@ class AdminService(
         }
     }
 
-    fun import(header: String?, path: String, body: ByteArray): AdminImport {
+    fun import(header: String?, path: String, body: ByteArray, importToken: String? = null): AdminImport {
         val credentials = AdminAuth.parse(header)?.takeIf { fresh(it) } ?: return AdminImport.Unauthorized
         if (!importing.compareAndSet(false, true)) return AdminImport.Busy
         val file = Files.createTempFile(tempDir, ".admin-import-", ".zip")
         try {
             Files.write(file, body)
-            return ZipExportSource(file).use { source -> importFrom(credentials, path, body, source) }
+            return ZipExportSource(file).use { source -> importFrom(credentials, path, body, source, importToken) }
         } catch (_: java.util.zip.ZipException) {
             return AdminImport.Unauthorized // not a zip, so there is no key to check the signature against
         } finally {
@@ -109,7 +108,7 @@ class AdminService(
         }
     }
 
-    private fun importFrom(credentials: AdminCredentials, path: String, body: ByteArray, source: ZipExportSource): AdminImport {
+    private fun importFrom(credentials: AdminCredentials, path: String, body: ByteArray, source: ZipExportSource, importToken: String?): AdminImport {
         // The host may not know this circle, so the signing key is looked up in the file's own registrations.
         val signPub = registrationIn(source, credentials.device)?.signPub ?: return AdminImport.Unauthorized
         if (!AdminAuth.verify(crypto, credentials, "POST", path, body, signPub) || !nonces.firstUse(credentials.nonce)) return AdminImport.Unauthorized
@@ -123,14 +122,20 @@ class AdminService(
         val circle = CircleId(manifest.circle)
         if (store.transaction { it.circleExists(circle) }) {
             if (!store.transaction { it.isSteward(circle, device!!.registration.member) }) return AdminImport.Forbidden("the signing device is not a steward of this circle on this host")
-        } else if (!creationAllowed) {
-            return AdminImport.Forbidden("this host does not accept new circles")
+        } else if (!tokenAccepted(importToken, circle)) {
+            return AdminImport.Forbidden(NEEDS_TOKEN)
         }
         return when (val result = importer.import(source, report)) {
             is ImportResult.Done -> AdminImport.Done(ImportSummary(result.report.eventsAccepted, result.report.eventsAlready, result.report.blobsStored, result.report.blobsAlready))
             is ImportResult.Refused -> AdminImport.Invalid(result.problems)
             is ImportResult.Stopped -> AdminImport.Invalid(result.problems)
         }
+    }
+
+    /** ADR 0034: a new circle needs the host operator's single-use token, which is used up here, just before the import. */
+    private fun tokenAccepted(token: String?, circle: CircleId): Boolean {
+        val raw = token?.let { ByteString.fromBase64Url(it) } ?: return false
+        return store.transaction { it.consumeImportToken(crypto.hash256(raw.toByteArray()), circle, clock.millis()) }
     }
 
     private fun fresh(credentials: AdminCredentials): Boolean =
@@ -160,6 +165,7 @@ class AdminService(
     }
 
     private companion object {
+        const val NEEDS_TOKEN = "a circle this host does not have yet needs an import token from the host operator (circles-server import-token)"
         val REGISTERING = setOf(EventType.CIRCLE_CREATE.wire, EventType.MEMBER_JOIN.wire, EventType.DEVICE_ADD.wire)
     }
 }

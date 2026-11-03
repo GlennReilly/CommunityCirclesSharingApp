@@ -29,9 +29,9 @@ class MigratorTest {
         val migrator = Migrator(connection)
         assertEquals(SchemaState.Empty, migrator.state())
         assertEquals(0, migrator.currentVersion())
-        assertEquals(listOf(1, 2, 3, 4, 5), migrator.migrate())
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), migrator.migrate())
         assertEquals(SchemaState.Current, migrator.state())
-        assertEquals(5, migrator.currentVersion())
+        assertEquals(6, migrator.currentVersion())
     }
 
     @Test
@@ -53,7 +53,7 @@ class MigratorTest {
         val migrator = Migrator(connection)
         migrator.migrate()
         assertEquals(emptyList(), migrator.migrate())
-        assertEquals(5, migrator.currentVersion())
+        assertEquals(6, migrator.currentVersion())
     }
 
     @Test
@@ -102,7 +102,7 @@ class MigratorTest {
         Database.openFile(dir).use { file ->
             assertTrue(dir.resolve(Database.FILE_NAME).exists())
             file.createStatement().use { it.executeQuery("PRAGMA journal_mode").use { rs -> rs.next(); assertEquals("wal", rs.getString(1)) } }
-            assertEquals(listOf(1, 2, 3, 4, 5), Migrator(file).migrate())
+            assertEquals(listOf(1, 2, 3, 4, 5, 6), Migrator(file).migrate())
         }
         Database.openFile(dir).use { assertEquals(SchemaState.Current, Migrator(it).state()) }
     }

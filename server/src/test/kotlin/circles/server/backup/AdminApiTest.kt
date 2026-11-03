@@ -62,8 +62,15 @@ class AdminApiTest {
 
     private fun export(h: Hosted, who: DeviceIdentity): RawResponse = h.live.request("GET", exportPath(h.fixture.circle), authorization = sign(h.live, who, "GET", exportPath(h.fixture.circle)))
 
-    private fun import(live: LiveServer, who: DeviceIdentity, zip: ByteArray, header: String = sign(live, who, "POST", importPath, zip)) =
-        live.request("POST", importPath, body = zip, authorization = header)
+    /** The operator's side: issue a token for [circle] on [live], as `import-token` does; returns what the steward gets. */
+    private fun issueToken(live: LiveServer, circle: CircleId, hours: Long = 24): String {
+        val raw = live.server.crypto.randomBytes(32)
+        live.server.services.store.transaction { it.putImportToken(live.server.crypto.hash256(raw.toByteArray()), circle, live.server.clock.millis() + hours * 3_600_000L) }
+        return raw.toBase64Url()
+    }
+
+    private fun import(live: LiveServer, who: DeviceIdentity, zip: ByteArray, header: String = sign(live, who, "POST", importPath, zip), token: String? = null) =
+        live.request("POST", importPath, body = zip, authorization = header, importToken = token)
 
     private fun zipOf(entries: Map<String, ByteArray>): ByteArray {
         val out = java.io.ByteArrayOutputStream()
@@ -88,7 +95,7 @@ class AdminApiTest {
         assertEquals(emptyList(), report.problems)
 
         val b = live()
-        val imported = import(b, a.fixture.members[1].identity, exported.body) // a different steward does the import
+        val imported = import(b, a.fixture.members[1].identity, exported.body, token = issueToken(b, a.fixture.circle)) // a different steward does the import
         assertEquals(200, imported.status, imported.text())
         val summary = ApiJson.decodeFromString(ImportSummary.serializer(), imported.text())
         assertEquals(ImportSummary(a.count, 0, 1, 0), summary)
@@ -175,16 +182,18 @@ class AdminApiTest {
         val b = live()
         val steward = a.fixture.members[0].identity
         val member = a.fixture.members[3].identity
+        val token = issueToken(b, a.fixture.circle)
 
-        assertEquals(403, import(b, member, file).status, "a member who is not a steward in the file")
-        assertEquals(401, import(b, DeviceIdentity.generate(b.server.crypto, testCipher), file).status, "a device the file does not contain")
+        assertEquals(403, import(b, member, file, token = token).status, "a member who is not a steward in the file")
+        assertEquals(401, import(b, DeviceIdentity.generate(b.server.crypto, testCipher), file, token = token).status, "a device the file does not contain")
         val other = file.copyOf().also { it[it.size - 3] = (it[it.size - 3].toInt() xor 1).toByte() }
-        assertEquals(401, import(b, steward, other, header = sign(b, steward, "POST", importPath, file)).status, "the body changed after signing")
-        assertEquals(401, import(b, steward, file, header = sign(b, steward, "POST", "/api/v1/admin/export/${a.fixture.circle.v}", file)).status, "signed for another path")
-        assertEquals(401, import(b, steward, "not a zip".encodeToByteArray()).status, "not a zip")
-        assertEquals(401, b.request("POST", importPath, body = file).status, "no signature at all")
+        assertEquals(401, import(b, steward, other, header = sign(b, steward, "POST", importPath, file), token = token).status, "the body changed after signing")
+        assertEquals(401, import(b, steward, file, header = sign(b, steward, "POST", "/api/v1/admin/export/${a.fixture.circle.v}", file), token = token).status, "signed for another path")
+        assertEquals(401, import(b, steward, "not a zip".encodeToByteArray(), token = token).status, "not a zip")
+        assertEquals(401, b.request("POST", importPath, body = file, importToken = token).status, "no signature at all")
         assertEquals(0, b.server.rows("SELECT 1 FROM events").size, "none of that imported anything")
-        assertEquals(200, import(b, steward, file).status)
+        assertEquals(1, b.server.rows("SELECT 1 FROM import_tokens").size, "and none of it used the token up")
+        assertEquals(200, import(b, steward, file, token = token).status)
     }
 
     @Test
@@ -196,32 +205,89 @@ class AdminApiTest {
         val built = CircleExport.build(crypto, a.fixture.circle, forged, emptyList())
         val zip = zipOf(built.entries(emptyMap()))
         val b = live()
-        val result = import(b, a.fixture.members[0].identity, zip)
+        val result = import(b, a.fixture.members[0].identity, zip, token = issueToken(b, a.fixture.circle))
         assertEquals(422, result.status, result.text())
         assertTrue(result.text().contains("refused by the circle's rules"), result.text())
         assertEquals(0, b.server.rows("SELECT 1 FROM events").size)
+        assertEquals(1, b.server.rows("SELECT 1 FROM import_tokens").size, "a refused file does not use the token up")
     }
 
     @Test
-    fun aHostThatClosedCircleCreationRefusesANewCircleButAllowsExtendingOne() {
+    fun aNewCircleNeedsTheOperatorsTokenEvenOnAnOpenHost() {
+        val a = hosted()
+        val file = export(a, a.fixture.members[0].identity).body
+        val b = live()
+        val none = import(b, a.fixture.members[0].identity, file)
+        assertEquals(403, none.status)
+        assertTrue(none.text().contains("import token"), none.text())
+        assertEquals(0, b.server.rows("SELECT 1 FROM events").size)
+        assertEquals(200, import(b, a.fixture.members[0].identity, file, token = issueToken(b, a.fixture.circle)).status)
+    }
+
+    @Test
+    fun aClosedHostTakesANewCircleOnlyWithATokenAndThenAllowsStewardsToExtendItWithoutOne() {
         val a = hosted()
         val file = export(a, a.fixture.members[0].identity).body
         val closed = live(TestServer(allowCreate = false))
-        val refused = import(closed, a.fixture.members[0].identity, file)
-        assertEquals(403, refused.status)
-        assertTrue(refused.text().contains("does not accept new circles"))
+        assertEquals(403, import(closed, a.fixture.members[0].identity, file).status)
         assertEquals(0, closed.server.rows("SELECT 1 FROM events").size)
-        // The operator seeds it from the command line path (allowed), and then a steward extends it over HTTP.
-        val operator = CircleImporter(closed.server.services.sync, closed.server.services.blobs!!, closed.server.crypto)
-        val source = ZipExportSource(Files.createTempFile(tmp, "seed", ".zip").also { Files.write(it, file) })
-        assertTrue(operator.import(source) is ImportResult.Done)
+        val first = import(closed, a.fixture.members[0].identity, file, token = issueToken(closed, a.fixture.circle))
+        assertEquals(200, first.status, first.text())
         val more = EventAuthor(a.live.server.crypto, a.fixture.founder.identity, testCipher, firstCounter = 1_000, keyRing = a.fixture.founder.keyRing)
         val extra = more.invite(a.fixture.circle, circles.server.support.newInviteKey(a.live.server.crypto), circles.server.support.TODAY + 5, 1, circles.server.support.TODAY)
         a.live.server.services.sync.submit(listOf(extra.toDto()), circles.server.domain.Entrance.Push(a.fixture.circle))
         val bigger = export(a, a.fixture.members[0].identity).body
-        val extended = import(closed, a.fixture.members[0].identity, bigger)
+        val extended = import(closed, a.fixture.members[0].identity, bigger) // no token: the circle is already here
         assertEquals(200, extended.status, extended.text())
         assertEquals(ImportSummary(1, a.count, 0, 1), ApiJson.decodeFromString(ImportSummary.serializer(), extended.text()))
+    }
+
+    @Test
+    fun theOperatorCommandAndHttpAgreeOnWhoMayExtend() {
+        val a = hosted()
+        val file = export(a, a.fixture.members[0].identity).body
+        val b = live()
+        val operator = CircleImporter(b.server.services.sync, b.server.services.blobs!!, b.server.crypto)
+        assertTrue(operator.import(ZipExportSource(Files.createTempFile(tmp, "seed", ".zip").also { Files.write(it, file) }).also { toClose += it }) is ImportResult.Done)
+        assertEquals(200, import(b, a.fixture.members[0].identity, file).status, "a steward extends a circle the operator seeded, with no token")
+    }
+
+    @Test
+    fun aTokenWorksOnceForOneCircleAndOnlyUntilItExpires() {
+        val a = hosted()
+        val file = export(a, a.fixture.members[0].identity).body
+        val steward = a.fixture.members[0].identity
+
+        val b = live()
+        val other = issueToken(b, CircleId("ab".repeat(16)))
+        assertEquals(403, import(b, steward, file, token = other).status, "a token for another circle")
+        assertEquals(403, import(b, steward, file, token = "not-base64!!").status, "garbage")
+        assertEquals(403, import(b, steward, file, token = circles.encoding.ByteString.of(ByteArray(32)).toBase64Url()).status, "a token nobody issued")
+        assertEquals(1, b.server.rows("SELECT 1 FROM import_tokens").size, "the one token that exists was not used up by those refusals")
+
+        val expired = live()
+        val old = issueToken(expired, a.fixture.circle, hours = 1)
+        expired.server.clock.advanceSeconds(2 * 3_600)
+        assertEquals(403, import(expired, steward, file, token = old, header = sign(expired, steward, "POST", importPath, file)).status, "expired")
+
+        val once = live()
+        val token = issueToken(once, a.fixture.circle)
+        assertEquals(200, import(once, steward, file, token = token).status)
+        assertEquals(0, once.server.rows("SELECT 1 FROM import_tokens").size, "used up")
+        val second = live()
+        assertEquals(403, import(second, steward, file, token = token).status, "and it is no good on another host")
+    }
+
+    @Test
+    fun theHostStoresOnlyAHashOfTheToken() {
+        val b = live()
+        val circle = CircleId("cd".repeat(16))
+        val token = issueToken(b, circle)
+        val stored = b.server.rows("SELECT hex(token_hash), circle_id FROM import_tokens").single()
+        val raw = circles.encoding.ByteString.fromBase64Url(token)!!
+        assertEquals(b.server.crypto.hash256(raw.toByteArray()).toHex().uppercase(), stored[0])
+        assertEquals(circle.v, stored[1])
+        assertFalse((stored[0] as String).contains(raw.toHex().uppercase()))
     }
 
     @Test
@@ -230,7 +296,7 @@ class AdminApiTest {
         val file = export(a, a.fixture.members[0].identity).body
         val small = live(TestServer(adminImportMaxBytes = 1_000))
         assertTrue(file.size > 1_000)
-        assertEquals(413, import(small, a.fixture.members[0].identity, file).status)
+        assertEquals(413, import(small, a.fixture.members[0].identity, file, token = issueToken(small, a.fixture.circle)).status)
         assertEquals(0, small.server.rows("SELECT 1 FROM events").size)
     }
 
@@ -250,10 +316,11 @@ class AdminApiTest {
         a.live.request("GET", exportPath(a.fixture.circle), authorization = header)
         val b = live(TestServer(log = log))
         val file = export(a, a.fixture.members[0].identity).body
-        import(b, a.fixture.members[0].identity, file)
+        val token = issueToken(b, a.fixture.circle)
+        import(b, a.fixture.members[0].identity, file, token = token)
         val text = log.text()
         val credentials = AdminAuth.parse(header)!!
-        listOf(credentials.nonce, credentials.sig.toBase64Url(), credentials.device.v, a.fixture.circle.v, a.fixture.members[0].identity.device.v).forEach {
+        listOf(token, credentials.nonce, credentials.sig.toBase64Url(), credentials.device.v, a.fixture.circle.v, a.fixture.members[0].identity.device.v).forEach {
             assertFalse(text.contains(it), "the log must not contain '$it'")
         }
         assertTrue(text.contains("admin_import"))

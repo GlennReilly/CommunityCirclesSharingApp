@@ -137,4 +137,61 @@ class CliExchangeTest {
         val out = run(null, "help").out
         listOf("export <circleId> <file>", "import <file>", "verify <file>").forEach { assertTrue(out.contains(it), it) }
     }
+
+    // ---- import-token (ADR 0034) ----
+
+    private fun tokenRows(dir: Path): List<List<Any?>> =
+        Database.openFile(dir).use { c ->
+            c.createStatement().use { st -> st.executeQuery("SELECT hex(token_hash), circle_id, expires_at FROM import_tokens").use { rs -> buildList { while (rs.next()) add(listOf(rs.getString(1), rs.getString(2), rs.getLong(3))) } } }
+        }
+
+    @Test
+    fun importTokenPrintsASingleUseTokenAndStoresOnlyItsHash() {
+        val dir = migratedHost("tokens")
+        val circle = "ab".repeat(16)
+        val result = run(dir, "import-token", circle)
+        assertEquals(EXIT_OK, result.code, result.err)
+        val token = result.out.lines().first { it.length == 43 && it.all { c -> c.isLetterOrDigit() || c == '-' || c == '_' } }
+        assertTrue(result.out.contains("works once and expires in 24 hours"), result.out)
+        assertTrue(result.out.contains("X-Circles-Import-Token"), result.out)
+        val row = tokenRows(dir).single()
+        assertEquals(circle, row[1])
+        val raw = circles.encoding.ByteString.fromBase64Url(token)!!
+        assertEquals(JvmCrypto().hash256(raw.toByteArray()).toHex().uppercase(), row[0])
+        assertTrue((row[2] as Long) > System.currentTimeMillis() + 23 * 3_600_000L)
+        assertTrue((row[2] as Long) < System.currentTimeMillis() + 25 * 3_600_000L)
+    }
+
+    @Test
+    fun importTokenHoursAreBoundedAndArgumentsChecked() {
+        val dir = migratedHost("tokens")
+        val circle = "ab".repeat(16)
+        assertEquals(EXIT_OK, run(dir, "import-token", circle, "--hours", "1").code)
+        assertEquals(EXIT_OK, run(dir, "import-token", circle, "--hours", "168").code)
+        listOf("0", "169", "-3", "many", "1.5").forEach { assertEquals(EXIT_USAGE, run(dir, "import-token", circle, "--hours", it).code, it) }
+        assertEquals(EXIT_USAGE, run(dir, "import-token", circle, "--hours").code, "hours without a number")
+        assertEquals(EXIT_USAGE, run(dir, "import-token").code)
+        assertEquals(EXIT_USAGE, run(dir, "import-token", "not-an-id").code)
+        assertEquals(EXIT_USAGE, run(dir, "import-token", circle, "extra").code)
+        assertEquals(2, tokenRows(dir).size, "only the two valid calls stored a token")
+    }
+
+    @Test
+    fun importTokenNeedsAMigratedDatabase() {
+        val fresh = Files.createDirectories(base.resolve("fresh-tokens"))
+        val result = run(fresh, "import-token", "ab".repeat(16))
+        assertEquals(EXIT_FAILURE, result.code)
+        assertTrue(result.err.contains("run 'migrate' first"), result.err)
+    }
+
+    @Test
+    fun usageListsImportToken() {
+        assertTrue(run(null, "help").out.contains("import-token <circleId> [--hours N]"))
+    }
+
+    private fun migratedHost(name: String): Path {
+        val dir = Files.createDirectories(base.resolve(name))
+        assertEquals(EXIT_OK, run(dir, "migrate").code)
+        return dir
+    }
 }

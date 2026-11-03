@@ -81,6 +81,7 @@ private const val STREAM_RETRY_MILLIS = 5_000
 private const val BLOB_CACHE_CONTROL = "private, max-age=31536000, immutable"
 private const val NO_PROXY_BUFFERING = "X-Accel-Buffering"
 private const val MAX_REPORTED_PROBLEMS = 10
+const val IMPORT_TOKEN_HEADER = "X-Circles-Import-Token"
 private val InsufficientStorage = HttpStatusCode(507, "Insufficient Storage")
 
 /** Everything the routes need. */
@@ -228,7 +229,7 @@ private fun Route.adminRoutes(services: Services) {
             val body = withContext(Dispatchers.IO) { call.receiveStream().use { it.readNBytes((services.adminImportMaxBytes + 1).toInt()) } }
             if (body.size > services.adminImportMaxBytes) return@post call.respondProblem(HttpStatusCode.PayloadTooLarge, "Import too large", "Use the command line for large circles.")
             val header = call.request.headers[HttpHeaders.Authorization]
-            when (val result = withContext(Dispatchers.IO) { admin.import(header, call.request.path(), body) }) {
+            when (val result = withContext(Dispatchers.IO) { admin.import(header, call.request.path(), body, call.request.headers[IMPORT_TOKEN_HEADER]) }) {
                 AdminImport.Unauthorized -> call.respondUnauthorized()
                 is AdminImport.Forbidden -> call.respondProblem(HttpStatusCode.Forbidden, "Not allowed", result.reason)
                 AdminImport.Busy -> call.respondProblem(HttpStatusCode.TooManyRequests, "Another import is running", "Try again shortly.")

@@ -36,6 +36,7 @@ import circles.server.data.Migrator
 import circles.server.data.SchemaState
 import circles.server.logging.JsonLog
 import circles.server.logging.info
+import circles.server.web.IMPORT_TOKEN_HEADER
 import circles.server.web.SERVER_VERSION
 import circles.server.web.Services
 import circles.server.web.module
@@ -48,6 +49,11 @@ const val EXIT_OK = 0
 const val EXIT_FAILURE = 1
 const val EXIT_USAGE = 2
 private const val MAX_FORMAT_PROBE_BYTES = 64L * 1024 * 1024
+private const val DEFAULT_TOKEN_HOURS = 24L
+private const val MIN_TOKEN_HOURS = 1L
+private const val MAX_TOKEN_HOURS = 168L
+private const val IMPORT_TOKEN_BYTES = 32
+private const val MILLIS_PER_HOUR = 3_600_000L
 
 private const val USAGE = """Usage: circles-server <command>
 
@@ -56,6 +62,7 @@ Commands:
   migrate   Create or update the database schema
   export <circleId> <file>   Write a circle's log and blobs to a circles-export/1 zip file (ADR 0030)
   import <file>              Seed this server from an export; re-checks every event, safe to repeat
+  import-token <circleId> [--hours N]   Print a single-use token that lets a steward import that new circle over HTTP (ADR 0034)
   verify <file>              Check an export or a backup without touching any database
   backup <dir>               Write circles-backup-<time>.zip (database and blobs) into <dir>
   restore <file> [--force]   Put a backup back (stop the server first); --force moves existing data aside
@@ -93,6 +100,7 @@ class Cli(
             "restore" -> restore(args)
             "export" -> exportCircle(args)
             "import" -> importCircle(args)
+            "import-token" -> importToken(args)
             null -> usageError("missing command")
             else -> usageError("unknown command '${args.first()}'")
         }
@@ -212,6 +220,24 @@ class Cli(
                 ExportResult.UnknownCircle -> fail("this server has no circle ${args[1]}")
                 is ExportResult.Failed -> result.problems.forEach { err.println("problem: $it") }.let { EXIT_FAILURE }
             }
+        }
+    }
+
+    private fun importToken(args: List<String>): Int {
+        val hoursAt = args.indexOf("--hours")
+        val rest = if (hoursAt >= 0) args.filterIndexed { i, _ -> i != hoursAt && i != hoursAt + 1 } else args
+        if (rest.size != 2) return usageError("'import-token' takes a circle id: import-token <circleId> [--hours N]")
+        if (!isValidRandomId(rest[1])) return usageError("'${rest[1]}' is not a circle id (32 lowercase hex characters)")
+        val hours = if (hoursAt >= 0) args.getOrNull(hoursAt + 1)?.toLongOrNull() else DEFAULT_TOKEN_HOURS
+        if (hours == null || hours !in MIN_TOKEN_HOURS..MAX_TOKEN_HOURS) return usageError("--hours must be a whole number from $MIN_TOKEN_HOURS to $MAX_TOKEN_HOURS")
+        return withServices { services ->
+            val token = crypto.randomBytes(IMPORT_TOKEN_BYTES)
+            val expires = clock.millis() + hours * MILLIS_PER_HOUR
+            services.store.transaction { it.putImportToken(crypto.hash256(token.toByteArray()), CircleId(rest[1]), expires) }
+            out.println("Import token for circle ${rest[1]}; it works once and expires in $hours hours:")
+            out.println(token.toBase64Url())
+            out.println("The steward sends it as the header $IMPORT_TOKEN_HEADER with the signed import request. Share it over a private channel; this host must be served over HTTPS.")
+            EXIT_OK
         }
     }
 

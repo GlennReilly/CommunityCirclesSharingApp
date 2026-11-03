@@ -367,7 +367,24 @@ class SqliteStore(private val connection: Connection) : Store {
                 if (rows.next()) SessionRecord(DeviceId(rows.getString(1)), rows.getLong(2)) else null
             }
 
+        override fun putImportToken(tokenHash: ByteString, circle: CircleId, expiresAtMillis: Long) {
+            update("INSERT INTO import_tokens (token_hash, circle_id, expires_at) VALUES (?, ?, ?)") {
+                it.setBytes(1, tokenHash.toByteArray())
+                it.setString(2, circle.v)
+                it.setLong(3, expiresAtMillis)
+            }
+        }
+
+        override fun consumeImportToken(tokenHash: ByteString, circle: CircleId, nowMillis: Long): Boolean =
+            connection.prepareStatement("DELETE FROM import_tokens WHERE token_hash = ? AND circle_id = ? AND expires_at > ?").use {
+                it.setBytes(1, tokenHash.toByteArray())
+                it.setString(2, circle.v)
+                it.setLong(3, nowMillis)
+                it.executeUpdate() == 1
+            }
+
         override fun deleteExpired(nowMillis: Long) {
+            update("DELETE FROM import_tokens WHERE expires_at <= ?") { it.setLong(1, nowMillis) }
             update("DELETE FROM challenges WHERE expires_at <= ?") { it.setLong(1, nowMillis) }
             update("DELETE FROM sessions WHERE expires_at <= ?") { it.setLong(1, nowMillis) }
         }

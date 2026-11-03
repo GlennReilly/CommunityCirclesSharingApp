@@ -36,7 +36,8 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0030](0030-circle-export-import-and-verify.md) | Circle export, import and verify (`circles-export/1`) | Accepted |
 | [0031](0031-server-backup-and-restore.md) | Server backup and restore (`circles-backup/1`) | Accepted (points 6, 7, 9 amended by 0032) |
 | [0032](0032-explicit-backup-folder-and-full-pre-migration-backup.md) | An explicit backup folder, and a full backup before every migration (amends 0031) | Accepted |
-| [0033](0033-signed-steward-admin-requests.md) | Signed steward requests for export and import over HTTP | Accepted |
+| [0033](0033-signed-steward-admin-requests.md) | Signed steward requests for export and import over HTTP | Accepted (point 6 amended by 0034) |
+| [0034](0034-operator-import-token-for-new-circles.md) | An operator-issued import token for new circles (amends 0033) | Accepted |
 
 ## Open decisions still to record
 

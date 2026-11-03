@@ -1,6 +1,6 @@
 # 0033. Signed steward requests for export and import over HTTP
 
-- Status: Accepted
+- Status: Accepted (point 6 amended by ADR 0034)
 - Date: 2026-11-03
 
 ## Context

@@ -66,7 +66,7 @@ java -jar circles-server.jar restore circles-backup-<time>.zip           # new h
 java -jar circles-server.jar restore circles-backup-<time>.zip --force   # existing data is moved aside, never deleted
 ```
 
-Stewards can also export and import a circle over HTTP with a signed request and no server password (`GET /api/v1/admin/export/{circleId}`, `POST /api/v1/admin/import`, [ADR 0033](docs/adr/0033-signed-steward-admin-requests.md), details in [docs/api.md](docs/api.md)).
+Stewards can also export and import a circle over HTTP with a signed request and no server password (`GET /api/v1/admin/export/{circleId}`, `POST /api/v1/admin/import`, [ADR 0033](docs/adr/0033-signed-steward-admin-requests.md), details in [docs/api.md](docs/api.md)). To let a steward bring a circle onto a host that has never seen it, the host operator first runs `circles-server import-token <circleId>` and passes on the printed single-use token ([ADR 0034](docs/adr/0034-operator-import-token-for-new-circles.md)).
 
 `migrate` takes a full backup (database and blobs) into `CIRCLES_BACKUP_DIR` first and refuses to run without that folder, so a failed or unwanted migration can be undone. Point it at another disk.
 

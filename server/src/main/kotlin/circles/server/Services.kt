@@ -43,7 +43,7 @@ fun buildServices(
     val blobs = BlobService(store, FileBlobFiles(blobsDir), crypto, clock, blobQuotaBytes)
     val sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log, hub)
     java.nio.file.Files.createDirectories(blobsDir.toAbsolutePath().parent)
-    val admin = AdminService(store, crypto, clock, CircleExporter(store, blobs, crypto), CircleImporter(sync, blobs, crypto), allowCreate, blobsDir.toAbsolutePath().parent)
+    val admin = AdminService(store, crypto, clock, CircleExporter(store, blobs, crypto), CircleImporter(sync, blobs, crypto), blobsDir.toAbsolutePath().parent)
     return Services(
         sync = sync,
         auth = AuthService(store, crypto, clock),

@@ -79,6 +79,12 @@ interface StoreTransaction : Directory {
 
     fun findSession(tokenHash: ByteString): SessionRecord?
 
+    /** Remembers an operator-issued import token by its hash (ADR 0034). */
+    fun putImportToken(tokenHash: ByteString, circle: CircleId, expiresAtMillis: Long)
+
+    /** Uses up the token if it exists, names [circle] and has not expired; true if it did. A token works once. */
+    fun consumeImportToken(tokenHash: ByteString, circle: CircleId, nowMillis: Long): Boolean
+
     fun deleteExpired(nowMillis: Long)
 }
 
