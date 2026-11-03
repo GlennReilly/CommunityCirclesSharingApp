@@ -1,0 +1,5 @@
+# Bundle analysis
+
+`node tools/bundle-analysis/gz-by-source.mjs` (after `./gradlew :web:jsBrowserProductionWebpack`) prints the production bundle's size by origin: each npm package, the Kotlin code and its runtime ("kotlin/other"), and code the source map cannot place ("unmapped", mostly the Kotlin standard library). Measured 2026-11-03 at 207.6 KB gzipped: Kotlin and runtime about 134 KB, unmapped about 36 KB, noble 37 KB (curves 20, hashes 10, ciphers 7).
+
+Why this is not trimmed further: Kotlin's dead-code removal already drops unreachable code (Shamir, export verifier, image policy and others are absent); the remainder is the program itself plus kotlinx-serialization, coroutines, kotlinx-html and the standard library. Terser is set to three passes in `web/webpack.config.d/minify.js` (-2.6 KB). A shim package that re-exports only `ed25519` and `x25519` might save a few KB of noble (the UMD `require` currently defeats tree shaking); not done because the margin is enough for the planned screens.
