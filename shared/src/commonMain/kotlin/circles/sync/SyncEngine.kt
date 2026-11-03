@@ -38,6 +38,11 @@ data class SyncReport(
     val unchecked: Int,
 )
 
+/** What the scheduler needs from the engine: run one sync of one circle. */
+fun interface Syncer {
+    suspend fun sync(circle: CircleId): SyncReport
+}
+
 /**
  * Pushes the outbox, then pulls the log, for one circle (spec 6). Each pulled event is shape-checked and its signature
  * verified once, here, and the result is stored with it (ADR 0036), so opening the app never repeats that work.
@@ -47,7 +52,7 @@ class SyncEngine(
     private val crypto: Crypto,
     private val api: SyncApi,
     private val replica: Replica,
-) {
+) : Syncer {
     private val mutableState = MutableStateFlow<SyncState>(SyncState.Offline(changesWaiting = 0))
     val state: StateFlow<SyncState> = mutableState.asStateFlow()
 
@@ -58,7 +63,7 @@ class SyncEngine(
         replica.enqueue(circle, envelope)
     }
 
-    suspend fun sync(circle: CircleId): SyncReport {
+    override suspend fun sync(circle: CircleId): SyncReport {
         mutableState.value = SyncState.Syncing
         var sent = 0
         var refused = 0
