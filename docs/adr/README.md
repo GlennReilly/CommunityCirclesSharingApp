@@ -45,7 +45,7 @@ From the spec, section 11. Record each as an ADR when it is decided:
 
 1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Shamir: decided (ADR 0020).
 2. Local replica store in the browser: IndexedDB vs SQLite-WASM on OPFS.
-3. Kotlin/JS bundle size outcome and the fallback plan if over budget.
+3. Kotlin/JS bundle size outcome and the fallback plan if over budget. Measured (ADR 0009): our code is about 77 KB gzipped and libsodium alone 231 KB, so the browser crypto needs deciding before M3.
 4. Recovery code wordlist and format.
 5. ~~Whether the server serves SSE in v1 or polling only.~~ Decided: hint-only SSE, optional for clients (ADR 0026).
 6. Default thresholds and half-life, after the pilot.
