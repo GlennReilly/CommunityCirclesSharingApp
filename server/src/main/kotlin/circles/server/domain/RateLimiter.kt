@@ -16,6 +16,7 @@ enum class Bucket(val label: String, val perMinute: Int) {
     CREATE("create", 5),
     BLOB("blob", 30),
     STREAM("stream", 6),
+    ADMIN("admin", 6),
 }
 
 sealed interface Limit {

@@ -67,8 +67,8 @@ sealed interface ImportResult {
  * steward rules are re-checked, and devices, stewards, epochs and sequence numbers are rebuilt in log order.
  */
 class CircleImporter(private val sync: SyncService, private val blobs: BlobService, private val crypto: Crypto) {
-    fun import(source: ExportSource): ImportResult {
-        val verified = ExportVerifier.verify(source, crypto)
+    fun import(source: ExportSource, alreadyVerified: circles.export.VerifyReport? = null): ImportResult {
+        val verified = alreadyVerified ?: ExportVerifier.verify(source, crypto)
         val manifest = verified.manifest
         if (!verified.ok || manifest == null) return ImportResult.Refused(verified.problems)
         val circle = CircleId(manifest.circle)

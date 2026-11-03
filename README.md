@@ -10,7 +10,7 @@ Done: **M0** (skeleton, trust policy), **M1** (signed event log and sync), **M2*
 - **Encryption** ([ADR 0018](docs/adr/0018-m2-libsodium-bindings.md) to [0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md), [0024](docs/adr/0024-retire-the-plaintext-v0-format.md)): every private payload is sealed under a circle key (format `v = 1`, the only one); the server stores ciphertext and never holds a key. Circle keys are wrapped to devices, rotated, and split among stewards (Shamir).
 - **Governance** ([ADR 0027](docs/adr/0027-steward-quorum-setting-and-inactivity-fallback.md), [0029](docs/adr/0029-lower-the-minimum-silent-days.md)): stewards, a per-circle quorum, and an inactivity fallback with settings the stewards control.
 - **Items and loans** ([ADR 0025](docs/adr/0025-item-and-loan-event-payloads.md)) with per-item detail keys, and encrypted blobs for attachments.
-- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed admin endpoints, Docker, the operator guides and load numbers are still to do.
+- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed steward export and import over HTTP ([ADR 0033](docs/adr/0033-signed-steward-admin-requests.md)) is done; Docker, the operator guides and load numbers are still to do.
 
 The API is in [docs/api.md](docs/api.md); the decisions are in [docs/adr/](docs/adr/README.md).
 
@@ -66,6 +66,8 @@ java -jar circles-server.jar restore circles-backup-<time>.zip           # new h
 java -jar circles-server.jar restore circles-backup-<time>.zip --force   # existing data is moved aside, never deleted
 ```
 
+Stewards can also export and import a circle over HTTP with a signed request and no server password (`GET /api/v1/admin/export/{circleId}`, `POST /api/v1/admin/import`, [ADR 0033](docs/adr/0033-signed-steward-admin-requests.md), details in [docs/api.md](docs/api.md)).
+
 `migrate` takes a full backup (database and blobs) into `CIRCLES_BACKUP_DIR` first and refuses to run without that folder, so a failed or unwanted migration can be undone. Point it at another disk.
 
 Settings (environment variables, all optional):
@@ -81,6 +83,7 @@ Settings (environment variables, all optional):
 | `CIRCLES_BACKUP_DIR` | unset | Folder for scheduled and pre-migration backups, ideally on another disk. Required for both: scheduling and `migrate` of existing data refuse to run without it ([ADR 0032](docs/adr/0032-explicit-backup-folder-and-full-pre-migration-backup.md)) |
 | `CIRCLES_BACKUP_INTERVAL_HOURS` | off | Write a full backup into `CIRCLES_BACKUP_DIR` every this many hours while serving ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) |
 | `CIRCLES_BACKUP_KEEP` | `7` | How many scheduled backups to keep |
+| `CIRCLES_ADMIN_IMPORT_MAX_MIB` | `64` | Largest circle a steward can import over HTTP, in MiB; use the command line for bigger ones ([ADR 0033](docs/adr/0033-signed-steward-admin-requests.md)) |
 | `CIRCLES_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
 Logs are one JSON object per line on stdout. They never contain bodies, headers, tokens, keys, client addresses or exception messages ([ADR 0016](docs/adr/0016-structured-json-logging.md)).

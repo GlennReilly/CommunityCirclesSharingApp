@@ -1,6 +1,10 @@
 package circles.server
 
 import circles.crypto.Crypto
+import circles.server.backup.AdminService
+import circles.server.backup.CircleExporter
+import circles.server.backup.CircleImporter
+import circles.server.config.DEFAULT_ADMIN_IMPORT_MAX_MIB
 import circles.server.data.FileBlobFiles
 import circles.server.data.SqliteStore
 import circles.server.domain.BYTES_PER_MIB
@@ -32,17 +36,24 @@ fun buildServices(
     blobsDir: Path,
     blobQuotaBytes: Long = DEFAULT_BLOB_QUOTA_MIB * BYTES_PER_MIB,
     streamKeepAliveMillis: Long = STREAM_KEEP_ALIVE_MILLIS,
+    adminImportMaxBytes: Long = DEFAULT_ADMIN_IMPORT_MAX_MIB * BYTES_PER_MIB,
 ): Services {
     val store = SqliteStore(connection)
     val hub = EventHub()
+    val blobs = BlobService(store, FileBlobFiles(blobsDir), crypto, clock, blobQuotaBytes)
+    val sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log, hub)
+    java.nio.file.Files.createDirectories(blobsDir.toAbsolutePath().parent)
+    val admin = AdminService(store, crypto, clock, CircleExporter(store, blobs, crypto), CircleImporter(sync, blobs, crypto), allowCreate, blobsDir.toAbsolutePath().parent)
     return Services(
-        sync = SyncService(store, crypto, clock, EventRules(crypto), allowCreate, log, hub),
+        sync = sync,
         auth = AuthService(store, crypto, clock),
         store = store,
         log = log,
         limits = if (rateLimit) RateLimiter(clock) else Unlimited,
         trustProxy = trustProxy,
-        blobs = BlobService(store, FileBlobFiles(blobsDir), crypto, clock, blobQuotaBytes),
+        blobs = blobs,
+        admin = admin,
+        adminImportMaxBytes = adminImportMaxBytes,
         hub = hub,
         streamKeepAliveMillis = streamKeepAliveMillis,
     )

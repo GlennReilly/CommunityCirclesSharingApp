@@ -337,7 +337,7 @@ class Cli(
         if (config.backupIntervalHours > 0 && backupFolder != null) {
             BackupScheduler(BackupService(config.dataDir, crypto), backupFolder, config.backupKeep, clock, log).start(config.backupIntervalHours)
         }
-        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy, config.dataDir.resolve("blobs"), config.blobQuotaMib * BYTES_PER_MIB)) }
+        connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy, config.dataDir.resolve("blobs"), config.blobQuotaMib * BYTES_PER_MIB, adminImportMaxBytes = config.adminImportMaxMib * BYTES_PER_MIB)) }
         return EXIT_OK
     }
 

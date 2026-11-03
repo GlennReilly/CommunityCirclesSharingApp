@@ -6,6 +6,7 @@ import circles.crypto.Crypto
 import circles.crypto.RefusingCipher
 import circles.encoding.Parsed
 import circles.event.CircleFold
+import circles.event.CircleView
 import circles.event.Envelope
 import circles.event.EnvelopeChecks
 import circles.event.EnvelopeDto
@@ -86,7 +87,13 @@ object CircleExport {
 }
 
 /** What [ExportVerifier] found; [events] and [manifest] are filled when they could be read. */
-class VerifyReport(val problems: List<String>, val manifest: ExportManifest?, val events: List<EnvelopeDto>) {
+class VerifyReport(
+    val problems: List<String>,
+    val manifest: ExportManifest?,
+    val events: List<EnvelopeDto>,
+    /** The log folded without keys, when it could be; its devices and stewards are the file's final state. */
+    val view: CircleView? = null,
+) {
     val ok: Boolean get() = problems.isEmpty()
 }
 
@@ -102,9 +109,10 @@ object ExportVerifier {
         val manifest = readManifest(source, problems) ?: return VerifyReport(problems, null, emptyList())
         checkEntryNames(names, manifest, problems)
         checkTotalSize(source, names, problems)
-        val events = readEvents(source, manifest, crypto, problems)
+        val folded = mutableListOf<CircleView>()
+        val events = readEvents(source, manifest, crypto, problems, folded)
         checkBlobs(source, manifest, crypto, problems)
-        return VerifyReport(problems, manifest, events)
+        return VerifyReport(problems, manifest, events, folded.firstOrNull())
     }
 
     private fun readManifest(source: ExportSource, problems: MutableList<String>): ExportManifest? {
@@ -145,7 +153,7 @@ object ExportVerifier {
         if (total > MAX_EXPORT_TOTAL_BYTES) problems += "the export is larger than $MAX_EXPORT_TOTAL_BYTES bytes"
     }
 
-    private fun readEvents(source: ExportSource, manifest: ExportManifest, crypto: Crypto, problems: MutableList<String>): List<EnvelopeDto> {
+    private fun readEvents(source: ExportSource, manifest: ExportManifest, crypto: Crypto, problems: MutableList<String>, folded: MutableList<CircleView>): List<EnvelopeDto> {
         val bytes = source.read(EVENTS_ENTRY, MAX_EXPORT_EVENTS_BYTES)
         if (bytes == null) {
             problems += if (source.sizeOf(EVENTS_ENTRY) == null) "$EVENTS_ENTRY is missing" else "$EVENTS_ENTRY is too large"
@@ -189,14 +197,15 @@ object ExportVerifier {
         }
         val ids = envelopes.map { it.eventId(crypto) }
         ids.groupBy { it }.filter { it.value.size > 1 }.keys.forEach { problems += "event ${it.v.take(SHORT_ID)}… appears more than once" }
-        if (dtos.size == lines.size && problems.none { it.startsWith("event ") || it.startsWith(EVENTS_ENTRY) }) foldLog(manifest, envelopes, crypto, ids, problems)
+        if (dtos.size == lines.size && problems.none { it.startsWith("event ") || it.startsWith(EVENTS_ENTRY) }) foldLog(manifest, envelopes, crypto, ids, problems, folded)
         return dtos
     }
 
     /** A structural fold with no keys: signatures, devices, roles, quorum, invites and epochs must all hold. */
-    private fun foldLog(manifest: ExportManifest, envelopes: List<Envelope>, crypto: Crypto, ids: List<circles.event.EventId>, problems: MutableList<String>) {
+    private fun foldLog(manifest: ExportManifest, envelopes: List<Envelope>, crypto: Crypto, ids: List<circles.event.EventId>, problems: MutableList<String>, folded: MutableList<CircleView>) {
         val view = CircleFold(crypto, RefusingCipher, null).fold(CircleId(manifest.circle), envelopes)
         val position = ids.withIndex().associate { it.value to it.index + 1 }
+        folded += view
         view.rejected.forEach { problems += "event ${position[it.id] ?: 0} (${it.type}) is refused by the circle's rules: ${it.reason}" }
     }
 

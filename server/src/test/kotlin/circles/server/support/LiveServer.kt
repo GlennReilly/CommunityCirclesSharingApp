@@ -24,9 +24,10 @@ class LiveServer(val server: TestServer) : AutoCloseable {
     val baseUrl: String = "http://127.0.0.1:${runBlocking { engine.engine.resolvedConnectors().first().port }}"
     val api = ApiClient(SocketTransport(baseUrl), server.crypto)
 
-    fun request(method: String, path: String, token: String? = null, body: ByteArray? = null): RawResponse {
+    fun request(method: String, path: String, token: String? = null, body: ByteArray? = null, authorization: String? = null): RawResponse {
         val builder = HttpRequest.newBuilder(URI.create(baseUrl + path))
         token?.let { builder.header("Authorization", "Bearer $it") }
+        authorization?.let { builder.header("Authorization", it) }
         builder.method(method, if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofByteArray(body))
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
         return RawResponse(response.statusCode(), response.body(), response.headers().map().mapKeys { it.key.lowercase() }.mapValues { it.value.first() })

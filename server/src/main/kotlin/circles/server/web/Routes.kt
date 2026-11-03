@@ -1,6 +1,7 @@
 package circles.server.web
 
 import circles.api.API_PREFIX
+import circles.api.ImportSummary
 import circles.api.MAX_BLOB_BYTES
 import circles.api.ChallengeRequest
 import circles.api.DEFAULT_PULL_LIMIT
@@ -16,6 +17,9 @@ import circles.api.SessionResponse
 import circles.api.VersionResponse
 import circles.event.isValidRandomId
 import circles.policy.CircleId
+import circles.server.backup.AdminExport
+import circles.server.backup.AdminImport
+import circles.server.backup.AdminService
 import circles.server.domain.BlobPutResult
 import circles.server.domain.BlobService
 import circles.server.domain.EventHub
@@ -23,6 +27,9 @@ import circles.server.domain.SubscribeResult
 import circles.server.logging.info
 import io.ktor.http.ContentType
 import io.ktor.server.request.contentLength
+import io.ktor.server.request.path
+import io.ktor.server.response.respondOutputStream
+import java.nio.file.Files
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondBytesWriter
@@ -73,6 +80,7 @@ const val STREAM_KEEP_ALIVE_MILLIS = 25_000L
 private const val STREAM_RETRY_MILLIS = 5_000
 private const val BLOB_CACHE_CONTROL = "private, max-age=31536000, immutable"
 private const val NO_PROXY_BUFFERING = "X-Accel-Buffering"
+private const val MAX_REPORTED_PROBLEMS = 10
 private val InsufficientStorage = HttpStatusCode(507, "Insufficient Storage")
 
 /** Everything the routes need. */
@@ -88,6 +96,9 @@ class Services(
     val hub: EventHub = EventHub(),
     /** How often an idle event stream sends a keep-alive and re-checks its token (ADR 0026). */
     val streamKeepAliveMillis: Long = STREAM_KEEP_ALIVE_MILLIS,
+    /** Signed steward export and import (ADR 0033); null leaves the admin endpoints off. */
+    val admin: AdminService? = null,
+    val adminImportMaxBytes: Long = 64L * 1024 * 1024,
 )
 
 fun Application.module(services: Services) {
@@ -114,6 +125,7 @@ fun Application.module(services: Services) {
         route(API_PREFIX) {
             authRoutes(services)
             circleRoutes(services)
+            adminRoutes(services)
         }
     }
 }
@@ -178,6 +190,52 @@ private fun Route.circleRoutes(services: Services) {
                         ?: if (call.parameters["limit"] == null) DEFAULT_PULL_LIMIT else return@get call.respondProblem(HttpStatusCode.BadRequest, "Bad 'limit'")
                     val page = withContext(Dispatchers.IO) { sync.pull(circle, after, limit) }
                     call.respondJson(PullResponse.serializer(), page)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * `GET /admin/export/{circleId}` and `POST /admin/import` (ADR 0033). Authorised only by a signed request; every kind of
+ * authentication failure gets the same bare `401` so it reveals nothing about which check failed.
+ */
+private fun Route.adminRoutes(services: Services) {
+    val admin = services.admin ?: return
+    route("/admin") {
+        get("/export/{id}") {
+            if (call.refusedByLimit(services, Bucket.ADMIN, call.clientKey(services))) return@get
+            val circle = call.circleOrNull() ?: return@get call.respondUnauthorized()
+            val header = call.request.headers[HttpHeaders.Authorization]
+            when (val result = withContext(Dispatchers.IO) { admin.export(header, call.request.path(), circle) }) {
+                AdminExport.Unauthorized -> call.respondUnauthorized()
+                AdminExport.Forbidden -> call.respondProblem(HttpStatusCode.Forbidden, "Only a steward of this circle may export it")
+                AdminExport.NotFound -> call.respondProblem(HttpStatusCode.NotFound, "No such circle")
+                is AdminExport.Ready -> {
+                    try {
+                        call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"circle-export.zip\"")
+                        call.respondOutputStream(ContentType.Application.Zip) { Files.copy(result.file, this) }
+                    } finally {
+                        Files.deleteIfExists(result.file)
+                    }
+                }
+            }
+        }
+        post("/import") {
+            if (call.refusedByLimit(services, Bucket.ADMIN, call.clientKey(services))) return@post
+            val declared = call.request.contentLength()
+            if (declared != null && declared > services.adminImportMaxBytes) return@post call.respondProblem(HttpStatusCode.PayloadTooLarge, "Import too large", "Use the command line for large circles.")
+            val body = withContext(Dispatchers.IO) { call.receiveStream().use { it.readNBytes((services.adminImportMaxBytes + 1).toInt()) } }
+            if (body.size > services.adminImportMaxBytes) return@post call.respondProblem(HttpStatusCode.PayloadTooLarge, "Import too large", "Use the command line for large circles.")
+            val header = call.request.headers[HttpHeaders.Authorization]
+            when (val result = withContext(Dispatchers.IO) { admin.import(header, call.request.path(), body) }) {
+                AdminImport.Unauthorized -> call.respondUnauthorized()
+                is AdminImport.Forbidden -> call.respondProblem(HttpStatusCode.Forbidden, "Not allowed", result.reason)
+                AdminImport.Busy -> call.respondProblem(HttpStatusCode.TooManyRequests, "Another import is running", "Try again shortly.")
+                is AdminImport.Invalid -> call.respondProblem(HttpStatusCode.UnprocessableEntity, "The file cannot be imported", result.problems.take(MAX_REPORTED_PROBLEMS).joinToString("; "))
+                is AdminImport.Done -> {
+                    services.log.info("admin_import", "events" to result.summary.eventsAccepted, "blobs" to result.summary.blobsStored)
+                    call.respondJson(ImportSummary.serializer(), result.summary)
                 }
             }
         }

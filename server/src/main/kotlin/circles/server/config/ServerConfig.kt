@@ -22,6 +22,8 @@ const val ENV_BLOB_QUOTA_MIB = "CIRCLES_BLOB_QUOTA_MIB"
 const val ENV_BACKUP_INTERVAL_HOURS = "CIRCLES_BACKUP_INTERVAL_HOURS"
 const val ENV_BACKUP_KEEP = "CIRCLES_BACKUP_KEEP"
 const val ENV_BACKUP_DIR = "CIRCLES_BACKUP_DIR"
+const val ENV_ADMIN_IMPORT_MAX_MIB = "CIRCLES_ADMIN_IMPORT_MAX_MIB"
+const val DEFAULT_ADMIN_IMPORT_MAX_MIB = 64L
 const val DEFAULT_BACKUP_KEEP = 7
 
 /** Settings from the `CIRCLES_*` environment variables (spec 7). */
@@ -41,6 +43,8 @@ data class ServerConfig(
     val backupKeep: Int = DEFAULT_BACKUP_KEEP,
     /** Where scheduled and pre-migration backups go; required for both, no default (ADR 0032). */
     val backupDir: Path? = null,
+    /** Largest import body accepted over HTTP, in MiB (ADR 0033). */
+    val adminImportMaxMib: Long = DEFAULT_ADMIN_IMPORT_MAX_MIB,
 )
 
 sealed interface ConfigResult {
@@ -63,6 +67,12 @@ object ServerConfigReader {
         val rateLimit = flag(env, ENV_RATE_LIMIT, default = true, problems)
         val backupIntervalHours = positiveInt(env, ENV_BACKUP_INTERVAL_HOURS, problems) ?: 0
         val backupKeep = positiveInt(env, ENV_BACKUP_KEEP, problems) ?: DEFAULT_BACKUP_KEEP
+        val adminImportMaxMib = env[ENV_ADMIN_IMPORT_MAX_MIB]?.let { text ->
+            text.toLongOrNull()?.takeIf { it >= 1 } ?: run {
+                problems += "$ENV_ADMIN_IMPORT_MAX_MIB must be a whole number of MiB, at least 1, not '$text'"
+                null
+            }
+        } ?: DEFAULT_ADMIN_IMPORT_MAX_MIB
         val backupDir = env[ENV_BACKUP_DIR]?.takeIf { it.isNotBlank() }?.let { Paths.get(it) }
         if (backupIntervalHours > 0 && backupDir == null) {
             problems += "$ENV_BACKUP_INTERVAL_HOURS needs $ENV_BACKUP_DIR: name a folder for backups, ideally on another disk"
@@ -81,7 +91,7 @@ object ServerConfigReader {
         } ?: LogLevel.INFO
         val bind = env[ENV_BIND]?.takeIf { it.isNotBlank() } ?: DEFAULT_BIND
         val dataDir = env[ENV_DATA_DIR]?.takeIf { it.isNotBlank() } ?: DEFAULT_DATA_DIR
-        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit, blobQuotaMib, backupIntervalHours, backupKeep, backupDir)) else ConfigResult.Invalid(problems)
+        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit, blobQuotaMib, backupIntervalHours, backupKeep, backupDir, adminImportMaxMib)) else ConfigResult.Invalid(problems)
     }
 
     private fun positiveInt(env: Map<String, String>, name: String, problems: MutableList<String>): Int? =

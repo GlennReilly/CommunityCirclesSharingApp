@@ -49,3 +49,13 @@ SSE stream, blobs, admin import/export, and any event type other than `circle.cr
 ## Steward governance (ADR 0027)
 
 `circle.create` may carry three optional public keys, `stewardQuorum` (1 to 9, default 2), `stewardInactiveDays` (7 to 365, default 60) and `stewardFallbackDelayDays` (7 to 90, default 14); values outside the limits are refused with `invalid_public`. `steward.policy` (steward only, `public = {quorum, inactiveDays, fallbackDelayDays}`) changes them once the current quorum of distinct stewards have each sent the same values. `steward.add` and `steward.remove` take effect when the quorum agrees, at once when the quorum is 1, or by the inactivity fallback: the proposer repeats the event after the delay, the other stewards having been silent for the quiet period before the first one and silent since. Votes that have not taken effect are accepted and recorded, so a first `steward.add` or `steward.remove` is answered `accepted` even though nothing changes yet.
+
+## Signed steward export and import (ADR 0033)
+
+| Call | Body | Answer |
+|---|---|---|
+| `GET /admin/export/{circleId}` | | The `circles-export/1` zip, if the signing device is a current steward of that circle on this host |
+| `POST /admin/import` | an export zip, at most `CIRCLES_ADMIN_IMPORT_MAX_MIB` | `{eventsAccepted, eventsAlready, blobsStored, blobsAlready}`, if the signing device is a steward in the file (and, for a circle this host already has, a steward here) |
+
+No session and no server password: every call carries `Authorization: Circles-Signature device=<id>, ts=<unix seconds>, nonce=<base64url 16 bytes>, sig=<base64url>`. `sig` is the device's Ed25519 signature over `circles/admin/v1`, then `METHOD`, the request path, `ts`, `nonce` and the hex BLAKE2b-256 of the body, each on its own line. `ts` must be within 5 minutes of the server's clock and a nonce works once. Any missing, malformed, stale, replayed or wrongly signed request is a bare `401`; a valid signature from a device that may not do it is `403` (also when the host has closed circle creation and the circle is new); `413` over the size cap; `422` with the problems if the file does not verify; `429` when another import is running or the rate limit (6 per minute per client address) is hit. `AdminAuth` in `shared` builds and checks the header for clients.
+

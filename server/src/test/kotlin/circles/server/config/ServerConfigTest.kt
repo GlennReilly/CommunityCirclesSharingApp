@@ -60,6 +60,8 @@ class ServerConfigTest {
         assertEquals(6, valid(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6", ENV_BACKUP_DIR to "/b")).backupIntervalHours)
         assertEquals(3, valid(mapOf(ENV_BACKUP_KEEP to "3")).backupKeep)
         assertEquals(null, defaults.backupDir)
+        assertEquals(64L, defaults.adminImportMaxMib)
+        assertEquals(8L, valid(mapOf(ENV_ADMIN_IMPORT_MAX_MIB to "8")).adminImportMaxMib)
         assertEquals(java.nio.file.Paths.get("/mnt/backups"), valid(mapOf(ENV_BACKUP_DIR to "/mnt/backups")).backupDir)
         assertEquals(null, valid(mapOf(ENV_BACKUP_DIR to "  ")).backupDir, "a blank folder counts as unset")
         assertEquals(6, valid(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6", ENV_BACKUP_DIR to "/b")).backupIntervalHours)
@@ -77,6 +79,7 @@ class ServerConfigTest {
         assertTrue(problems(mapOf(ENV_RATE_LIMIT to "0")).single().contains(ENV_RATE_LIMIT))
         assertTrue(problems(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6")).single().contains("needs $ENV_BACKUP_DIR"))
         listOf("0", "-1", "daily", "1.5").forEach { assertTrue(problems(mapOf(ENV_BACKUP_INTERVAL_HOURS to it)).single().contains(ENV_BACKUP_INTERVAL_HOURS), it) }
+        listOf("0", "-3", "big", "1.5").forEach { assertTrue(problems(mapOf(ENV_ADMIN_IMPORT_MAX_MIB to it)).single().contains(ENV_ADMIN_IMPORT_MAX_MIB), it) }
         listOf("0", "-1", "all").forEach { assertTrue(problems(mapOf(ENV_BACKUP_KEEP to it)).single().contains(ENV_BACKUP_KEEP), it) }
         listOf("0", "-5", "lots", "1.5").forEach { assertTrue(problems(mapOf(ENV_BLOB_QUOTA_MIB to it)).single().contains(ENV_BLOB_QUOTA_MIB), it) }
         assertEquals(3, problems(mapOf(ENV_LOG_LEVEL to "x", ENV_TRUST_PROXY to "x", ENV_RATE_LIMIT to "x")).size)
