@@ -41,7 +41,7 @@ class StewardSettingsPartsTest {
         assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries - "boxPub")))
         assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardQuorum" to CborText("3")))))
         assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardQuorum" to CborInt(0)))))
-        assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardInactiveDays" to CborInt(29)))))
+        assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardInactiveDays" to CborInt(6)))))
         assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardFallbackDelayDays" to CborInt(91)))))
         assertIs<Parsed.Invalid>(PublicParts.circleCreate(CborMap(good.entries + ("stewardQuorum" to CborInt(-1)))))
     }

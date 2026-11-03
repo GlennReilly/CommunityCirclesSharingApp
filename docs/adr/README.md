@@ -30,8 +30,9 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0024](0024-retire-the-plaintext-v0-format.md) | Retire the plaintext v = 0 format (amends 0014, 0021) | Accepted |
 | [0025](0025-item-and-loan-event-payloads.md) | Item and loan event payloads and folding rules | Accepted |
 | [0026](0026-sse-hints-and-blob-storage.md) | Server-sent event hints and blob storage | Accepted |
-| [0027](0027-steward-quorum-setting-and-inactivity-fallback.md) | Steward governance settings and the inactivity fallback (supersedes 0023) | Accepted |
+| [0027](0027-steward-quorum-setting-and-inactivity-fallback.md) | Steward governance settings and the inactivity fallback (supersedes 0023) | Accepted (minimum silent days changed by 0029) |
 | [0028](0028-client-image-policy.md) | Client image policy: resize, re-encode, strip metadata | Accepted |
+| [0029](0029-lower-the-minimum-silent-days.md) | Lower the minimum silent days of the steward fallback to 7 (amends 0027) | Accepted |
 
 ## Open decisions still to record
 

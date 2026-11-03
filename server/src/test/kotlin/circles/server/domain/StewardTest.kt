@@ -198,7 +198,7 @@ class StewardTest {
         listOf(
             StewardSettings(quorum = 0),
             StewardSettings(quorum = 10),
-            StewardSettings(inactiveDays = 29),
+            StewardSettings(inactiveDays = 6),
             StewardSettings(fallbackDelayDays = 6),
             StewardSettings(inactiveDays = 366),
             StewardSettings(fallbackDelayDays = 91),

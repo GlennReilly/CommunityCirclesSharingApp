@@ -1,6 +1,6 @@
 # 0027. Steward governance settings and the inactivity fallback
 
-- Status: Accepted (supersedes 0023)
+- Status: Accepted (supersedes 0023; the minimum of `stewardInactiveDays` was lowered to 7 by ADR 0029)
 - Date: 2026-11-03
 
 ## Context

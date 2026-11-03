@@ -36,6 +36,9 @@ class StewardRulesTest {
         assertFailsWith<IllegalArgumentException> { StewardPolicy(proposalDays = -1) }
         StewardPolicy(quorum = MIN_STEWARD_QUORUM, inactiveDays = MIN_STEWARD_INACTIVE_DAYS, fallbackDelayDays = MIN_STEWARD_FALLBACK_DELAY_DAYS)
         StewardPolicy(quorum = MAX_STEWARD_QUORUM, inactiveDays = MAX_STEWARD_INACTIVE_DAYS, fallbackDelayDays = MAX_STEWARD_FALLBACK_DELAY_DAYS)
+        assertEquals(7, MIN_STEWARD_INACTIVE_DAYS, "ADR 0029")
+        assertEquals(null, StewardSettings(inactiveDays = 7).problem())
+        assertTrue(StewardSettings(inactiveDays = 6).problem()!!.contains("inactiveDays"))
         assertEquals(StewardSettings(2, 60, 14), StewardSettings())
         assertEquals(null, StewardSettings().problem())
         assertTrue(StewardSettings(quorum = 0).problem()!!.contains("quorum"))
@@ -251,5 +254,15 @@ class StewardRulesTest {
         val day = 100 + MIN_STEWARD_FALLBACK_DELAY_DAYS
         assertEquals(StewardOutcome.Effective, StewardRules.decide(shortTimes, StewardChange.ADD, c, a, day, stewards, proposalAt100, activity))
         assertEquals(StewardOutcome.Pending, StewardRules.decide(policy, StewardChange.ADD, c, a, day, stewards, proposalAt100, activity))
+    }
+
+    @Test
+    fun aWeekOfSilenceAndAWeekOfDelayIsEnoughAtTheNewMinimum() {
+        val shortest = policy.with(StewardSettings(quorum = 2, inactiveDays = 7, fallbackDelayDays = 7))
+        val stewards = mapOf(a to founding, b to founding)
+        val activity = Activity(lastDay = mapOf(b to 93))
+        assertEquals(StewardOutcome.Effective, StewardRules.decide(shortest, StewardChange.ADD, c, a, 107, stewards, proposalAt100, activity))
+        val sixDaysQuiet = Activity(lastDay = mapOf(b to 94))
+        assertEquals(StewardOutcome.Pending, StewardRules.decide(shortest, StewardChange.ADD, c, a, 107, stewards, proposalAt100, sixDaysQuiet))
     }
 }
