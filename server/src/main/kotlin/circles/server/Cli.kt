@@ -60,6 +60,7 @@ private const val USAGE = """Usage: circles-server <command>
 Commands:
   serve     Start the server (migrates a brand-new database; refuses an old or newer one)
   migrate   Create or update the database schema
+  list                       Show the circles on this host (id, created, events, devices, stewards)
   export <circleId> <file>   Write a circle's log and blobs to a circles-export/1 zip file (ADR 0030)
   import <file>              Seed this server from an export; re-checks every event, safe to repeat
   import-token <circleId> [--hours N]   Print a single-use token that lets a steward import that new circle over HTTP (ADR 0034)
@@ -98,6 +99,7 @@ class Cli(
             "verify" -> verify(args)
             "backup" -> backup(args)
             "restore" -> restore(args)
+            "list" -> listCircles(args)
             "export" -> exportCircle(args)
             "import" -> importCircle(args)
             "import-token" -> importToken(args)
@@ -207,6 +209,22 @@ class Cli(
             is ConfigResult.Invalid -> result.problems.forEach { err.println("error: $it") }.let { EXIT_USAGE }
             is ConfigResult.Valid -> action(result.config)
         }
+
+    private fun listCircles(args: List<String>): Int {
+        if (args.size != 1) return usageError("'list' takes no arguments")
+        return withServices { services ->
+            val circles = services.store.transaction { it.circleSummaries() }
+            if (circles.isEmpty()) {
+                out.println("This host has no circles.")
+            } else {
+                out.println("circle id                         created     events  devices  stewards")
+                circles.forEach { c ->
+                    out.println("%s  %s  %6d  %7d  %8d".format(c.circle.v, java.time.LocalDate.ofEpochDay(c.createdDay.toLong()), c.events, c.devices, c.stewards))
+                }
+            }
+            EXIT_OK
+        }
+    }
 
     private fun exportCircle(args: List<String>): Int {
         if (args.size != 3) return usageError("'export' takes a circle id and a file: export <circleId> <file>")

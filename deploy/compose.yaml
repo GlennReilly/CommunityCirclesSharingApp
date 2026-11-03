@@ -1,0 +1,54 @@
+# Circles server.   Start:  docker compose -f deploy/compose.yaml up -d
+# Read docs/operator/install.md first. Two things are required and have no default:
+#   BACKUP_DIR_ON_HOST  a folder for backups, ideally on a different disk from the data (ADR 0032)
+# Optional:
+#   CIRCLES_DOMAIN      your domain name, for the built-in HTTPS proxy (the "tls" profile below); without it Caddy only serves "localhost"
+services:
+  circles:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: circles-server
+    restart: unless-stopped
+    # Reachable only from this machine by default; the proxy below (or your own) is what faces the internet.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      CIRCLES_ALLOW_CREATE: "${CIRCLES_ALLOW_CREATE:-true}"
+      # Turn this on only when a reverse proxy sits in front, so the real client address is used for rate limits.
+      CIRCLES_TRUST_PROXY: "${CIRCLES_TRUST_PROXY:-false}"
+      CIRCLES_RATE_LIMIT: "${CIRCLES_RATE_LIMIT:-true}"
+      CIRCLES_BLOB_QUOTA_MIB: "${CIRCLES_BLOB_QUOTA_MIB:-256}"
+      # A full backup every 24 hours into the backup folder, keeping the newest 7.
+      CIRCLES_BACKUP_INTERVAL_HOURS: "${CIRCLES_BACKUP_INTERVAL_HOURS:-24}"
+      CIRCLES_BACKUP_KEEP: "${CIRCLES_BACKUP_KEEP:-7}"
+      CIRCLES_LOG_LEVEL: "${CIRCLES_LOG_LEVEL:-info}"
+    volumes:
+      - circles-data:/data
+      - "${BACKUP_DIR_ON_HOST:?set BACKUP_DIR_ON_HOST to a folder for backups, ideally on another disk}:/backups"
+    # A modest cap: 512 MiB is enough for 300 members (docs/operator/requirements.md).
+    mem_limit: 768m
+
+  # HTTPS with automatic certificates.  Start both:  docker compose -f deploy/compose.yaml --profile tls up -d
+  # Also set CIRCLES_DOMAIN and CIRCLES_TRUST_PROXY=true, and open ports 80 and 443.
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - circles
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Compose reads every service even when its profile is off, so this cannot be a required variable.
+      CIRCLES_DOMAIN: "${CIRCLES_DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  circles-data:
+  caddy-data:
+  caddy-config:

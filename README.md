@@ -10,7 +10,7 @@ Done: **M0** (skeleton, trust policy), **M1** (signed event log and sync), **M2*
 - **Encryption** ([ADR 0018](docs/adr/0018-m2-libsodium-bindings.md) to [0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md), [0024](docs/adr/0024-retire-the-plaintext-v0-format.md)): every private payload is sealed under a circle key (format `v = 1`, the only one); the server stores ciphertext and never holds a key. Circle keys are wrapped to devices, rotated, and split among stewards (Shamir).
 - **Governance** ([ADR 0027](docs/adr/0027-steward-quorum-setting-and-inactivity-fallback.md), [0029](docs/adr/0029-lower-the-minimum-silent-days.md)): stewards, a per-circle quorum, and an inactivity fallback with settings the stewards control.
 - **Items and loans** ([ADR 0025](docs/adr/0025-item-and-loan-event-payloads.md)) with per-item detail keys, and encrypted blobs for attachments.
-- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed steward export and import over HTTP ([ADR 0033](docs/adr/0033-signed-steward-admin-requests.md)) is done; load numbers are in [docs/operator/requirements.md](docs/operator/requirements.md); Docker and the remaining operator guides are still to do.
+- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed steward export and import over HTTP ([ADR 0033](docs/adr/0033-signed-steward-admin-requests.md)) is done; a Dockerfile, a compose file, a systemd unit and operator guides ([docs/operator/](docs/operator/README.md): install, requirements from a measured load test, backup and restore, upgrade, handover) complete M5.
 
 The API is in [docs/api.md](docs/api.md); the decisions are in [docs/adr/](docs/adr/README.md).
 
@@ -21,7 +21,9 @@ The API is in [docs/api.md](docs/api.md); the decisions are in [docs/adr/](docs/
 | `shared/` | Kotlin Multiplatform (JVM + JS): policy (tiers, standing, access), CBOR encoding, envelope, validation, the event fold, steward rules, items and loans, export format, `Crypto` and `Cipher` (libsodium on JS) |
 | `server/` | Ktor server: `domain/` (rules, services), `data/` (SQLite, migrations, blob files), `backup/` (export and import), `web/` (routes), `config/`, CLI |
 | `web/` | Placeholder for the PWA; stack not yet decided ([ADR 0009](docs/adr/0009-web-ui-stack.md)) |
-| `deploy/`, `tools/` | Placeholders for Docker, Caddy, systemd and dev scripts |
+| `deploy/` | Dockerfile, compose file with an optional HTTPS proxy, Caddyfile, systemd unit |
+| `tools/` | Independent reference generators for test vectors |
+| `docs/operator/` | Guides for the person running a host |
 | `docs/spec/` | Design doc and implementation spec |
 | `docs/adr/` | Architecture decision records |
 

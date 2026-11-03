@@ -1,0 +1,9 @@
+# Used by the "tls" profile of compose.yaml. Caddy gets and renews the certificate by itself.
+{$CIRCLES_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy circles:8080 {
+		# The live-update stream must not be buffered or cut off.
+		flush_interval -1
+	}
+}

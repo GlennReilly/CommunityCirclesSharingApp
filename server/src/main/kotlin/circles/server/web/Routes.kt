@@ -72,7 +72,7 @@ import kotlinx.serialization.builtins.ListSerializer
 const val HEALTHY_BODY = "ok"
 const val READY_BODY = "ready"
 const val SERVER_NAME = "circles-server"
-const val SERVER_VERSION = "0.1.0-M1"
+const val SERVER_VERSION = "0.5.0-M5"
 private const val BEARER_PREFIX = "Bearer "
 private const val LOGGED_FRAMES = 5
 private const val FORWARDED_FOR = "X-Forwarded-For"

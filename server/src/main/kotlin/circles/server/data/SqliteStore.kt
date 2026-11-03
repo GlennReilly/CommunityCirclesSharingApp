@@ -14,6 +14,7 @@ import circles.event.StewardVote
 import circles.policy.CircleId
 import circles.policy.MemberId
 import circles.server.domain.ChallengeRecord
+import circles.server.domain.CircleSummary
 import circles.server.domain.DeviceRecord
 import circles.server.domain.Effect
 import circles.server.domain.InviteRecord
@@ -170,6 +171,17 @@ class SqliteStore(private val connection: Connection) : Store {
 
         override fun blobBytesUsed(circle: CircleId): Long =
             query("SELECT COALESCE(SUM(size), 0) FROM blobs WHERE circle_id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getLong(1) else 0L }
+
+        override fun circleSummaries(): List<CircleSummary> =
+            query(
+                """SELECT c.id, c.created_day,
+                          (SELECT COUNT(*) FROM events e WHERE e.circle_id = c.id),
+                          (SELECT COUNT(*) FROM devices d WHERE d.circle_id = c.id AND d.revoked_seq IS NULL),
+                          (SELECT COUNT(*) FROM stewards s WHERE s.circle_id = c.id AND s.removed_seq IS NULL)
+                   FROM circles c ORDER BY c.created_day, c.id""",
+            ) { rows ->
+                buildList { while (rows.next()) add(CircleSummary(CircleId(rows.getString(1)), rows.getInt(2), rows.getLong(3), rows.getInt(4), rows.getInt(5))) }
+            }
 
         override fun blobList(circle: CircleId): List<Pair<String, Long>> =
             query("SELECT hash, size FROM blobs WHERE circle_id = ? ORDER BY hash", { it.setString(1, circle.v) }) { rows ->

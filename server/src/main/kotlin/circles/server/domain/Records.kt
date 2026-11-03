@@ -24,6 +24,9 @@ data class DeviceRecord(
 
 data class InviteRecord(val circle: CircleId, val id: EventId, val author: MemberId, val terms: InviteTerms, val used: Int)
 
+/** What `list` shows about a circle: ids and counts only, nothing a member wrote. */
+data class CircleSummary(val circle: CircleId, val createdDay: Int, val events: Long, val devices: Int, val stewards: Int)
+
 data class ChallengeRecord(val device: DeviceId, val expiresAtMillis: Long)
 
 data class SessionRecord(val device: DeviceId, val expiresAtMillis: Long)

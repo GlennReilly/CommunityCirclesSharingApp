@@ -47,6 +47,9 @@ interface Directory {
     /** Total bytes of blobs stored for the circle. */
     fun blobBytesUsed(circle: CircleId): Long
 
+    /** One line per circle on this host, for the operator's `list` command. */
+    fun circleSummaries(): List<CircleSummary>
+
     /** Every blob stored for the circle with its size, by hash. */
     fun blobList(circle: CircleId): List<Pair<String, Long>>
 

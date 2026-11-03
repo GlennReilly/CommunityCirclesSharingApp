@@ -135,7 +135,7 @@ class CliExchangeTest {
     @Test
     fun usageListsTheNewCommands() {
         val out = run(null, "help").out
-        listOf("export <circleId> <file>", "import <file>", "verify <file>").forEach { assertTrue(out.contains(it), it) }
+        listOf("list  ", "export <circleId> <file>", "import <file>", "verify <file>").forEach { assertTrue(out.contains(it), it) }
     }
 
     // ---- import-token (ADR 0034) ----
@@ -211,5 +211,25 @@ class CliExchangeTest {
         } finally {
             server.close()
         }
+    }
+
+    @Test
+    fun listShowsEachCircleWithItsCounts() {
+        val (from, fixture) = host("listed")
+        val result = run(from, "list")
+        assertEquals(EXIT_OK, result.code, result.err)
+        val line = result.out.lines().first { it.startsWith(fixture.circle.v) }
+        assertTrue(Regex("""\d{4}-\d{2}-\d{2}""").containsMatchIn(line), line)
+        assertTrue(Regex("""\s13\s+2\s+2$""").containsMatchIn(line), "13 events, 2 devices, 2 stewards: $line")
+        assertTrue(result.out.startsWith("circle id"), result.out)
+    }
+
+    @Test
+    fun listOnAnEmptyHostAndWithExtraArguments() {
+        val empty = migratedHost("empty-list")
+        assertTrue(run(empty, "list").out.contains("This host has no circles."))
+        assertEquals(EXIT_USAGE, run(empty, "list", "extra").code)
+        val fresh = Files.createDirectories(base.resolve("fresh-list"))
+        assertEquals(EXIT_FAILURE, run(fresh, "list").code, "needs a migrated database")
     }
 }

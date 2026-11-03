@@ -1,0 +1,31 @@
+# systemd unit for running the jar directly (see docs/operator/install.md).
+# Install: copy to /etc/systemd/system/, create the user and folders, edit the paths, then
+#   systemctl daemon-reload && systemctl enable --now circles-server
+[Unit]
+Description=Circles server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=circles
+Group=circles
+# Settings live in /etc/circles/circles.env (one NAME=value per line); see docs/operator/install.md.
+EnvironmentFile=/etc/circles/circles.env
+ExecStart=/usr/bin/java -Xmx256m -jar /opt/circles/circles-server.jar serve
+Restart=on-failure
+RestartSec=5
+
+# The server only needs its own data folder and the backup folder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/circles /srv/circles-backups
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
