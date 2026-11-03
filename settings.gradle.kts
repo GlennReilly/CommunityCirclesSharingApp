@@ -13,4 +13,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "circles"
 
-include(":shared", ":server")
+include(":shared", ":server", ":web")

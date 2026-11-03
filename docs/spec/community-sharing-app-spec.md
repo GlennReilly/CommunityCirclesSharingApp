@@ -380,6 +380,8 @@ Load test: 300 members, 20k events, sync from zero in under 10 seconds on the ta
 
 **M3 PWA offline**: Kotlin/JS facade, local replica, outbox, sync engine, screens 1-6, service worker. Done when the offline E2E tests pass.
 
+M3 amendment (2026-11-03, ADR 0009, 0035, 0036): the client is Kotlin/JS with kotlinx-html in module `web`, crypto is noble, local storage is IndexedDB with verify-once ingest. The skeleton (shell, routing, state, bundle budget check) is in; the replica, sync engine, screens and service worker are not.
+
 **M4 Community mechanics**: vouching, steward screens, pauses with quorum, config updates, QR verification, key rotation on removal, recovery shares and steward-assisted rewrap, standing confirmation flow. Done when handover tests 3-5 pass.
 
 **M5 Operations**: backup, restore, export, import, verify; Dockerfile and compose; docs; load test numbers; handover tests 1-2. Done when all acceptance tests pass and docs are reviewed by someone who has not seen the code.
