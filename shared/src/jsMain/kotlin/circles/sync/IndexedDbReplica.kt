@@ -7,6 +7,8 @@ import circles.event.Envelope
 import circles.event.EnvelopeDto
 import circles.event.EventId
 import circles.event.toDto
+import circles.keys.KeyStore
+import circles.keys.StoredIdentity
 import circles.policy.CircleId
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -21,11 +23,13 @@ sealed interface IdbOpenResult {
 
 class IdbException(message: String) : RuntimeException(message)
 
-private const val DB_VERSION = 1
+private const val DB_VERSION = 2
 private const val STORE_EVENTS = "events"
 private const val STORE_OUTBOX = "outbox"
 private const val STORE_REFUSED = "refused"
 private const val STORE_META = "meta"
+private const val STORE_KEYS = "keys"
+private const val KEY_IDENTITY = "identity"
 private const val INDEX_BY_ID = "byId"
 private const val META_CURSOR = "cursor:"
 private const val META_OUTBOX_COUNTER = "outbox:"
@@ -43,7 +47,7 @@ private const val SEQUENCE_UPPER_BOUND = 9_007_199_254_740_991.0
 class IndexedDbReplica private constructor(
     private val db: IdbDatabase,
     private val idOf: (Envelope) -> EventId,
-) : Replica {
+) : Replica, KeyStore {
 
     override suspend fun cursor(circle: CircleId): Long {
         val tx = db.transaction(arrayOf(STORE_META), MODE_READ)
@@ -135,6 +139,29 @@ class IndexedDbReplica private constructor(
         val tx = db.transaction(arrayOf(STORE_REFUSED), MODE_READ)
         return tx.objectStore(STORE_REFUSED).getAll(range(circle, 0)).await().asRows()
             .map { RefusedEvent(EventId(it.id as String), it.type as String, it.reason as String) }
+    }
+
+    // ---- KeyStore (ADR 0039): the one wrapped identity of this browser profile, in the same database ----
+
+    override suspend fun load(): StoredIdentity? {
+        val tx = db.transaction(arrayOf(STORE_KEYS), MODE_READ)
+        val row = tx.objectStore(STORE_KEYS).get(KEY_IDENTITY).await().value ?: return null
+        return ApiJson.decodeFromString(StoredIdentity.serializer(), row.json as String)
+    }
+
+    override suspend fun save(identity: StoredIdentity) {
+        transact(arrayOf(STORE_KEYS)) { tx ->
+            tx.objectStore(STORE_KEYS).put(
+                jsObject {
+                    this.k = KEY_IDENTITY
+                    this.json = ApiJson.encodeToString(StoredIdentity.serializer(), identity)
+                },
+            )
+        }
+    }
+
+    override suspend fun erase() {
+        transact(arrayOf(STORE_KEYS)) { tx -> tx.objectStore(STORE_KEYS).delete(KEY_IDENTITY) }
     }
 
     /** Closes the connection; a later upgrade by another tab is then not blocked. */
@@ -237,6 +264,7 @@ class IndexedDbReplica private constructor(
                 }
             }
             if (!has(STORE_META)) db.createObjectStore(STORE_META, js("{keyPath: 'k'}"))
+            if (!has(STORE_KEYS)) db.createObjectStore(STORE_KEYS, js("{keyPath: 'k'}"))
         }
 
         private fun describe(error: dynamic): String = (error?.message as? String) ?: (error?.name as? String) ?: "unknown error"
