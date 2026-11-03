@@ -120,4 +120,23 @@ class MarketPayloadsTest {
         assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("expiresDay" to CborText("soon")))))
         assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("expiresDay" to CborInt(5_000_000)))))
     }
+
+    @Test
+    fun confirmationDisputeAndResolutionPayloadsRoundTripAndAreStrict() {
+        assertEquals(ReturnConfirmation(loan), ok(MarketPayloads.parseReturnConfirmation(MarketPayloads.confirmReturn(ReturnConfirmation(loan)))))
+        val dispute = LoanDispute(loan, DisputeClaim.LOSS, "never came back")
+        assertEquals(dispute, ok(MarketPayloads.parseDispute(MarketPayloads.dispute(dispute))))
+        assertEquals(dispute.copy(note = null), ok(MarketPayloads.parseDispute(MarketPayloads.dispute(dispute.copy(note = null)))))
+        val resolution = LoanResolution(loan, DisputeOutcome.UPHELD)
+        assertEquals(resolution, ok(MarketPayloads.parseResolution(MarketPayloads.resolve(resolution))))
+        val d = MarketPayloads.dispute(dispute).entries
+        assertIs<Parsed.Invalid>(MarketPayloads.parseDispute(CborMap(d + ("claim" to CborText("SHOUTING")))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseDispute(CborMap(d + ("note" to CborText("n".repeat(257))))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseDispute(CborMap(d - "claim")))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseDispute(CborMap(d + ("extra" to CborInt(1)))))
+        val r = MarketPayloads.resolve(resolution).entries
+        assertIs<Parsed.Invalid>(MarketPayloads.parseResolution(CborMap(r + ("outcome" to CborText("MAYBE")))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseResolution(CborMap(r - "outcome")))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseReturnConfirmation(CborMap(mapOf("loan" to CborText("nope")))))
+    }
 }

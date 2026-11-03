@@ -43,6 +43,18 @@ data class LoanState(
     val returnedDay: Int? = null,
     /** The borrower's note on the request, if any. */
     val requestNote: String? = null,
+    /** The day the owner confirmed the return, if they did (ADR 0043). */
+    val confirmedDay: Int? = null,
+    val dispute: DisputeState? = null,
+)
+
+/** An owner's dispute of a return, and how it ended. [resolvedDay] and [outcome] are null while it is pending. */
+data class DisputeState(
+    val claim: DisputeClaim,
+    val note: String?,
+    val day: Int,
+    val outcome: DisputeOutcome? = null,
+    val resolvedDay: Int? = null,
 )
 
 /** Items, loans and what this device can read of them. */
@@ -62,6 +74,7 @@ internal class MarketResult(val view: MarketView, val rejected: Map<EventId, Str
 private val MARKET_TYPES = setOf(
     EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.VOUCH,
+    EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -101,6 +114,9 @@ internal class MarketFold(
         EventType.ITEM_RETIRE -> parse(MarketPayloads.parseItemRetire(payload)) { retire(e.author, it) }
         EventType.ITEM_DETAIL -> parse(MarketPayloads.parseItemDetail(payload)) { detail(e.author, it) }
         EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it, e.day, id) }
+        EventType.STANDING_CONFIRM -> parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
+        EventType.LOAN_DISPUTE -> parse(MarketPayloads.parseDispute(payload)) { dispute(e.author, it, e.day) }
+        EventType.LOAN_RESOLVE -> parse(MarketPayloads.parseResolution(payload)) { resolve(e.author, it, e.day, id) }
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
         EventType.LOAN_RESPOND -> parse(MarketPayloads.parseLoanRespond(payload)) { respond(e.author, it) }
         EventType.LOAN_HANDOVER -> parse(MarketPayloads.parseLoanHandover(payload)) { handover(e.author, it) }
@@ -200,6 +216,39 @@ internal class MarketFold(
             else -> return "only the owner or the borrower may confirm a hand-over"
         }
         loans[v.loan] = if (updated.ownerConfirmedHandover && updated.borrowerConfirmedHandover) updated.copy(status = LoanStatus.ACTIVE) else updated
+        return null
+    }
+
+    private fun confirm(author: MemberId, v: ReturnConfirmation, day: Int): String? {
+        val loan = loans[v.loan] ?: return "unknown loan"
+        if (loan.owner != author) return "only the item's owner confirms a return"
+        if (loan.status != LoanStatus.RETURNED) return "only a returned loan can be confirmed"
+        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "a reported problem needs no confirmation"
+        if (loan.confirmedDay != null) return "already confirmed"
+        if (loan.dispute != null) return "the return is in dispute"
+        loans[v.loan] = loan.copy(confirmedDay = maxOf(day, loan.returnedDay ?: day))
+        return null
+    }
+
+    private fun dispute(author: MemberId, v: LoanDispute, day: Int): String? {
+        val loan = loans[v.loan] ?: return "unknown loan"
+        if (loan.owner != author) return "only the item's owner may dispute a return"
+        if (loan.status != LoanStatus.RETURNED) return "only a returned loan can be disputed"
+        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "the borrower already reported a problem"
+        if (loan.dispute != null) return "the return is already disputed"
+        val returned = loan.returnedDay ?: return "the return has no day"
+        if (day < returned || day - returned > DAMAGE_CLAIM_DAYS) return "a dispute must come within $DAMAGE_CLAIM_DAYS days of the return"
+        loans[v.loan] = loan.copy(dispute = DisputeState(v.claim, v.note, day))
+        return null
+    }
+
+    private fun resolve(author: MemberId, v: LoanResolution, day: Int, id: EventId): String? {
+        val loan = loans[v.loan] ?: return "unknown loan"
+        val dispute = loan.dispute ?: return "the return is not in dispute"
+        if (dispute.outcome != null) return "the dispute is already resolved"
+        if (author !in stewardsAt(id)) return "only a steward may resolve a dispute"
+        if (author == loan.owner || author == loan.borrower) return "a party to the loan cannot resolve its dispute"
+        loans[v.loan] = loan.copy(dispute = dispute.copy(outcome = v.outcome, resolvedDay = maxOf(day, dispute.day)))
         return null
     }
 

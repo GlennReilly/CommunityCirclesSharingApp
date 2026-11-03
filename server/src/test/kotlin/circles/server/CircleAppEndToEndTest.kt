@@ -7,6 +7,9 @@ import circles.app.InviteLink
 import circles.app.ItemResult
 import circles.app.LoanResult
 import circles.app.VouchResult
+import circles.app.DisputeStatus
+import circles.event.DisputeClaim
+import circles.event.DisputeOutcome
 import circles.policy.Tier
 import circles.app.LoanRole
 import circles.event.LoanStatus
@@ -391,5 +394,75 @@ class CircleAppEndToEndTest {
         assertIs<VouchResult.Done>(bea.app.vouchFor(home(alice.app).me))
         assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
         assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+    }
+
+    @Test
+    fun aReturnIsConfirmedAndAnotherDisputedAndTheStewardWhoIsNotAPartyDecides() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val carol = join()
+        val item = (bea.app.addItem("Wheelbarrow", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        listOf(bea, carol, alice).forEach { it.app.syncOnce() }
+
+        // Two returns of the same item: the owner confirms the first and disputes the second.
+        suspend fun lendAndReturn(): circles.event.LoanId {
+            val loan = (carol.app.requestLoan(item, TODAY, TODAY + 2, "") as LoanResult.Done).loan
+            carol.app.syncOnce(); bea.app.syncOnce()
+            assertIs<LoanResult.Done>(bea.app.respondToLoan(loan, approve = true, note = "")); bea.app.syncOnce(); carol.app.syncOnce()
+            assertIs<LoanResult.Done>(bea.app.confirmHandover(loan)); assertIs<LoanResult.Done>(carol.app.confirmHandover(loan))
+            bea.app.syncOnce(); carol.app.syncOnce()
+            assertIs<LoanResult.Done>(carol.app.returnLoan(loan, ReturnOutcome.OK))
+            carol.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+            return loan
+        }
+        val first = lendAndReturn()
+        assertEquals(LoanResult.NotAllowed, carol.app.confirmReturn(first), "the borrower cannot confirm")
+        assertTrue(home(bea.app).loans.single { it.loan == first }.canConfirm)
+        assertIs<LoanResult.Done>(bea.app.confirmReturn(first))
+        assertEquals(LoanResult.NotAllowed, bea.app.confirmReturn(first), "only once")
+        bea.app.syncOnce(); carol.app.syncOnce(); alice.app.syncOnce()
+        assertEquals("1.3", home(bea.app).standing!!.points, "1.0 for lending plus 0.25 for confirming promptly, counted at once")
+        assertEquals("0.5", home(carol.app).standing!!.points)
+
+        val second = lendAndReturn()
+        val seenByBea = home(bea.app).loans.single { it.loan == second }
+        assertTrue(seenByBea.canDispute)
+        assertEquals(LoanResult.NoteTooLong(256), bea.app.disputeReturn(second, DisputeClaim.DAMAGE, "n".repeat(257)))
+        assertEquals(LoanResult.NotAllowed, carol.app.disputeReturn(second, DisputeClaim.DAMAGE, ""), "only the owner disputes")
+        assertIs<LoanResult.Done>(bea.app.disputeReturn(second, DisputeClaim.DAMAGE, "the handle is cracked"))
+        assertEquals(DisputeStatus.PENDING, home(bea.app).loans.single { it.loan == second }.dispute!!.status)
+        bea.app.syncOnce(); carol.app.syncOnce(); alice.app.syncOnce()
+
+        // Alice (steward, not a party) can resolve; the parties cannot. Credit for the second loan is withheld meanwhile.
+        val forAlice = home(alice.app).loans.single { it.loan == second }
+        assertEquals(LoanRole.STEWARD, forAlice.role)
+        assertTrue(forAlice.canResolve)
+        assertEquals("the handle is cracked", forAlice.dispute!!.note)
+        assertEquals(LoanResult.NotAllowed, bea.app.resolveDispute(second, DisputeOutcome.UPHELD))
+        assertEquals(LoanResult.NotAllowed, carol.app.resolveDispute(second, DisputeOutcome.DISMISSED))
+        assertEquals("1.3", home(bea.app).standing!!.points, "nothing more while pending")
+        assertEquals(1, home(alice.app).stewardCount)
+
+        assertIs<LoanResult.Done>(alice.app.resolveDispute(second, DisputeOutcome.UPHELD))
+        assertEquals(LoanResult.NotAllowed, alice.app.resolveDispute(second, DisputeOutcome.DISMISSED), "only once")
+        listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        assertEquals(DisputeStatus.UPHELD, home(carol.app).loans.single { it.loan == second }.dispute!!.status)
+        val carolNow = home(carol.app).standing!!
+        assertEquals("0.0", carolNow.points, "the incident outweighs the earlier good loan, and points never go below zero")
+        assertTrue(carolNow.reasons.any { it.contains("unreported incident") && it.contains("on hold") })
+        assertEquals("1.3", home(bea.app).standing!!.points, "an upheld dispute earns the owner nothing for that loan")
+        assertEquals(0, home(alice.app).loans.count { it.canResolve })
     }
 }

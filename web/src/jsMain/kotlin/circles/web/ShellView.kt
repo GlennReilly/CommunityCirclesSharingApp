@@ -4,6 +4,9 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
+import circles.app.DisputeStatus
+import circles.event.DAMAGE_CLAIM_DAYS
+import circles.event.DisputeClaim
 import circles.app.StandingSummary
 import circles.policy.Tier
 import circles.app.ItemSummary
@@ -85,6 +88,11 @@ const val ACTION_BORROW_ITEM = "borrow-item"
 const val ACTION_APPROVE_LOAN = "approve-loan"
 const val ACTION_DECLINE_LOAN = "decline-loan"
 const val ACTION_HANDOVER = "handover-loan"
+const val ACTION_CONFIRM_RETURN = "confirm-return"
+const val ACTION_UPHOLD = "uphold-dispute"
+const val ACTION_DISMISS_DISPUTE = "dismiss-dispute"
+const val FORM_DISPUTE_PREFIX = "dispute-form-"
+const val FIELD_CLAIM = "claim"
 const val FORM_LOAN_REQUEST = "loan-request-form"
 const val FORM_RETURN_PREFIX = "return-form-"
 const val FIELD_FROM = "from"
@@ -588,11 +596,27 @@ private fun FlowContent.borrow(home: HomeData) {
         p { a(href = Screen.Items.fragment) { +"Find something on the Items page." } }
         return
     }
-    val toAnswer = home.loans.filter { it.role == LoanRole.OWNER && it.status == LoanStatus.REQUESTED }
-    val waiting = home.loans.filter { it.role == LoanRole.BORROWER && it.status == LoanStatus.REQUESTED }
-    val handovers = home.loans.filter { it.status == LoanStatus.APPROVED }
-    val out = home.loans.filter { it.status == LoanStatus.ACTIVE }
-    val finished = home.loans.filter { it.status == LoanStatus.RETURNED || it.status == LoanStatus.DECLINED }
+    val mine = home.loans.filter { it.role != LoanRole.STEWARD }
+    val toAnswer = mine.filter { it.role == LoanRole.OWNER && it.status == LoanStatus.REQUESTED }
+    val waiting = mine.filter { it.role == LoanRole.BORROWER && it.status == LoanStatus.REQUESTED }
+    val handovers = mine.filter { it.status == LoanStatus.APPROVED }
+    val out = mine.filter { it.status == LoanStatus.ACTIVE }
+    val finished = mine.filter { it.status == LoanStatus.RETURNED || it.status == LoanStatus.DECLINED }
+    val toResolve = home.loans.filter { it.canResolve }
+    if (toResolve.isNotEmpty()) {
+        section {
+            h2 { +"Disputes to resolve" }
+            for (loan in toResolve) {
+                div {
+                    h3 { +loan.itemName }
+                    p { +"The owner says the borrower did not report ${if (loan.dispute?.claim == DisputeClaim.LOSS) "a loss" else "damage"}. The borrower reported: ${loan.reported?.let { outcomeLabel(it) } ?: "nothing"}." }
+                    loan.dispute?.note?.let { p { +"Owner's note: $it" } }
+                    loanButton(ACTION_UPHOLD, loan, "Uphold: the borrower did not report it")
+                    loanButton(ACTION_DISMISS_DISPUTE, loan, "Dismiss: the return was as reported")
+                }
+            }
+        }
+    }
     if (toAnswer.isNotEmpty()) {
         section {
             h2 { +"Requests to answer" }
@@ -670,6 +694,59 @@ private fun FlowContent.borrow(home: HomeData) {
                     loanHeading(loan)
                     p {
                         +(if (loan.status == LoanStatus.DECLINED) "Declined." else loan.outcome?.let { outcomeLabel(it) + "." } ?: "Returned.")
+                    }
+                    loan.dispute?.let { dispute ->
+                        val claim = if (dispute.claim == DisputeClaim.LOSS) "loss" else "damage"
+                        p {
+                            +when (dispute.status) {
+                                DisputeStatus.PENDING -> "Pending review: the owner reported $claim. A steward who is not part of this loan will decide. Credit for this loan waits."
+                                DisputeStatus.UPHELD -> "The owner's report of $claim was upheld."
+                                DisputeStatus.DISMISSED -> "The owner's report of $claim was dismissed, so the return counts as reported."
+                            }
+                        }
+                        dispute.note?.let { p { +"Owner's note: $it" } }
+                        if (dispute.status == DisputeStatus.PENDING && home.isSteward && home.stewardCount == 1) {
+                            p { +"You are the only steward, so nobody else can decide this. It closes after $DAMAGE_CLAIM_DAYS days as if the return had been fine." }
+                        }
+                    }
+                    if (loan.canConfirm) {
+                        loanButton(ACTION_CONFIRM_RETURN, loan, "It came back fine")
+                    }
+                    if (loan.canDispute) {
+                        details {
+                            summary { +"Report a problem" }
+                            p { +"Use this only if the borrower did not tell you about damage or loss. A steward who is not part of this loan will decide." }
+                            form {
+                                id = FORM_DISPUTE_PREFIX + loan.loan.v
+                                attributes[ATTR_LOAN] = loan.loan.v
+                                label {
+                                    attributes["for"] = "$FIELD_CLAIM-${loan.loan.v}"
+                                    +"What went wrong: "
+                                }
+                                select {
+                                    id = "$FIELD_CLAIM-${loan.loan.v}"
+                                    name = FIELD_CLAIM
+                                    option {
+                                        value = DisputeClaim.DAMAGE.name
+                                        +"It came back damaged"
+                                    }
+                                    option {
+                                        value = DisputeClaim.LOSS.name
+                                        +"It did not come back"
+                                    }
+                                }
+                                label {
+                                    attributes["for"] = "$FIELD_NOTE-${loan.loan.v}"
+                                    +"Note: "
+                                }
+                                input(type = InputType.text, name = FIELD_NOTE) {
+                                    id = "$FIELD_NOTE-${loan.loan.v}"
+                                    attributes["maxlength"] = MAX_LOAN_NOTE_CHARS.toString()
+                                    attributes["autocomplete"] = "off"
+                                }
+                                formSubmit("Send report", ready = true)
+                            }
+                        }
                     }
                 }
             }

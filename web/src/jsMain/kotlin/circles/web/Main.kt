@@ -8,6 +8,8 @@ import circles.app.ItemResult
 import circles.app.LoanResult
 import circles.app.VouchResult
 import circles.policy.MemberId
+import circles.event.DisputeClaim
+import circles.event.DisputeOutcome
 import circles.event.LoanId
 import circles.event.ReturnOutcome
 import circles.policy.ItemClass
@@ -163,6 +165,12 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             else -> ""
         }
         scope.launch {
+            if (form.id.startsWith(FORM_DISPUTE_PREFIX)) {
+                val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
+                val claim = DisputeClaim.entries.firstOrNull { it.name == field(FIELD_CLAIM) }
+                if (loan != null && claim != null) reportLoan(circleApp.disputeReturn(loan, claim, field(FIELD_NOTE)), "Reported. A steward who is not part of this loan will decide.", null)
+                return@launch
+            }
             if (form.id.startsWith(FORM_RETURN_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val outcome = ReturnOutcome.entries.firstOrNull { it.name == field(FIELD_OUTCOME) }
@@ -273,6 +281,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 }
                 ACTION_APPROVE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), true, "") ?: LoanResult.NotAllowed, "Approved. They can now read the details.", null) }
                 ACTION_DECLINE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), false, "") ?: LoanResult.NotAllowed, "Declined.", null) }
+                ACTION_CONFIRM_RETURN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmReturn(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed. Thank you.", null) }
+                ACTION_UPHOLD -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.UPHELD) ?: LoanResult.NotAllowed, "Decided: the owner's report is upheld.", null) }
+                ACTION_DISMISS_DISPUTE -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.DISMISSED) ?: LoanResult.NotAllowed, "Decided: the return counts as reported.", null) }
                 ACTION_HANDOVER -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmHandover(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed.", null) }
                 ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.EditItem(ItemId(it)))

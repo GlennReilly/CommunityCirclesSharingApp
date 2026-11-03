@@ -92,6 +92,31 @@ try {
   await until(bea, has(bea, 'Finished') + ' && ' + has(bea, 'damage reported'), 'bea returned'); await sleep(1500); await click(bea, 'sync'); await until(bea, has(bea, 'Up to date'), 'bea synced return');
   await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Finished') + ' && ' + has(alice, 'damage reported'), 'alice sees the return'); ok('bea reported damage; alice sees it');
   await alice.evaluate('location.hash = "#/items"');
+  // Confirmation and disputes: one return confirmed by the owner, one disputed (alice is both the owner and the only steward).
+  async function lendOnceAndReturnOk() {
+    await bea.evaluate('location.hash = "#/items"'); await until(bea, has(bea, 'Long ladder'), 'bea on items');
+    await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'request page');
+    await setField(bea, 'loan-request-form', 'from', iso(1)); await setField(bea, 'loan-request-form', 'to', iso(2));
+    await bea.evaluate('document.getElementById("loan-request-form").requestSubmit()'); await until(bea, has(bea, 'Waiting for an answer'), 'bea waiting');
+    await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Requests to answer'), 'alice sees the request'); await click(alice, 'approve-loan');
+    await until(alice, has(alice, 'Ready to hand over'), 'approved'); await sleep(1200);
+    await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Ready to hand over'), 'bea sees approval'); await click(bea, 'handover-loan'); await sleep(1200);
+    await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'has confirmed'), 'alice sees bea confirm'); await click(alice, 'handover-loan'); await sleep(1200);
+    await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'How did it go: '), 'bea sees it out');
+    await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "OK"; f.requestSubmit(); return true; })()');
+    await until(bea, has(bea, 'Thank you. Reported back.'), 'bea returned'); await sleep(1200);
+    await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'It came back fine'), 'alice sees the return');
+  }
+  await lendOnceAndReturnOk();
+  await click(alice, 'confirm-return'); await until(alice, '!' + has(alice, 'It came back fine') + ' && ' + has(alice, 'Confirmed. Thank you.'), 'confirmed'); ok('the owner confirmed a return');
+  await lendOnceAndReturnOk();
+  await alice.evaluate('(() => { const d = [...document.querySelectorAll("details")].find(x => x.textContent.includes("Report a problem")); d.open = true; return true; })()');
+  await alice.evaluate('(() => { const f = document.querySelector("form[id^=dispute-form-]"); f.elements.namedItem("claim").value = "DAMAGE"; f.elements.namedItem("note").value = "the rail is bent"; f.requestSubmit(); return true; })()');
+  await until(alice, has(alice, 'Pending review') + ' && ' + has(alice, "Owner's note: the rail is bent"), 'dispute pending'); ok('the owner reported damage: pending review with the note');
+  if (!(await alice.evaluate(has(alice, 'You are the only steward, so nobody else can decide this')))) throw new Error('no single-steward warning'); ok('the only steward is warned that nobody else can decide it');
+  if (await alice.evaluate('document.querySelector("[data-action=uphold-dispute]") !== null')) throw new Error('alice can resolve her own dispute'); ok('a party to the loan is not offered the decision');
+  await sleep(1500); await click(alice, 'sync'); await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Pending review'), 'bea sees pending review'); ok('the borrower sees "Pending review" too');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items');
   await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
   await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
   await alice.evaluate('location.hash = "#/home"');

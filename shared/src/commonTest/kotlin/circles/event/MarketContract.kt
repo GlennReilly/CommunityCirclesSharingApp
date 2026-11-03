@@ -449,4 +449,126 @@ abstract class MarketContract {
         assertEquals(circles.policy.EventKind.LENT_ITEM_RETURNED_OK, kinds[late.owner])
         assertEquals(circles.policy.EventKind.RETURNED_LATE, kinds[late.borrower])
     }
+
+    /** A finished loan from bea (owner) to carol (borrower) with [outcome] on [returnDay]; returns the loan id. */
+    private fun World.loanBetweenBeaAndCarol(outcome: ReturnOutcome, returnDay: Int): LoanId {
+        val (item, key) = share(bea, ItemClass.EVERYDAY)
+        val loan = newLoanId(crypto)
+        log += carol.loanRequest(circle, DAY, loan, item, DAY, DAY + 2)
+        log += bea.loanApprove(circle, DAY, loan, item, DAY, DAY + 2, key, listOf(carol.identity.registration))
+        log += bea.loanHandover(circle, DAY, loan)
+        log += carol.loanHandover(circle, DAY, loan)
+        log += carol.loanReturn(circle, returnDay, loan, outcome)
+        return loan
+    }
+
+    private fun World.rejectedWith(vararg events: Envelope): List<String> = reasons(events.toList())
+
+    @Test
+    fun onlyTheOwnerMayConfirmAReturnAndOnlyOnceAndNotAfterADispute() = runTest {
+        val w = world()
+        val loan = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
+        val byBorrower = w.carol.confirmReturn(w.circle, DAY + 3, loan)
+        val first = w.bea.confirmReturn(w.circle, DAY + 3, loan)
+        val again = w.bea.confirmReturn(w.circle, DAY + 4, loan)
+        val reasons = w.rejectedWith(byBorrower, first, again)
+        assertEquals(2, reasons.size)
+        assertTrue(reasons[0].contains("only the item's owner"))
+        assertTrue(reasons[1].contains("already confirmed"))
+        val damaged = w.loanBetweenBeaAndCarol(ReturnOutcome.DAMAGED_REPORTED, DAY + 2)
+        assertTrue(w.rejectedWith(w.bea.confirmReturn(w.circle, DAY + 3, damaged)).single().contains("needs no confirmation"))
+        val disputed = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
+        w.log += w.bea.loanDispute(w.circle, DAY + 3, disputed, DisputeClaim.DAMAGE)
+        assertTrue(w.rejectedWith(w.bea.confirmReturn(w.circle, DAY + 4, disputed)).single().contains("in dispute"))
+    }
+
+    @Test
+    fun disputesFollowTheRulesOfAdr0043() = runTest {
+        val w = world()
+        val loan = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
+        val notOwner = w.carol.loanDispute(w.circle, DAY + 3, loan, DisputeClaim.DAMAGE)
+        val tooLate = w.bea.loanDispute(w.circle, DAY + 2 + DAMAGE_CLAIM_DAYS + 1, loan, DisputeClaim.DAMAGE)
+        val good = w.bea.loanDispute(w.circle, DAY + 2 + DAMAGE_CLAIM_DAYS, loan, DisputeClaim.LOSS, "never came back")
+        val twice = w.bea.loanDispute(w.circle, DAY + 3, loan, DisputeClaim.DAMAGE)
+        val reasons = w.foldAs(w.founder, w.log + listOf(notOwner, tooLate, good, twice)).rejected.associate { it.id to it.reason }
+        assertTrue(reasons.getValue(notOwner.eventId(w.crypto)).contains("only the item's owner"))
+        assertTrue(reasons.getValue(tooLate.eventId(w.crypto)).contains("within $DAMAGE_CLAIM_DAYS days"))
+        assertTrue(good.eventId(w.crypto) !in reasons, "the last allowed day is accepted")
+        assertTrue(reasons.getValue(twice.eventId(w.crypto)).contains("already disputed"))
+        val reported = w.loanBetweenBeaAndCarol(ReturnOutcome.LOST_REPORTED, DAY + 2)
+        assertTrue(w.rejectedWith(w.bea.loanDispute(w.circle, DAY + 3, reported, DisputeClaim.LOSS)).single().contains("already reported a problem"))
+        val notReturned = newLoanId(w.crypto)
+        assertTrue(w.rejectedWith(w.bea.loanDispute(w.circle, DAY + 3, notReturned, DisputeClaim.LOSS)).single().contains("unknown loan"))
+    }
+
+    @Test
+    fun onlyAStewardWhoIsNotAPartyMayResolveAndOnlyOnce() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        val loan = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
+        w.log += w.bea.loanDispute(w.circle, DAY + 3, loan, DisputeClaim.DAMAGE, "cracked handle")
+        val byMember = w.carol.loanResolve(w.circle, DAY + 4, loan, DisputeOutcome.DISMISSED)
+        val byOwner = w.bea.loanResolve(w.circle, DAY + 4, loan, DisputeOutcome.UPHELD)
+        val byStewardOk = w.founder.loanResolve(w.circle, DAY + 5, loan, DisputeOutcome.UPHELD)
+        val again = w.founder.loanResolve(w.circle, DAY + 6, loan, DisputeOutcome.DISMISSED)
+        val reasons = w.foldAs(w.founder, w.log + listOf(byMember, byOwner, byStewardOk, again)).rejected.associate { it.id to it.reason }
+        assertTrue(reasons.getValue(byMember.eventId(w.crypto)).contains("only a steward"))
+        assertTrue(reasons.getValue(byOwner.eventId(w.crypto)).contains("only a steward"), "the owner is no steward here")
+        assertTrue(byStewardOk.eventId(w.crypto) !in reasons)
+        assertTrue(reasons.getValue(again.eventId(w.crypto)).contains("already resolved"))
+        val undisputed = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
+        assertTrue(w.rejectedWith(w.founder.loanResolve(w.circle, DAY + 4, undisputed, DisputeOutcome.UPHELD)).single().contains("not in dispute"))
+    }
+
+    @Test
+    fun aStewardWhoIsAPartyCannotResolveTheirOwnDispute() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        val (item, key) = w.share(w.founder, ItemClass.EVERYDAY)
+        val loan = newLoanId(w.crypto)
+        w.log += w.bea.loanRequest(w.circle, DAY, loan, item, DAY, DAY + 2)
+        w.log += w.founder.loanApprove(w.circle, DAY, loan, item, DAY, DAY + 2, key, listOf(w.bea.identity.registration))
+        w.log += w.founder.loanHandover(w.circle, DAY, loan)
+        w.log += w.bea.loanHandover(w.circle, DAY, loan)
+        w.log += w.bea.loanReturn(w.circle, DAY + 2, loan, ReturnOutcome.OK)
+        w.log += w.founder.loanDispute(w.circle, DAY + 3, loan, DisputeClaim.DAMAGE)
+        val own = w.founder.loanResolve(w.circle, DAY + 4, loan, DisputeOutcome.UPHELD)
+        val reason = w.foldAs(w.founder, w.log + own).rejected.single { it.id == own.eventId(w.crypto) }.reason
+        assertTrue(reason.contains("party"), reason)
+    }
+
+    @Test
+    fun anUpheldDisputeHoldsValuableItemsButNotEverydayOnes() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
+        w.log += w.founder.vouch(w.circle, DAY, w.carol.identity.member, DAY + 400)
+        w.log += w.bea.vouch(w.circle, DAY, w.carol.identity.member, DAY + 400)
+        val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
+        val (everyday, _) = w.share(w.founder, ItemClass.EVERYDAY)
+        // Carol, made a neighbour by two vouches, borrows a founder item and brings it back; the founder disputes it and
+        // bea, a steward who is not a party, upholds the claim.
+        val (lent, lentKey) = w.share(w.founder, ItemClass.EVERYDAY)
+        val loan = newLoanId(w.crypto)
+        w.log += w.carol.loanRequest(w.circle, DAY + 1, loan, lent, DAY + 1, DAY + 3)
+        w.log += w.founder.loanApprove(w.circle, DAY + 1, loan, lent, DAY + 1, DAY + 3, lentKey, listOf(w.carol.identity.registration))
+        w.log += w.founder.loanHandover(w.circle, DAY + 1, loan)
+        w.log += w.carol.loanHandover(w.circle, DAY + 1, loan)
+        w.log += w.carol.loanReturn(w.circle, DAY + 3, loan, ReturnOutcome.OK)
+        w.log += w.founder.loanDispute(w.circle, DAY + 4, loan, DisputeClaim.DAMAGE, "the blade is bent")
+        w.log += w.bea.loanResolve(w.circle, DAY + 6, loan, DisputeOutcome.UPHELD)
+        val heldValuable = w.requestOf(w.carol, valuable, DAY + 10)
+        val openEveryday = w.requestOf(w.carol, everyday, DAY + 10)
+        val afterCooldown = w.requestOf(w.carol, valuable, DAY + 6 + 91)
+        w.log += listOf(heldValuable, openEveryday)
+        // The vouches expire after 180 days from DAY, so judge the post-cooldown request while they still live.
+        w.log += afterCooldown
+        val view = w.foldAs(w.founder)
+        val reasons = view.rejected.associate { it.id to it.reason }
+        assertTrue(heldValuable.eventId(w.crypto) in reasons, "the hold applies to valuable items")
+        assertTrue(reasons.getValue(heldValuable.eventId(w.crypto)).contains("on hold"))
+        assertTrue(openEveryday.eventId(w.crypto) !in reasons, "everyday items stay open")
+        assertTrue(afterCooldown.eventId(w.crypto) !in reasons, "the hold is a pause that ends")
+        assertEquals(DisputeOutcome.UPHELD, view.market.loans.getValue(loan).dispute?.outcome)
+    }
 }

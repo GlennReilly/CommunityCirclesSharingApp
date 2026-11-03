@@ -49,6 +49,17 @@ data class LoanRespond(val loan: LoanId, val approve: Boolean, val fromDay: Int,
 
 data class LoanHandover(val loan: LoanId)
 
+/** What the owner says went wrong that the borrower did not report. */
+enum class DisputeClaim { DAMAGE, LOSS }
+
+enum class DisputeOutcome { UPHELD, DISMISSED }
+
+data class ReturnConfirmation(val loan: LoanId)
+
+data class LoanDispute(val loan: LoanId, val claim: DisputeClaim, val note: String?)
+
+data class LoanResolution(val loan: LoanId, val outcome: DisputeOutcome)
+
 /** A member vouches for another until [expiresDay] (the policy caps it; ADR 0042). */
 data class VouchTerms(val vouchee: MemberId, val expiresDay: Int)
 
@@ -67,6 +78,7 @@ private const val K_TO = "toDay"
 private const val K_NOTE = "note"
 private const val K_APPROVE = "approve"
 private const val K_OUTCOME = "outcome"
+private const val K_CLAIM = "claim"
 private const val K_VOUCHEE = "vouchee"
 private const val K_EXPIRES = "expiresDay"
 private const val K_DEVICE = "device"
@@ -111,6 +123,18 @@ object MarketPayloads {
         },
     )
 
+    fun confirmReturn(v: ReturnConfirmation): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v))
+
+    fun dispute(v: LoanDispute): CborMap = CborMap(
+        buildMap {
+            put(K_LOAN, CborText(v.loan.v))
+            put(K_CLAIM, CborText(v.claim.name))
+            v.note?.let { put(K_NOTE, CborText(it)) }
+        },
+    )
+
+    fun resolve(v: LoanResolution): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v), K_OUTCOME to CborText(v.outcome.name))
+
     fun vouch(v: VouchTerms): CborMap = CborMap.of(K_VOUCHEE to CborText(v.vouchee.v), K_EXPIRES to CborInt(v.expiresDay.toLong()))
 
     fun loanHandover(v: LoanHandover): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v))
@@ -149,6 +173,26 @@ object MarketPayloads {
         val (from, to) = window(map) ?: return Parsed.Invalid("the window must be 0 to $MAX_LOAN_DAYS days with fromDay not after toDay")
         val note = optionalNote(map) ?: return Parsed.Invalid("note must be at most $MAX_LOAN_NOTE_CHARS characters")
         return Parsed.Ok(LoanRequest(LoanId(loan), ItemId(item), from, to, note.value))
+    }
+
+    fun parseReturnConfirmation(map: CborMap): Parsed<ReturnConfirmation> {
+        keys(map, required = setOf(K_LOAN))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(ReturnConfirmation(LoanId(randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters"))))
+    }
+
+    fun parseDispute(map: CborMap): Parsed<LoanDispute> {
+        keys(map, required = setOf(K_LOAN, K_CLAIM), optional = setOf(K_NOTE))?.let { return Parsed.Invalid(it) }
+        val loan = randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters")
+        val claim = enumOf<DisputeClaim>(map, K_CLAIM) ?: return Parsed.Invalid("claim is not a known claim")
+        val note = optionalNote(map) ?: return Parsed.Invalid("note must be at most $MAX_LOAN_NOTE_CHARS characters")
+        return Parsed.Ok(LoanDispute(LoanId(loan), claim, note.value))
+    }
+
+    fun parseResolution(map: CborMap): Parsed<LoanResolution> {
+        keys(map, required = setOf(K_LOAN, K_OUTCOME))?.let { return Parsed.Invalid(it) }
+        val loan = randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters")
+        val outcome = enumOf<DisputeOutcome>(map, K_OUTCOME) ?: return Parsed.Invalid("outcome is not a known outcome")
+        return Parsed.Ok(LoanResolution(LoanId(loan), outcome))
     }
 
     fun parseVouch(map: CborMap): Parsed<VouchTerms> {

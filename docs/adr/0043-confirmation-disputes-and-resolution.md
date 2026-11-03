@@ -1,6 +1,6 @@
 # 0043. Owner confirmation, disputes and their resolution (M4, second slice)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 
 ## Context
@@ -18,13 +18,20 @@ ADR 0042 made returned loans earn standing after a grace period of 7 days. Two t
 4. **Everything is judged the same way as in ADR 0042:** standing is computed from the events earlier in the log at the day of the event being judged, so every client agrees.
 5. **Screens.** On Borrow, an owner sees, for each returned loan: "It came back fine" (confirm) and a "Report a problem" disclosure (claim, note); loans in dispute show "Pending review" to both parties. A steward who is not a party sees "Disputes to resolve" with the claim, the borrower's reported outcome and the two buttons. A circle with a single steward shows that steward a warning that disputes in which they are a party cannot be resolved.
 
-## Decisions for the owner
+## Decisions for the owner (answered 2026-11-03: A1, B1, C1)
 
-**A. Who resolves.** **A1 (recommended, the spec's default): one steward who is not a party.** Fast, and the borrower and owner are both protected by the rule that a party cannot resolve their own case. **A2: the circle's steward quorum** (`StewardSettings.quorum`, default 2) must agree on the same outcome, using the same voting machinery as steward changes. Safer against one biased steward, but slower, and in a circle with two or three stewards a dispute between two of them can never reach a quorum.
+**A. Who resolves. Chosen: A1.** **A1 (recommended, the spec's default): one steward who is not a party.** Fast, and the borrower and owner are both protected by the rule that a party cannot resolve their own case. **A2: the circle's steward quorum** (`StewardSettings.quorum`, default 2) must agree on the same outcome, using the same voting machinery as steward changes. Safer against one biased steward, but slower, and in a circle with two or three stewards a dispute between two of them can never reach a quorum.
 
-**B. When nobody resolves.** This happens when the only steward is a party, or stewards are inactive. **B1 (recommended): after `damageClaimDays` (30) from the dispute with no resolution it counts as `DISMISSED`**, so a borrower's credit is not held for ever and the owner is never silently overruled: they keep the full claim window to find a steward. **B2: it stays pending** and both credits stay withheld until a steward acts. **B3:** after 30 days it counts as `UPHELD` (favours the owner); not recommended, because it would let one person punish another by inaction of others.
+**B. When nobody resolves. Chosen: B1.** This happens when the only steward is a party, or stewards are inactive. **B1 (recommended): after `damageClaimDays` (30) from the dispute with no resolution it counts as `DISMISSED`**, so a borrower's credit is not held for ever and the owner is never silently overruled: they keep the full claim window to find a steward. **B2: it stays pending** and both credits stay withheld until a steward acts. **B3:** after 30 days it counts as `UPHELD` (favours the owner); not recommended, because it would let one person punish another by inaction of others.
 
-**C. Is the owner's reward for a returned-with-damage dispute upheld?** **C1 (recommended): nothing**, as in point 3. **C2:** the owner keeps the normal lending credit (the item did come back).
+**C. Owner credit when a dispute is upheld. Chosen: C1.** **C1 (recommended): nothing**, as in point 3. **C2:** the owner keeps the normal lending credit (the item did come back).
+
+## Details settled while building
+
+- One window applies to every claim: a dispute must be dated no more than `damageClaimDays` (30) after the return, because claims are only damage or loss; `returnGraceDays` (7) only decides when an undisputed, unconfirmed return starts to count.
+- An unresolved dispute counts as `DISMISSED` from its 30th day (point B1). That is worked out when standing is computed, not by an event, so every client agrees.
+- The owner's `CONFIRMED_RETURN_PROMPTLY` credit is dropped if the loan is later disputed and the dispute is upheld or still pending.
+- A dispute dated before a confirmation cannot be followed by a confirmation; a dispute after a confirmation is allowed.
 
 ## Consequences
 

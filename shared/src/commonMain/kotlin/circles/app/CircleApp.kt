@@ -12,6 +12,9 @@ import circles.event.FIRST_EPOCH
 import circles.event.InviteKey
 import circles.event.ItemKeys
 import circles.event.MAX_ITEM_NAME_CHARS
+import circles.event.DAMAGE_CLAIM_DAYS
+import circles.event.DisputeClaim
+import circles.event.DisputeOutcome
 import circles.event.LoanId
 import circles.event.StandingRules
 import circles.event.LoanStatus
@@ -106,7 +109,12 @@ data class MemberSummary(
     val vouchedByMeUntil: Int? = null,
 )
 
-enum class LoanRole { BORROWER, OWNER }
+enum class LoanRole { BORROWER, OWNER, /** Neither party: a steward who may resolve this loan's dispute. */ STEWARD }
+
+enum class DisputeStatus { PENDING, UPHELD, DISMISSED }
+
+/** A dispute as the Borrow screen shows it. [DisputeStatus.DISMISSED] includes one that closed unresolved after 30 days. */
+data class DisputeSummary(val claim: DisputeClaim, val note: String?, val day: Int, val status: DisputeStatus)
 
 /** A loan this member is part of, as the Borrow screen shows it. */
 data class LoanSummary(
@@ -125,6 +133,14 @@ data class LoanSummary(
     /** The item's private details, once this device can read them (the owner always; a borrower after approval). */
     val description: String?,
     val note: String? = null,
+    /** What the borrower reported when returning it; null until returned. */
+    val reported: ReturnOutcome? = null,
+    val confirmed: Boolean = false,
+    val dispute: DisputeSummary? = null,
+    /** What this member may do about the return right now (ADR 0043). */
+    val canConfirm: Boolean = false,
+    val canDispute: Boolean = false,
+    val canResolve: Boolean = false,
 )
 
 sealed interface LoanResult {
@@ -189,6 +205,8 @@ data class HomeData(
     val standing: StandingSummary? = null,
     /** May I vouch for others right now? */
     val canVouch: Boolean = false,
+    /** How many stewards the circle has; one means disputes the steward is part of cannot be decided. */
+    val stewardCount: Int = 0,
     /** Everyone in the circle, in the order they joined. */
     val people: List<MemberSummary> = emptyList(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
@@ -493,6 +511,62 @@ class CircleApp(
         return LoanResult.Done(loan)
     }
 
+    /** The owner says the item came back as reported, so the return counts at once (ADR 0043). */
+    suspend fun confirmReturn(loan: LoanId): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.loans[loan] ?: return LoanResult.NotAllowed
+        if (!canConfirm(state, s.identity.member)) return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.confirmReturn(s.circle, today(), loan))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** The owner reports damage or loss the borrower did not mention; a steward who is not a party decides. */
+    suspend fun disputeReturn(loan: LoanId, claim: DisputeClaim, note: String): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.loans[loan] ?: return LoanResult.NotAllowed
+        if (!canDispute(state, s.identity.member, today())) return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.loanDispute(s.circle, today(), loan, claim, note.trim().ifEmpty { null }))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** A steward who is neither the owner nor the borrower decides a pending dispute. */
+    suspend fun resolveDispute(loan: LoanId, outcome: DisputeOutcome): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.loans[loan] ?: return LoanResult.NotAllowed
+        if (!canResolve(state, s.identity.member, view.stewards, today())) return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.loanResolve(s.circle, today(), loan, outcome))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    private fun returnedWithoutReportedProblem(loan: circles.event.LoanState): Boolean =
+        loan.status == LoanStatus.RETURNED && (loan.outcome == ReturnOutcome.OK || loan.outcome == ReturnOutcome.LATE)
+
+    private fun canConfirm(loan: circles.event.LoanState, me: MemberId): Boolean =
+        loan.owner == me && returnedWithoutReportedProblem(loan) && loan.confirmedDay == null && loan.dispute == null
+
+    private fun canDispute(loan: circles.event.LoanState, me: MemberId, day: Int): Boolean {
+        val returned = loan.returnedDay ?: return false
+        return loan.owner == me && returnedWithoutReportedProblem(loan) && loan.dispute == null && day >= returned && day - returned <= DAMAGE_CLAIM_DAYS
+    }
+
+    private fun canResolve(loan: circles.event.LoanState, me: MemberId, stewards: Set<MemberId>, day: Int): Boolean {
+        val dispute = loan.dispute ?: return false
+        return dispute.outcome == null && me in stewards && me != loan.owner && me != loan.borrower && day - dispute.day < DAMAGE_CLAIM_DAYS
+    }
+
     private fun windowProblem(fromDay: Int, toDay: Int, mustStartTodayOrLater: Boolean): LoanResult.BadDates? =
         if (fromDay > toDay || toDay - fromDay > MAX_LOAN_DAYS || (mustStartTodayOrLater && fromDay < today())) LoanResult.BadDates(MAX_LOAN_DAYS) else null
 
@@ -552,6 +626,7 @@ class CircleApp(
                     howToUnlock = unlockHints(myStanding, cfg),
                 ),
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
+                stewardCount = view.stewards.size,
                 autoLockMinutes = vault.autoLockMinutes,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     MemberSummary(
@@ -563,25 +638,48 @@ class CircleApp(
                         vouchedByMeUntil = vouchesNow.filter { it.voucher == me && it.vouchee == member && it.isLiveOn(now, cfg) }.maxOfOrNull { it.effectiveExpiry(cfg) },
                     )
                 },
-                loans = view.market.loans.values.filter { it.owner == s.identity.member || it.borrower == s.identity.member }.map { loan ->
-                    val item = view.market.items[loan.item]
-                    val iAmOwner = loan.owner == s.identity.member
-                    LoanSummary(
-                        loan = loan.loan,
-                        item = loan.item,
-                        itemName = item?.name.orEmpty(),
-                        role = if (iAmOwner) LoanRole.OWNER else LoanRole.BORROWER,
-                        other = if (iAmOwner) loan.borrower else loan.owner,
-                        fromDay = loan.fromDay,
-                        toDay = loan.toDay,
-                        status = loan.status,
-                        iConfirmedHandover = if (iAmOwner) loan.ownerConfirmedHandover else loan.borrowerConfirmedHandover,
-                        otherConfirmedHandover = if (iAmOwner) loan.borrowerConfirmedHandover else loan.ownerConfirmedHandover,
-                        outcome = loan.outcome,
-                        note = loan.requestNote,
-                        description = ((view.market.details[loan.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
-                    )
-                },
+                loans = view.market.loans.values
+                    .filter { loan -> loan.owner == me || loan.borrower == me || canResolve(loan, me, view.stewards, now) }
+                    .map { loan ->
+                        val item = view.market.items[loan.item]
+                        val role = when (me) {
+                            loan.owner -> LoanRole.OWNER
+                            loan.borrower -> LoanRole.BORROWER
+                            else -> LoanRole.STEWARD
+                        }
+                        val iAmOwner = role == LoanRole.OWNER
+                        val dispute = loan.dispute
+                        LoanSummary(
+                            loan = loan.loan,
+                            item = loan.item,
+                            itemName = item?.name.orEmpty(),
+                            role = role,
+                            other = if (iAmOwner) loan.borrower else loan.owner,
+                            fromDay = loan.fromDay,
+                            toDay = loan.toDay,
+                            status = loan.status,
+                            iConfirmedHandover = if (iAmOwner) loan.ownerConfirmedHandover else loan.borrowerConfirmedHandover,
+                            otherConfirmedHandover = if (iAmOwner) loan.borrowerConfirmedHandover else loan.ownerConfirmedHandover,
+                            outcome = loan.outcome,
+                            note = loan.requestNote,
+                            description = ((view.market.details[loan.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
+                            reported = loan.outcome,
+                            confirmed = loan.confirmedDay != null,
+                            dispute = dispute?.let {
+                                DisputeSummary(
+                                    it.claim, it.note, it.day,
+                                    when {
+                                        it.outcome == DisputeOutcome.UPHELD -> DisputeStatus.UPHELD
+                                        it.outcome == DisputeOutcome.DISMISSED || now - it.day >= DAMAGE_CLAIM_DAYS -> DisputeStatus.DISMISSED
+                                        else -> DisputeStatus.PENDING
+                                    },
+                                )
+                            },
+                            canConfirm = canConfirm(loan, me),
+                            canDispute = canDispute(loan, me, now),
+                            canResolve = canResolve(loan, me, view.stewards, now),
+                        )
+                    },
                 items = view.market.items.values.filter { !it.retired }.map { state ->
                     ItemSummary(
                         item = state.item,

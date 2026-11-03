@@ -48,6 +48,9 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.LOAN_HANDOVER,
     EventType.LOAN_RETURN,
     EventType.VOUCH,
+    EventType.STANDING_CONFIRM,
+    EventType.LOAN_DISPUTE,
+    EventType.LOAN_RESOLVE,
 )
 
 /** Types whose whole payload is secret: empty `public`, a sealed `encrypted` (spec 3.2, ADR 0025). */

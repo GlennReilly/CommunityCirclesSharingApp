@@ -10,6 +10,9 @@ import circles.event.LoanId
 import circles.event.LoanStatus
 import circles.event.ReturnOutcome
 import circles.app.AccessSummary
+import circles.app.DisputeStatus
+import circles.app.DisputeSummary
+import circles.event.DisputeClaim
 import circles.app.ItemSummary
 import circles.app.StandingSummary
 import circles.policy.Tier
@@ -240,6 +243,7 @@ class ShellViewTest {
             render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item)),
             settings(),
             borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
+            borrow(returned(LoanRole.OWNER, { it.copy(canDispute = true) })),
         )
         var labels = 0
         for (html in pages) {
@@ -248,7 +252,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -598,6 +602,69 @@ class ShellViewTest {
         assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in already)
         assertTrue("You vouch for them until 2027-05-01." in already)
         assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in members(home(people = listOf(mine, theirs)).copy(canVouch = false)), "newcomers see no vouch button")
+    }
+
+    private fun returned(role: LoanRole, vararg tweak: (LoanSummary) -> LoanSummary): LoanSummary =
+        tweak.fold(loan("r", role, LoanStatus.RETURNED, outcome = ReturnOutcome.OK).copy(reported = ReturnOutcome.OK)) { acc, f -> f(acc) }
+
+    @Test fun anOwnerCanConfirmAReturnOrReportAProblemAndTheFormHasLabelsAndMaxLength() {
+        val html = borrow(returned(LoanRole.OWNER, { it.copy(canConfirm = true, canDispute = true) }))
+        assertTrue("""$ATTR_ACTION="$ACTION_CONFIRM_RETURN"""" in html && "It came back fine" in html)
+        assertTrue("""id="$FORM_DISPUTE_PREFIX${"r".repeat(32)}"""" in html)
+        assertTrue("What went wrong: " in html && "Note: " in html && """maxlength="256"""" in html)
+        for (claim in DisputeClaim.entries) assertTrue("""value="${claim.name}"""" in html, claim.name)
+        assertTrue(html.indexOf("<details") < html.indexOf(FORM_DISPUTE_PREFIX), "the report sits behind a disclosure")
+        assertTrue("Use this only if the borrower did not tell you" in html)
+    }
+
+    @Test fun neitherConfirmNorReportIsOfferedWhenNotAllowed() {
+        val html = borrow(returned(LoanRole.OWNER), returned(LoanRole.BORROWER))
+        assertFalse(ACTION_CONFIRM_RETURN in html)
+        assertFalse(FORM_DISPUTE_PREFIX in html)
+    }
+
+    private fun disputed(status: DisputeStatus, note: String? = "the handle is cracked") =
+        { l: LoanSummary -> l.copy(dispute = DisputeSummary(DisputeClaim.DAMAGE, note, 20_760, status)) }
+
+    @Test fun everyoneSeesPendingReviewWithTheOwnersNoteAndCreditWaiting() {
+        for (role in listOf(LoanRole.OWNER, LoanRole.BORROWER)) {
+            val html = borrow(returned(role, disputed(DisputeStatus.PENDING)))
+            assertTrue("Pending review" in html, role.name)
+            assertTrue("Credit for this loan waits." in html)
+            assertTrue("Owner's note: the handle is cracked" in html)
+        }
+    }
+
+    @Test fun settledDisputesSayHowTheyEnded() {
+        assertTrue("was upheld" in borrow(returned(LoanRole.BORROWER, disputed(DisputeStatus.UPHELD))))
+        assertTrue("dismissed, so the return counts as reported" in borrow(returned(LoanRole.BORROWER, disputed(DisputeStatus.DISMISSED))))
+    }
+
+    @Test fun aStewardWhoIsNotAPartySeesTheDisputeAndTheTwoDecisions() {
+        val loan = returned(LoanRole.STEWARD, disputed(DisputeStatus.PENDING), { it.copy(canResolve = true) })
+        val html = render(open(home(steward = true, loans = listOf(loan))).copy(screen = Screen.Borrow))
+        assertTrue("Disputes to resolve" in html)
+        assertTrue("The owner says the borrower did not report damage" in html)
+        assertTrue("The borrower reported: Returned, all good" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_UPHOLD"""" in html && """$ATTR_ACTION="$ACTION_DISMISS_DISPUTE"""" in html)
+        assertFalse("Finished" in html, "the steward's view of someone else's loan is not in their own history")
+    }
+
+    @Test fun nobodyElseIsOfferedTheDecision() {
+        val html = borrow(returned(LoanRole.OWNER, disputed(DisputeStatus.PENDING)))
+        assertFalse("Disputes to resolve" in html)
+        assertFalse(ACTION_UPHOLD in html)
+    }
+
+    @Test fun theOnlyStewardIsWarnedAboutADisputeTheyAreAPartyTo() {
+        val loan = returned(LoanRole.OWNER, disputed(DisputeStatus.PENDING))
+        val warned = render(open(home(steward = true, loans = listOf(loan)).copy(stewardCount = 1)).copy(screen = Screen.Borrow))
+        assertTrue("You are the only steward, so nobody else can decide this" in warned)
+        assertTrue("closes after 30 days" in warned)
+        val fine = render(open(home(steward = true, loans = listOf(loan)).copy(stewardCount = 2)).copy(screen = Screen.Borrow))
+        assertFalse("only steward" in fine)
+        val member = render(open(home(steward = false, loans = listOf(loan)).copy(stewardCount = 1)).copy(screen = Screen.Borrow))
+        assertFalse("only steward" in member)
     }
 
     @Test fun statusLineIsALiveRegion() {

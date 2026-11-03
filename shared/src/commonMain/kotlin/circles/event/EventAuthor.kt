@@ -137,6 +137,18 @@ class EventAuthor(
     fun vouch(circle: CircleId, day: Int, vouchee: MemberId, expiresDay: Int): Envelope =
         build(circle, EventType.VOUCH, day, CborMap.EMPTY, MarketPayloads.vouch(VouchTerms(vouchee, expiresDay)))
 
+    /** The owner says the item came back as reported; the return then counts at once (ADR 0043). */
+    fun confirmReturn(circle: CircleId, day: Int, loan: LoanId): Envelope =
+        build(circle, EventType.STANDING_CONFIRM, day, CborMap.EMPTY, MarketPayloads.confirmReturn(ReturnConfirmation(loan)))
+
+    /** The owner says the borrower did not report damage or loss (ADR 0043). */
+    fun loanDispute(circle: CircleId, day: Int, loan: LoanId, claim: DisputeClaim, note: String? = null): Envelope =
+        build(circle, EventType.LOAN_DISPUTE, day, CborMap.EMPTY, MarketPayloads.dispute(LoanDispute(loan, claim, note)))
+
+    /** A steward who is not a party decides a dispute (ADR 0043). */
+    fun loanResolve(circle: CircleId, day: Int, loan: LoanId, outcome: DisputeOutcome): Envelope =
+        build(circle, EventType.LOAN_RESOLVE, day, CborMap.EMPTY, MarketPayloads.resolve(LoanResolution(loan, outcome)))
+
     fun loanHandover(circle: CircleId, day: Int, loan: LoanId): Envelope =
         build(circle, EventType.LOAN_HANDOVER, day, CborMap.EMPTY, MarketPayloads.loanHandover(LoanHandover(loan)))
 
