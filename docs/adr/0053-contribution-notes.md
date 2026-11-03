@@ -28,3 +28,7 @@ Standing so far comes only from lending and borrowing. The spec also has `standi
 - Needs payloads and fold rules in `MarketFold` and `StandingRules.eventsFrom`, two small forms and a list; the server only checks the events are sealed.
 - Standing from contributions is slower and smaller than from lending, on purpose: lending is the thing the circle exists for.
 - Contribution kinds cannot be added without a new ADR (the weights are config-able later, ADR 0051 left them out).
+
+## As built (2026-11-04)
+
+`standing.note {noteId, kind, with, text}` and `standing.confirm {noteId}` (the same type as a return confirmation; the fold tries the return shape first) are sealed events. `MarketFold` keeps `ContributionState`; a note is refused if it names oneself or someone outside the circle, if the author already made 3 in the last 30 days, or for `MENTORED_NEWCOMER` if the other person is above newcomer on that day; only the named person confirms, once, within 30 days of the note. A confirmed note adds a `StandingEvent` for its author dated on the confirmation day (`StandingRules.eventsFrom(..., contributions)`, threaded through `standingOf`, `mayVouch` and `decide`). The Standing page has "Waiting for your confirmation", "Log a contribution" and "Your recent contributions". B2 (a steward may confirm group events) was not chosen, so there is no steward path.

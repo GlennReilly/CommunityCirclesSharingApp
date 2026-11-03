@@ -59,6 +59,24 @@ enum class DisputeOutcome { UPHELD, DISMISSED }
 
 data class ReturnConfirmation(val loan: LoanId)
 
+/** The contributions that can be noted (ADR 0053), each worth the library's points for the matching standing event. */
+enum class ContributionKind(val standing: circles.policy.EventKind) {
+    SKILL_SHARE_HELPED(circles.policy.EventKind.SKILL_SHARE_HELPED),
+    HOSTED_OR_ORGANISED(circles.policy.EventKind.HOSTED_OR_ORGANISED),
+    MENTORED_NEWCOMER(circles.policy.EventKind.MENTORED_NEWCOMER),
+}
+
+/** A note's id: random 128-bit lowercase hex, made by its author. */
+data class NoteId(val v: String)
+
+/** `standing.note`: [with] confirms that the author did [kind] for or with them; it counts only once confirmed (ADR 0053). */
+data class StandingNote(val note: NoteId, val kind: ContributionKind, val with: MemberId, val text: String)
+
+/** `standing.confirm` for a note (the same event type also confirms a return). */
+data class NoteConfirmation(val note: NoteId)
+
+const val MAX_NOTE_TEXT_CHARS = 140
+
 data class LoanDispute(val loan: LoanId, val claim: DisputeClaim, val note: String?)
 
 data class LoanResolution(val loan: LoanId, val outcome: DisputeOutcome)
@@ -113,6 +131,10 @@ private const val K_VOUCH_VALID = "vouchValidityDays"
 private const val K_REVIEWERS = "reviewersForPause"
 private const val K_PAUSE_DAYS = "defaultPauseDays"
 private const val K_COOLDOWN = "incidentCooldownDays"
+private const val K_NOTE_ID = "noteId"
+private const val K_KIND = "kind"
+private const val K_WITH = "with"
+private const val K_TEXT = "text"
 private const val K_PAUSE = "pause"
 private const val K_SUBJECT = "subject"
 private const val K_REASON = "reason"
@@ -146,6 +168,23 @@ object MarketPayloads {
         keys(map, required = names.toSet())?.let { return Parsed.Invalid(it) }
         val n = names.map { name -> (map[name] as? CborInt)?.value?.takeIf { it in 0..MAX_DAY } ?: return Parsed.Invalid("$name must be a whole number") }.map { it.toInt() }
         return Parsed.Ok(ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+    }
+
+    fun standingNote(v: StandingNote): CborMap = CborMap.of(K_NOTE_ID to CborText(v.note.v), K_KIND to CborText(v.kind.name), K_WITH to CborText(v.with.v), K_TEXT to CborText(v.text))
+    fun confirmNote(v: NoteConfirmation): CborMap = CborMap.of(K_NOTE_ID to CborText(v.note.v))
+
+    fun parseStandingNote(map: CborMap): Parsed<StandingNote> {
+        keys(map, required = setOf(K_NOTE_ID, K_KIND, K_WITH, K_TEXT))?.let { return Parsed.Invalid(it) }
+        val note = randomId(map, K_NOTE_ID) ?: return Parsed.Invalid("noteId must be 32 lowercase hex characters")
+        val kind = enumOf<ContributionKind>(map, K_KIND) ?: return Parsed.Invalid("kind is not a known contribution")
+        val with = randomId(map, K_WITH) ?: return Parsed.Invalid("with must be 32 lowercase hex characters")
+        val text = text(map, K_TEXT, MAX_NOTE_TEXT_CHARS) ?: return Parsed.Invalid("text must be at most $MAX_NOTE_TEXT_CHARS characters")
+        return Parsed.Ok(StandingNote(NoteId(note), kind, MemberId(with), text))
+    }
+
+    fun parseNoteConfirmation(map: CborMap): Parsed<NoteConfirmation> {
+        keys(map, required = setOf(K_NOTE_ID))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(NoteConfirmation(NoteId(randomId(map, K_NOTE_ID) ?: return Parsed.Invalid("noteId must be 32 lowercase hex characters"))))
     }
 
     fun pausePropose(v: PauseProposal): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_SUBJECT to CborText(v.subject.v), K_REASON to CborText(v.reason), K_DAYS to CborInt(v.days.toLong()))

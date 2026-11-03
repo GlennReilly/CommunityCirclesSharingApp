@@ -25,7 +25,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | Config events (ADR 0051) and the owner's minimum tier on the item form | M | Lets the pilot tune thresholds without a release. |
 | Photos on items (the image policy exists; no screen) | M | |
 | QR codes: member fingerprint check and item tags | M | Fingerprints can be compared by eye now. |
-| `standing.note` contribution events and the sponsor nudge | M | Standing only comes from lending and borrowing for now. |
+| ~~`standing.note` contribution events~~ | done (ADR 0053) | The sponsor nudge for upheld damage disputes was already in (ADR 0043). |
 | Passkey (WebAuthn PRF) wrapping as an alternative to the passphrase | M | Passphrase works everywhere. |
 | Language and accessibility settings page (text size, contrast) | S | |
 | Pause history and a plain "what happened" log for stewards | S | |

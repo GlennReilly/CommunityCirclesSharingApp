@@ -156,6 +156,12 @@ class EventAuthor(
     fun configUpdate(circle: CircleId, day: Int, settings: ConfigSettings): Envelope =
         build(circle, EventType.CONFIG_UPDATE, day, CborMap.EMPTY, MarketPayloads.configUpdate(settings))
 
+    fun standingNote(circle: CircleId, day: Int, note: NoteId, kind: ContributionKind, with: MemberId, text: String): Envelope =
+        build(circle, EventType.STANDING_NOTE, day, CborMap.EMPTY, MarketPayloads.standingNote(StandingNote(note, kind, with, text)))
+
+    fun confirmNote(circle: CircleId, day: Int, note: NoteId): Envelope =
+        build(circle, EventType.STANDING_CONFIRM, day, CborMap.EMPTY, MarketPayloads.confirmNote(NoteConfirmation(note)))
+
     fun pausePropose(circle: CircleId, day: Int, pause: PauseId, subject: MemberId, reason: String, days: Int): Envelope =
         build(circle, EventType.PAUSE_PROPOSE, day, CborMap.EMPTY, MarketPayloads.pausePropose(PauseProposal(pause, subject, reason, days)))
 

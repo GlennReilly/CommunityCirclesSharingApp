@@ -875,4 +875,50 @@ abstract class MarketContract {
         w.log += w.bea.loanHandover(w.circle, DAY, loan)
         assertEquals(listOf("only a request or an approval before the hand-over can be cancelled"), w.reasons(listOf(w.bea.loanCancel(w.circle, DAY, loan))))
     }
+
+    // ---- contribution notes (ADR 0053) ----
+
+    private fun World.pointsOf(view: CircleView, member: MemberId, day: Int): Double =
+        StandingRules.standingOf(member, StandingRules.defaultConfig(circle), view.market.loans.values, emptyList(), view.stewards, day, view.market.contributions).points
+
+    @Test
+    fun aContributionCountsFromTheDayTheNamedPersonConfirmsAndNotBefore() = runTest {
+        val w = world()
+        val note = newNoteId(w.crypto)
+        w.log += w.bea.standingNote(w.circle, DAY, note, ContributionKind.SKILL_SHARE_HELPED, w.carol.identity.member, "fixed the bike")
+        assertEquals(emptyList(), w.foldAs(w.bea).rejected)
+        assertEquals(0.0, w.pointsOf(w.foldAs(w.bea), w.bea.identity.member, DAY + 6), "an unconfirmed note counts for nothing")
+        w.log += w.carol.confirmNote(w.circle, DAY + 5, note)
+        val view = w.foldAs(w.bea)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(0.0, w.pointsOf(view, w.bea.identity.member, DAY + 4))
+        assertEquals(1.5, w.pointsOf(view, w.bea.identity.member, DAY + 5), "the points of SKILL_SHARE_HELPED")
+        assertEquals(0.0, w.pointsOf(view, w.carol.identity.member, DAY + 5), "the person who confirms earns nothing")
+        assertEquals(DAY + 5, view.market.contributions.single().confirmedDay)
+    }
+
+    @Test
+    fun theRulesForNotesAndTheirConfirmation() = runTest {
+        val w = world()
+        fun note(by: EventAuthor, with: EventAuthor, day: Int = DAY, kind: ContributionKind = ContributionKind.HOSTED_OR_ORGANISED) =
+            by.standingNote(w.circle, day, newNoteId(w.crypto), kind, with.identity.member, "")
+        assertEquals(listOf("a note must name someone else"), w.reasons(listOf(note(w.bea, w.bea))))
+        assertEquals(listOf("both people must be in the circle"), w.reasons(listOf(w.bea.standingNote(w.circle, DAY, newNoteId(w.crypto), ContributionKind.HOSTED_OR_ORGANISED, MemberId("9".repeat(32)), ""))))
+        // The founder is a steward, so counts as trusted: only a newcomer can be mentored.
+        assertEquals(listOf("only a newcomer can be mentored"), w.reasons(listOf(note(w.bea, w.founder, kind = ContributionKind.MENTORED_NEWCOMER))))
+        assertEquals(emptyList(), w.reasons(listOf(note(w.founder, w.carol, kind = ContributionKind.MENTORED_NEWCOMER))))
+        // Three notes in 30 days; the fourth waits until the first is 30 days old.
+        val first = note(w.bea, w.carol, DAY)
+        w.log += first; w.log += note(w.bea, w.carol, DAY + 1); w.log += note(w.bea, w.founder, DAY + 2)
+        assertEquals(listOf("at most 3 contribution notes in 30 days"), w.reasons(listOf(note(w.bea, w.carol, DAY + 29))))
+        assertEquals(emptyList(), w.reasons(listOf(note(w.bea, w.carol, DAY + 30))))
+        // Only the named person confirms, once, and in time.
+        val id = w.foldAs(w.bea).market.contributions.first().note
+        assertEquals(listOf("only the person named can confirm"), w.reasons(listOf(w.founder.confirmNote(w.circle, DAY, id))))
+        assertEquals(listOf("only the person named can confirm"), w.reasons(listOf(w.bea.confirmNote(w.circle, DAY, id))))
+        assertEquals(listOf("unknown note"), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY, newNoteId(w.crypto)))))
+        assertEquals(listOf("the note has lapsed"), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 31, id))))
+        w.log += w.carol.confirmNote(w.circle, DAY + 3, id)
+        assertEquals(listOf("already confirmed"), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 4, id))))
+    }
 }

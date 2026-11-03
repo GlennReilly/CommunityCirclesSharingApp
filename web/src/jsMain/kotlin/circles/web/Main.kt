@@ -274,6 +274,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
                 }
+                FORM_NOTE_ADD -> {
+                    val kind = circles.event.ContributionKind.entries.firstOrNull { it.name == field(FIELD_NOTE_KIND) }
+                    val result = if (kind == null) null else circleApp.addContribution(kind, MemberId(field(FIELD_NOTE_WITH)), field(FIELD_NOTE_TEXT))
+                    dispatch(
+                        AppAction.Notice(
+                            when (result) {
+                                circles.app.NoteResult.Sent -> "Sent. It counts once they confirm it."
+                                is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                                else -> "That cannot be done right now."
+                            },
+                        ),
+                    )
+                }
                 FORM_RULES -> {
                     fun tenths(name: String): Int? = field(name).toDoubleOrNull()?.let { (it * 10 + 0.5).toInt() }
                     val numbers = listOf(tenths("rules-neighbour"), tenths("rules-trusted"), tenths("rules-steward")) +
@@ -495,6 +508,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 }
                 ACTION_RULES_AGREE -> target.getAttribute(ATTR_RULES)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 9 }?.let {
                     reportRules(circleApp?.proposeRules(rulesOf(it)) ?: RulesResult.NotAllowed)
+                }
+                ACTION_NOTE_CONFIRM -> target.getAttribute(ATTR_NOTE_ID)?.let { id ->
+                    dispatch(
+                        AppAction.Notice(
+                            when (val result = circleApp?.confirmContribution(circles.event.NoteId(id))) {
+                                circles.app.NoteResult.Sent -> "Confirmed. Thank you."
+                                is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                                else -> "That cannot be done right now."
+                            },
+                        ),
+                    )
                 }
                 ACTION_PAUSE_REVIEW -> target.getAttribute(ATTR_PAUSE)?.let { id ->
                     val agree = target.getAttribute(ATTR_AGREE) == "true"

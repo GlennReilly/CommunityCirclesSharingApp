@@ -60,6 +60,21 @@ data class DisputeState(
 /** The stewards at one moment of the log: who, how many must agree, and when each joined (ADR 0051). */
 class StewardFacts(val stewards: Set<MemberId>, val quorum: Int, val since: Map<MemberId, Int>)
 
+/** A contribution note and whether the named person confirmed it (ADR 0053); it counts for [author] from [confirmedDay]. */
+data class ContributionState(
+    val note: NoteId,
+    val author: MemberId,
+    val with: MemberId,
+    val kind: ContributionKind,
+    val text: String,
+    val day: Int,
+    val confirmedDay: Int? = null,
+)
+
+/** A note may be made at most this many times by one author in any [NOTE_WINDOW_DAYS] days, and is confirmed within that many days (ADR 0053). */
+const val MAX_NOTES_PER_WINDOW = 3
+const val NOTE_WINDOW_DAYS = 30
+
 /** Days a pause proposal stays open for reviews (ADR 0050). */
 const val PAUSE_PROPOSAL_WINDOW_DAYS = 14
 
@@ -115,6 +130,8 @@ class MarketView(
     val pendingConfigs: List<PendingConfig> = emptyList(),
     /** The defaults every circle starts from; [configOn] applies the versions on top. */
     val baseConfig: circles.policy.CircleConfig? = null,
+    /** Contribution notes (ADR 0053), confirmed or not, in the order they were made. */
+    val contributions: List<ContributionState> = emptyList(),
 ) {
     /** The circle's rules for a decision dated [day]: the newest version that had taken effect by then (ADR 0051, C1). */
     fun configOn(circle: CircleId, day: Int): circles.policy.CircleConfig {
@@ -138,7 +155,7 @@ private val MARKET_TYPES = setOf(
     EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.LOAN_CANCEL, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
-    EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE,
+    EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE, EventType.STANDING_NOTE,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -163,6 +180,9 @@ internal class MarketFold(
     private val loans = mutableMapOf<LoanId, LoanState>()
     private val pauses = linkedMapOf<PauseId, PauseState>()
     private val configs = mutableListOf<ConfigVersion>()
+    private val notes = linkedMapOf<NoteId, ContributionState>()
+
+    private fun confirmedNotes(): List<ContributionState> = notes.values.filter { it.confirmedDay != null }
     private val configProposals = linkedMapOf<ConfigSettings, PendingConfig>()
 
     /** The circle's rules in force on [day] (ADR 0051). */
@@ -178,7 +198,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList()), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -186,10 +206,11 @@ internal class MarketFold(
         EventType.ITEM_RETIRE -> parse(MarketPayloads.parseItemRetire(payload)) { retire(e.author, it) }
         EventType.ITEM_DETAIL -> parse(MarketPayloads.parseItemDetail(payload)) { detail(e.author, it) }
         EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it, e.day, id) }
-        EventType.STANDING_CONFIRM -> parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
+        EventType.STANDING_CONFIRM -> if (MarketPayloads.parseReturnConfirmation(payload) is Parsed.Invalid) parse(MarketPayloads.parseNoteConfirmation(payload)) { confirmNote(e.author, it, e.day) } else parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
         EventType.LOAN_DISPUTE -> parse(MarketPayloads.parseDispute(payload)) { dispute(e.author, it, e.day) }
         EventType.LOAN_RESOLVE -> parse(MarketPayloads.parseResolution(payload)) { resolve(e.author, it, e.day, id) }
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
+        EventType.STANDING_NOTE -> parse(MarketPayloads.parseStandingNote(payload)) { noteContribution(e.author, it, e.day, id) }
         EventType.CONFIG_UPDATE -> parse(MarketPayloads.parseConfigUpdate(payload)) { configUpdate(e.author, it, e.day, id) }
         EventType.PAUSE_PROPOSE -> parse(MarketPayloads.parsePausePropose(payload)) { proposePause(e.author, it, e.day, id) }
         EventType.PAUSE_REVIEW -> parse(MarketPayloads.parsePauseReview(payload)) { reviewPause(e.author, it, e.day, id) }
@@ -259,12 +280,35 @@ internal class MarketFold(
     private fun members(): Set<MemberId> = devices.values.filter { !it.revoked }.map { it.registration.member }.toSet()
 
     private fun isReviewer(member: MemberId, day: Int, id: EventId): Boolean =
-        StandingRules.standingOf(member, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day).tier.rank >= config(day).pauseReviewerMinTier.rank
+        StandingRules.standingOf(member, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier.rank >= config(day).pauseReviewerMinTier.rank
 
     /** Reviewers needed for a pause of [subject]: the configured number, at least two, and never more than the eligible reviewers minus one. */
     private fun reviewersNeeded(subject: MemberId, day: Int, id: EventId): Int {
         val eligible = members().count { it != subject && isReviewer(it, day, id) }
         return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config(day).reviewersForPause, eligible - 1)))
+    }
+
+    // ---- contribution notes (ADR 0053) ----
+
+    private fun noteContribution(author: MemberId, v: StandingNote, day: Int, id: EventId): String? {
+        if (notes.containsKey(v.note)) return "note id already used"
+        if (v.with == author) return "a note must name someone else"
+        if (author !in members() || v.with !in members()) return "both people must be in the circle"
+        if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days"
+        if (v.kind == ContributionKind.MENTORED_NEWCOMER &&
+            StandingRules.standingOf(v.with, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier != circles.policy.Tier.NEWCOMER
+        ) return "only a newcomer can be mentored"
+        notes[v.note] = ContributionState(v.note, author, v.with, v.kind, v.text, day)
+        return null
+    }
+
+    private fun confirmNote(author: MemberId, v: NoteConfirmation, day: Int): String? {
+        val note = notes[v.note] ?: return "unknown note"
+        if (note.with != author) return "only the person named can confirm"
+        if (note.confirmedDay != null) return "already confirmed"
+        if (day > note.day + NOTE_WINDOW_DAYS) return "the note has lapsed"
+        notes[v.note] = note.copy(confirmedDay = maxOf(day, note.day))
+        return null
     }
 
     // ---- circle rules (ADR 0051) ----
@@ -348,7 +392,7 @@ internal class MarketFold(
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
         if (v.vouchee == author) return "a member cannot vouch for themselves"
         if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day)) return "only a neighbour or above may vouch"
+        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a neighbour or above may vouch"
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }
@@ -360,7 +404,7 @@ internal class MarketFold(
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
         if (bookedOver(v.item, v.fromDay, v.toDay, except = null)) return "the item is already promised for some of those days"
-        val decision = StandingRules.decide(author, item, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day))
+        val decision = StandingRules.decide(author, item, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day), confirmedNotes())
         if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
         loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
         return null

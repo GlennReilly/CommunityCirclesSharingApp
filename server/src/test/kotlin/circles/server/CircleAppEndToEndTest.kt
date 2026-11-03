@@ -31,6 +31,9 @@ import circles.event.DisputeOutcome
 import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
+import circles.app.NoteResult
+import circles.app.NoteStatus
+import circles.event.ContributionKind
 import circles.app.PauseResult
 import circles.app.RulesResult
 import circles.app.PauseRole
@@ -1220,5 +1223,52 @@ class CircleAppEndToEndTest {
         assertEquals(LoanStatus.APPROVED, home(carol.app).loans.single { it.loan == carolLoan }.status)
         assertEquals(LoanResult.NotAllowed, bea.app.cancelLoan(beaLoan), "already cancelled")
         listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun aContributionCountsForStandingOnceTheNamedPersonConfirms() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea).forEach { it.app.syncOnce() } } }
+        val aliceId = home(alice.app).me; val beaId = home(bea.app).me
+        assertEquals("0.0", home(bea.app).standing!!.points)
+        assertEquals(listOf(aliceId), home(bea.app).contributions.candidates)
+        assertEquals(3, home(bea.app).contributions.notesLeft)
+
+        // Bea says she helped Alice with a skill. It is waiting; nothing counts yet. A steward cannot be "mentored".
+        assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "fixed the gate"))
+        assertEquals(NoteResult.Refused("only a newcomer can be mentored"), bea.app.addContribution(ContributionKind.MENTORED_NEWCOMER, aliceId, ""))
+        assertEquals(NoteResult.Refused("keep it to 140 characters"), bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "x".repeat(141)))
+        sync()
+        assertEquals("0.0", home(bea.app).standing!!.points)
+        val mine = home(bea.app).contributions.mine.single()
+        assertEquals(NoteStatus.WAITING, mine.status)
+        val waiting = home(alice.app).contributions.toConfirm.single()
+        assertEquals("fixed the gate", waiting.text); assertEquals(beaId, waiting.other)
+        assertEquals(NoteResult.Refused("only the person named can confirm"), bea.app.confirmContribution(mine.note), "the author cannot confirm their own note")
+
+        // Alice confirms; the points arrive for Bea, not for Alice.
+        assertEquals(NoteResult.Sent, alice.app.confirmContribution(waiting.note))
+        sync()
+        assertEquals("1.5", home(bea.app).standing!!.points)
+        assertEquals("0.0", home(alice.app).standing!!.points, "the person who confirms earns nothing")
+        assertEquals(NoteStatus.COUNTED, home(bea.app).contributions.mine.single().status)
+        assertEquals(emptyList(), home(alice.app).contributions.toConfirm)
+        assertEquals(NoteResult.Refused("already confirmed"), alice.app.confirmContribution(waiting.note))
+
+        // Three in 30 days, then the cap.
+        assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
+        assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
+        assertEquals(NoteResult.Refused("at most 3 contribution notes in 30 days"), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
+        assertEquals(0, home(bea.app).contributions.notesLeft)
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }

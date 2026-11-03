@@ -38,7 +38,12 @@ object StandingRules {
      * vouchers a mild nudge), if it is dismissed, or nobody resolves it within [DAMAGE_CLAIM_DAYS], the return counts as
      * the borrower reported it.
      */
-    fun eventsFrom(loans: Collection<LoanState>, circle: CircleId, day: Int, vouches: List<Vouch> = emptyList(), cfg: CircleConfig = defaultConfig(circle)): List<StandingEvent> = buildList {
+    fun eventsFrom(loans: Collection<LoanState>, circle: CircleId, day: Int, vouches: List<Vouch> = emptyList(), cfg: CircleConfig = defaultConfig(circle), contributions: List<ContributionState> = emptyList()): List<StandingEvent> = buildList {
+        // A contribution counts for its author from the day the other person confirmed it (ADR 0053).
+        for (c in contributions) {
+            val confirmed = c.confirmedDay ?: continue
+            if (confirmed <= day) add(StandingEvent(c.author, circle, c.kind.standing, confirmed, c.with, c.note.v))
+        }
         for (loan in loans) {
             val returned = loan.returnedDay ?: continue
             val outcome = loan.outcome ?: continue
@@ -84,8 +89,9 @@ object StandingRules {
         vouches: List<Vouch>,
         stewards: Set<MemberId>,
         day: Int,
+        contributions: List<ContributionState> = emptyList(),
     ): Standing {
-        val events = eventsFrom(loans, cfg.id, day, vouches, cfg)
+        val events = eventsFrom(loans, cfg.id, day, vouches, cfg, contributions)
         // A voucher counts by the tier their points earn (plus the steward floor), never by being vouched for (C12).
         val voucherTier = { who: MemberId ->
             floored(who, StandingCalculator.compute(who, cfg, events, emptyList(), { Tier.NEWCOMER }, day).tier, stewards)
@@ -96,8 +102,8 @@ object StandingRules {
     }
 
     /** May [voucher] vouch on [day]? Their tier must reach `voucherMinTier`. */
-    fun mayVouch(voucher: MemberId, cfg: CircleConfig, loans: Collection<LoanState>, vouches: List<Vouch>, stewards: Set<MemberId>, day: Int): Boolean {
-        val events = eventsFrom(loans, cfg.id, day)
+    fun mayVouch(voucher: MemberId, cfg: CircleConfig, loans: Collection<LoanState>, vouches: List<Vouch>, stewards: Set<MemberId>, day: Int, contributions: List<ContributionState> = emptyList()): Boolean {
+        val events = eventsFrom(loans, cfg.id, day, contributions = contributions)
         val base = floored(voucher, StandingCalculator.compute(voucher, cfg, events, emptyList(), { Tier.NEWCOMER }, day).tier, stewards)
         return base.rank >= cfg.voucherMinTier.rank
     }
@@ -112,8 +118,9 @@ object StandingRules {
         stewards: Set<MemberId>,
         day: Int,
         pauses: List<circles.policy.Pause> = emptyList(),
+        contributions: List<ContributionState> = emptyList(),
     ): AccessDecision {
-        val standing = standingOf(borrower, cfg, loans, vouches, stewards, day)
+        val standing = standingOf(borrower, cfg, loans, vouches, stewards, day, contributions)
         val policyItem = Item(
             id = item.item, owner = item.owner, name = item.name, itemClass = item.itemClass, ownerMinTier = item.minTier, circles = setOf(cfg.id),
         )

@@ -3,7 +3,10 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MIN_RECOVERY_THRESHOLD
+import circles.app.NoteStatus
 import circles.app.PauseRole
+import circles.event.ContributionKind
+import circles.event.MAX_NOTE_TEXT_CHARS
 import circles.app.PauseSummary
 import circles.event.MAX_PAUSE_APPEAL_CHARS
 import circles.event.MAX_PAUSE_DAYS
@@ -119,6 +122,12 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val FORM_NOTE_ADD = "contribution-form"
+const val FIELD_NOTE_KIND = "contribution-kind"
+const val FIELD_NOTE_WITH = "contribution-with"
+const val FIELD_NOTE_TEXT = "contribution-text"
+const val ACTION_NOTE_CONFIRM = "contribution-confirm"
+const val ATTR_NOTE_ID = "data-note-id"
 const val ACTION_PAUSE_REVIEW = "pause-review"
 const val ACTION_PAUSE_LIFT = "pause-lift"
 const val ATTR_PAUSE = "data-pause"
@@ -1066,6 +1075,7 @@ private fun FlowContent.standing(standing: StandingSummary?, home: HomeData? = n
         h2 { +"How to unlock more" }
         ul { for (step in standing.howToUnlock) li { +step } }
     }
+    if (home != null) contributions(home)
     if (home != null && (home.canProposePause || home.pauses.isNotEmpty())) {
         p { a(href = Screen.Pauses.fragment) { +"Pauses" } }
     }
@@ -1710,3 +1720,89 @@ private data class Quad(val field: String, val label: String, val step: String, 
 
 /** Tenths of a point as text with one decimal: 25 is "2.5". */
 private fun tenthsText(tenths: Int): String = "${tenths / 10}.${tenths % 10}"
+
+private fun contributionPhrase(kind: ContributionKind, mine: Boolean): String = when (kind) {
+    ContributionKind.SKILL_SHARE_HELPED -> if (mine) "helped them with a skill" else "helped you with a skill"
+    ContributionKind.HOSTED_OR_ORGANISED -> if (mine) "hosted or organised something with them" else "hosted or organised something with you"
+    ContributionKind.MENTORED_NEWCOMER -> if (mine) "mentored them as a newcomer" else "mentored you as a newcomer"
+}
+
+/** Contribution notes (ADR 0053): thank-yous that count once the other person confirms them. */
+private fun FlowContent.contributions(home: HomeData) {
+    val c = home.contributions
+    if (c.toConfirm.isNotEmpty()) {
+        section {
+            h2 { +"Waiting for your confirmation" }
+            for (note in c.toConfirm) {
+                div {
+                    p { +"Member ${note.other.v.take(MEMBER_SHORT_CHARS)} says they ${contributionPhrase(note.kind, mine = false)}.${if (note.text.isNotBlank()) " \"${note.text}\"" else ""}" }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_NOTE_CONFIRM
+                        attributes[ATTR_NOTE_ID] = note.note.v
+                        +"Yes, that happened"
+                    }
+                }
+            }
+        }
+    }
+    if (home.canRead && c.candidates.isNotEmpty()) {
+        section {
+            h2 { +"Log a contribution" }
+            p { +"Helped someone? It counts towards your standing once they confirm it. You can make ${c.notesLeft} more in the next 30 days." }
+            if (c.notesLeft > 0) {
+                form {
+                    id = FORM_NOTE_ADD
+                    label {
+                        attributes["for"] = FIELD_NOTE_KIND
+                        +"What you did: "
+                    }
+                    select {
+                        id = FIELD_NOTE_KIND
+                        name = FIELD_NOTE_KIND
+                        for (kind in ContributionKind.entries) option {
+                            value = kind.name
+                            +"I ${contributionPhrase(kind, mine = true)}"
+                        }
+                    }
+                    label {
+                        attributes["for"] = FIELD_NOTE_WITH
+                        +"Who: "
+                    }
+                    select {
+                        id = FIELD_NOTE_WITH
+                        name = FIELD_NOTE_WITH
+                        for (member in c.candidates) option {
+                            value = member.v
+                            +"Member ${member.v.take(MEMBER_SHORT_CHARS)}"
+                        }
+                    }
+                    label {
+                        attributes["for"] = FIELD_NOTE_TEXT
+                        +"A few words (optional): "
+                    }
+                    input(type = InputType.text, name = FIELD_NOTE_TEXT) {
+                        id = FIELD_NOTE_TEXT
+                        attributes["maxlength"] = MAX_NOTE_TEXT_CHARS.toString()
+                    }
+                    formSubmit("Send for confirmation", ready = true)
+                }
+            }
+        }
+    }
+    if (c.mine.isNotEmpty()) {
+        section {
+            h2 { +"Your recent contributions" }
+            ul {
+                for (note in c.mine) li {
+                    val what = contributionPhrase(note.kind, mine = true).replace("them", "member ${note.other.v.take(MEMBER_SHORT_CHARS)}")
+                    val state = when (note.status) {
+                        NoteStatus.COUNTED -> "confirmed and counted."
+                        NoteStatus.WAITING -> "waiting for them to confirm."
+                        NoteStatus.LAPSED -> "not confirmed in time, so it did not count."
+                    }
+                    +"You $what: $state"
+                }
+            }
+        }
+    }
+}

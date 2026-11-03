@@ -1119,4 +1119,25 @@ class ShellViewTest {
         val finished = borrow(loanLine(LoanRole.BORROWER, LoanStatus.CANCELLED))
         assertTrue("Cancelled." in finished && "Finished" in finished)
     }
+
+    // ---- contribution notes (ADR 0053) ----
+
+    private fun standingPage(c: circles.app.ContributionsSummary) =
+        render(open(home().copy(contributions = c, standing = StandingSummary(circles.policy.Tier.NEWCOMER, "0.0", emptyList(), emptyList()))).copy(screen = Screen.Standing))
+
+    @Test fun theStandingPageOffersToLogAContributionAndListsNotesToConfirm() {
+        val note = circles.app.NoteSummary(circles.event.NoteId("d".repeat(32)), circles.event.ContributionKind.SKILL_SHARE_HELPED, bea, "fixed the gate", 20_759, circles.app.NoteStatus.WAITING)
+        val html = standingPage(circles.app.ContributionsSummary(toConfirm = listOf(note), mine = listOf(note.copy(status = circles.app.NoteStatus.COUNTED)), candidates = listOf(bea), notesLeft = 2))
+        assertTrue("Waiting for your confirmation" in html && "says they helped you with a skill." in html && "fixed the gate" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_NOTE_CONFIRM" $ATTR_NOTE_ID="${note.note.v}"""" in html)
+        assertTrue("""id="$FORM_NOTE_ADD"""" in html && "You can make 2 more in the next 30 days." in html)
+        assertTrue("I mentored them as a newcomer" in html)
+        assertTrue("confirmed and counted." in html)
+    }
+
+    @Test fun theFormIsHiddenWhenNoNotesAreLeftOrThereIsNoOneToName() {
+        assertFalse(FORM_NOTE_ADD in standingPage(circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 0)))
+        assertFalse("Log a contribution" in standingPage(circles.app.ContributionsSummary(candidates = emptyList(), notesLeft = 3)))
+        assertFalse("Waiting for your confirmation" in standingPage(circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 3)))
+    }
 }

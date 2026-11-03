@@ -247,6 +247,29 @@ sealed interface LoanResult {
     data object NotAllowed : LoanResult
 }
 
+enum class NoteStatus { WAITING, COUNTED, LAPSED }
+
+/** A contribution note as the people it names see it (ADR 0053). [other] is the other person. */
+data class NoteSummary(val note: circles.event.NoteId, val kind: circles.event.ContributionKind, val other: MemberId, val text: String, val day: Int, val status: NoteStatus)
+
+data class ContributionsSummary(
+    /** Notes that name me and wait for my confirmation. */
+    val toConfirm: List<NoteSummary> = emptyList(),
+    /** My own recent notes and where each stands. */
+    val mine: List<NoteSummary> = emptyList(),
+    /** The people I may name, and how many more notes I may make now. */
+    val candidates: List<MemberId> = emptyList(),
+    val notesLeft: Int = 0,
+)
+
+sealed interface NoteResult {
+    data object Sent : NoteResult
+
+    data class Refused(val reason: String) : NoteResult
+
+    data object NotAllowed : NoteResult
+}
+
 enum class PauseRole { SUBJECT, REVIEWER }
 
 /** A pause or proposal this member may see (ADR 0050): the subject and the trusted members and stewards who may review it. */
@@ -340,6 +363,8 @@ data class HomeData(
     val pauses: List<PauseSummary> = emptyList(),
     /** The circle's rules in force today and the proposals for new ones (ADR 0051). */
     val rules: RulesSummary = RulesSummary(circles.event.ConfigSettings.of(circles.policy.CircleConfig(circles.policy.CircleId(""), ""))),
+    /** Contribution notes (ADR 0053). */
+    val contributions: ContributionsSummary = ContributionsSummary(),
     val canProposePause: Boolean = false,
     val pauseCandidates: List<MemberId> = emptyList(),
     val stewardList: List<StewardInfo> = emptyList(),
@@ -381,6 +406,8 @@ sealed interface ExportResult {
 private const val EXPORT_NAME_ID_CHARS = 8
 
 /** The smallest number of stewards that must come together (a single steward needs no sharing). */
+private const val MAX_NOTES_SHOWN = 8
+
 const val MIN_RECOVERY_THRESHOLD = 2
 
 sealed interface ShareMakingResult {
@@ -697,6 +724,49 @@ class CircleApp(
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- contribution notes (ADR 0053) ----
+
+    private fun contributionsFor(view: circles.event.CircleView, me: MemberId, now: Int): ContributionsSummary {
+        fun summary(c: circles.event.ContributionState, other: MemberId) = NoteSummary(
+            c.note, c.kind, other, c.text, c.day,
+            when {
+                c.confirmedDay != null -> NoteStatus.COUNTED
+                now <= c.day + circles.event.NOTE_WINDOW_DAYS -> NoteStatus.WAITING
+                else -> NoteStatus.LAPSED
+            },
+        )
+        val all = view.market.contributions
+        val recent = all.count { it.author == me && it.day > now - circles.event.NOTE_WINDOW_DAYS }
+        return ContributionsSummary(
+            toConfirm = all.filter { it.with == me && summary(it, it.author).status == NoteStatus.WAITING }.map { summary(it, it.author) },
+            mine = all.filter { it.author == me }.takeLast(MAX_NOTES_SHOWN).map { summary(it, it.with) },
+            candidates = view.devices.values.filter { !it.revoked }.map { it.registration.member }.distinct().filter { it != me },
+            notesLeft = (circles.event.MAX_NOTES_PER_WINDOW - recent).coerceAtLeast(0),
+        )
+    }
+
+    private suspend fun sendNote(event: circles.event.Envelope): NoteResult {
+        val (s, _) = pauseSession() ?: return NoteResult.NotAllowed
+        return when (val result = sendPause(s, event)) {
+            PauseResult.Sent -> NoteResult.Sent
+            is PauseResult.Refused -> NoteResult.Refused(result.reason)
+            PauseResult.NotAllowed -> NoteResult.NotAllowed
+        }
+    }
+
+    /** Notes that I did [kind] for or with [with]; it counts once they confirm (ADR 0053). */
+    suspend fun addContribution(kind: circles.event.ContributionKind, with: MemberId, text: String): NoteResult {
+        val (s, _) = pauseSession() ?: return NoteResult.NotAllowed
+        if (text.trim().length > circles.event.MAX_NOTE_TEXT_CHARS) return NoteResult.Refused("keep it to ${circles.event.MAX_NOTE_TEXT_CHARS} characters")
+        return sendNote(s.author.standingNote(s.circle, today(), circles.event.newNoteId(crypto), kind, with, text.trim()))
+    }
+
+    /** The named person confirms a note; it then counts for its author. */
+    suspend fun confirmContribution(note: circles.event.NoteId): NoteResult {
+        val (s, _) = pauseSession() ?: return NoteResult.NotAllowed
+        return sendNote(s.author.confirmNote(s.circle, today(), note))
     }
 
     // ---- circle rules (ADR 0051) ----
@@ -1226,7 +1296,7 @@ class CircleApp(
         val cfg = view.market.configOn(s.circle, today())
         val inCircle = view.devices.values.any { !it.revoked && it.registration.member == member }
         if (member == s.identity.member || !inCircle) return VouchResult.NotAllowed
-        if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today())) return VouchResult.NotAllowed
+        if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.contributions)) return VouchResult.NotAllowed
         s.author.keyRing = view.keys
         val expires = today() + VOUCH_DAYS
         s.engine.enqueue(s.circle, s.author.vouch(s.circle, today(), member, expires))
@@ -1244,7 +1314,7 @@ class CircleApp(
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
         val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member && it.owner !in view.market.departed } ?: return LoanResult.NotAllowed
         // The same rule every client applies when folding (ADR 0042); asking first spares the member a request that would be ignored.
-        val decision = StandingRules.decide(s.identity.member, state, view.market.configOn(s.circle, today()), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.livePausesOn(s.circle, today()))
+        val decision = StandingRules.decide(s.identity.member, state, view.market.configOn(s.circle, today()), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.livePausesOn(s.circle, today()), view.market.contributions)
         if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
         if (decision is AccessDecision.Paused) return LoanResult.Paused(decision.reasons)
         if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
@@ -1425,7 +1495,7 @@ class CircleApp(
         val loansNow = view.market.loans.values
         val vouchesNow = view.market.vouchesOn(now)
         val me = s.identity.member
-        val myStanding = StandingRules.standingOf(me, cfg, loansNow, vouchesNow, view.stewards, now)
+        val myStanding = StandingRules.standingOf(me, cfg, loansNow, vouchesNow, view.stewards, now, view.market.contributions)
         mutableModel.value = AppModel.Open(
             HomeData(
                 circle = s.circle,
@@ -1443,12 +1513,13 @@ class CircleApp(
                     reasons = myStanding.reasons,
                     howToUnlock = unlockHints(myStanding, cfg),
                 ),
-                canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
+                canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now, view.market.contributions),
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 recoveryShares = recoverySharesOf(view, s.identity.member),
                 pauses = pausesFor(view, me, myStanding.tier, now),
                 rules = rulesFor(view, me, now),
+                contributions = contributionsFor(view, me, now),
                 canProposePause = myStanding.tier.rank >= cfg.pauseReviewerMinTier.rank,
                 pauseCandidates = if (myStanding.tier.rank < cfg.pauseReviewerMinTier.rank) emptyList() else view.devices.values.filter { !it.revoked }
                     .map { it.registration.member }.distinct()
@@ -1526,7 +1597,7 @@ class CircleApp(
                         ownedByMe = state.owner == s.identity.member,
                         ownerMinTier = state.minTier,
                         description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
-                        access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now, view.market.livePausesOn(s.circle, now))) {
+                        access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now, view.market.livePausesOn(s.circle, now), view.market.contributions)) {
                             is AccessDecision.Eligible -> AccessSummary(true, emptyList(), emptyList())
                             is AccessDecision.NotYet -> AccessSummary(false, decision.reasons, decision.howToUnlock)
                             is AccessDecision.Paused -> AccessSummary(false, decision.reasons, emptyList())
