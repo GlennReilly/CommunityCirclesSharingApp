@@ -101,6 +101,15 @@ private const val K_OUTCOME = "outcome"
 private const val K_CLAIM = "claim"
 private const val K_VOUCHEE = "vouchee"
 private const val K_EXPIRES = "expiresDay"
+private const val K_NEIGHBOUR = "neighbourTenths"
+private const val K_TRUSTED = "trustedTenths"
+private const val K_STEWARD_TIER = "stewardTenths"
+private const val K_HALF_LIFE = "halfLifeDays"
+private const val K_VOUCHES = "vouchesForNeighbour"
+private const val K_VOUCH_VALID = "vouchValidityDays"
+private const val K_REVIEWERS = "reviewersForPause"
+private const val K_PAUSE_DAYS = "defaultPauseDays"
+private const val K_COOLDOWN = "incidentCooldownDays"
 private const val K_PAUSE = "pause"
 private const val K_SUBJECT = "subject"
 private const val K_REASON = "reason"
@@ -121,6 +130,20 @@ object MarketPayloads {
             put(K_KEY_WRAPS, wraps(v.keyWraps))
         },
     )
+
+    fun configUpdate(v: ConfigSettings): CborMap = CborMap.of(
+        K_NEIGHBOUR to CborInt(v.neighbourTenths.toLong()), K_TRUSTED to CborInt(v.trustedTenths.toLong()), K_STEWARD_TIER to CborInt(v.stewardTenths.toLong()),
+        K_HALF_LIFE to CborInt(v.halfLifeDays.toLong()), K_VOUCHES to CborInt(v.vouchesForNeighbour.toLong()), K_VOUCH_VALID to CborInt(v.vouchValidityDays.toLong()),
+        K_REVIEWERS to CborInt(v.reviewersForPause.toLong()), K_PAUSE_DAYS to CborInt(v.defaultPauseDays.toLong()), K_COOLDOWN to CborInt(v.incidentCooldownDays.toLong()),
+    )
+
+    /** Reads the whole-number fields only; whether the values are acceptable is [ConfigSettings.problem]'s job. */
+    fun parseConfigUpdate(map: CborMap): Parsed<ConfigSettings> {
+        val names = listOf(K_NEIGHBOUR, K_TRUSTED, K_STEWARD_TIER, K_HALF_LIFE, K_VOUCHES, K_VOUCH_VALID, K_REVIEWERS, K_PAUSE_DAYS, K_COOLDOWN)
+        keys(map, required = names.toSet())?.let { return Parsed.Invalid(it) }
+        val n = names.map { name -> (map[name] as? CborInt)?.value?.takeIf { it in 0..MAX_DAY } ?: return Parsed.Invalid("$name must be a whole number") }.map { it.toInt() }
+        return Parsed.Ok(ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+    }
 
     fun pausePropose(v: PauseProposal): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_SUBJECT to CborText(v.subject.v), K_REASON to CborText(v.reason), K_DAYS to CborInt(v.days.toLong()))
     fun pauseReview(v: PauseReview): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_AGREE to CborBool(v.agree))

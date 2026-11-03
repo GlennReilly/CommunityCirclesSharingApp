@@ -261,7 +261,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -750,7 +750,7 @@ class ShellViewTest {
     @Test fun theRulesFormHasFourLabelledNumbersWithTheirRangesAndAHiddenButton() {
         val html = stewards(true, listOf(meSteward))
         for (label in listOf("Stewards who must agree: ", "Quiet days: ", "Days to wait: ", "Stewards to rebuild the key (0 for none): ")) assertTrue(label in html, label)
-        assertEquals(4, Regex("""type="number"""").findAll(html).count())
+        assertEquals(4, Regex("""type="number"""").findAll(html.substringAfter(FORM_STEWARD_RULES)).count())
         assertTrue("""min="1"""" in html && """max="9"""" in html && """min="7"""" in html && """max="365"""" in html && """max="90"""" in html)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_STEWARD_RULES))?.value ?: error("no button")
         assertTrue("hidden" in button)
@@ -1070,5 +1070,36 @@ class ShellViewTest {
         assertTrue("1 pause proposal waiting for your answer" in render(open(home().copy(pauses = listOf(pauseSummary { copy(canReview = true) })))))
         assertTrue(Screen.Pauses.fragment in render(open(home().copy(canProposePause = true)).copy(screen = Screen.Standing, model = AppModel.Open(home(steward = false).copy(canProposePause = true, standing = StandingSummary(circles.policy.Tier.TRUSTED, "3.0", emptyList(), emptyList()))))))
         assertFalse(Screen.Pauses in Screen.navigation)
+    }
+
+    // ---- circle rules (ADR 0051) ----
+
+    private val defaultRules = circles.event.ConfigSettings.of(circles.policy.CircleConfig(circles.policy.CircleId(""), ""))
+
+    @Test fun theStewardsPageShowsTheCircleRulesInWordsAndProposalsToAgreeTo() {
+        val changed = defaultRules.copy(halfLifeDays = 90)
+        val summary = circles.app.RulesSummary(defaultRules, listOf(circles.app.RulesProposal(changed, 1, 2, iAgree = false, canAgree = true)))
+        val html = render(open(home().copy(rules = summary, stewardCount = 2)).copy(screen = Screen.Stewards))
+        assertTrue("Points for Neighbour, Trusted and Steward level: 3.0, 10.0 and 25.0" in html)
+        assertTrue("Points fade by half every 180 days" in html)
+        assertTrue("1 of 2 stewards agree." in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_RULES_AGREE" $ATTR_RULES="30:100:250:90:2:180:3:30:90"""" in html)
+        assertTrue("Things decided before then keep the rules they were decided under." in html)
+        assertTrue("""id="$FORM_RULES"""" in html)
+        val voted = circles.app.RulesProposal(changed, 1, 2, iAgree = true, canAgree = false)
+        assertFalse(ACTION_RULES_AGREE in render(open(home().copy(rules = summary.copy(proposals = listOf(voted)))).copy(screen = Screen.Stewards)))
+    }
+
+    @Test fun aMemberWhoIsNotAStewardSeesTheRulesButNoForm() {
+        val html = render(open(home(steward = false).copy(rules = circles.app.RulesSummary(defaultRules))).copy(screen = Screen.Stewards))
+        assertTrue("Points fade by half every 180 days" in html)
+        assertFalse(FORM_RULES in html)
+    }
+
+    @Test fun theItemFormOffersToRaiseWhoMayAskButNotLowerIt() {
+        val html = render(open(home()).copy(screen = Screen.AddItem))
+        assertTrue("""for="$FIELD_MIN_TIER"""" in html && "Who may ask: " in html)
+        assertTrue("Neighbour and above" in html && "Trusted and above" in html)
+        assertFalse("Newcomer and above" in html)
     }
 }

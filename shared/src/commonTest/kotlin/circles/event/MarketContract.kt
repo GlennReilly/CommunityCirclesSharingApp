@@ -766,4 +766,69 @@ abstract class MarketContract {
             w.reasons(listOf(w.founder.pausePropose(w.circle, DAY, id, w.bea.identity.member, "x", 5))),
         )
     }
+
+    // ---- circle rules (ADR 0051) ----
+
+    private fun World.defaults() = ConfigSettings.of(StandingRules.defaultConfig(circle))
+
+    @Test
+    fun aConfigTakesEffectFromTheDayItWasAgreedAndEarlierDaysKeepTheOldRules() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        val changed = w.defaults().copy(halfLifeDays = 90, vouchesForNeighbour = 3)
+        w.log += w.founder.configUpdate(w.circle, DAY + 10, changed)
+        val view = w.foldAs(w.founder)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(180, view.market.configOn(w.circle, DAY + 9).halfLifeDays, "before the day it took effect")
+        assertEquals(90, view.market.configOn(w.circle, DAY + 10).halfLifeDays)
+        assertEquals(3, view.market.configOn(w.circle, DAY + 400).vouchesForNeighbour)
+        assertEquals(listOf(ConfigVersion(DAY + 10, changed)), view.market.configs)
+        // A later change replaces it from its own day on.
+        val later = changed.copy(halfLifeDays = 60)
+        w.log += w.founder.configUpdate(w.circle, DAY + 20, later)
+        val view2 = w.foldAs(w.founder)
+        assertEquals(90, view2.market.configOn(w.circle, DAY + 19).halfLifeDays)
+        assertEquals(60, view2.market.configOn(w.circle, DAY + 20).halfLifeDays)
+    }
+
+    @Test
+    fun configRulesRefuseNonStewardsBadValuesAndNoChange() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        val d = w.defaults()
+        fun rejected(by: EventAuthor, settings: ConfigSettings) = w.reasons(listOf(by.configUpdate(w.circle, DAY, settings)))
+        assertEquals(listOf("only a steward may change the circle's rules"), rejected(w.bea, d.copy(halfLifeDays = 90)))
+        assertEquals(listOf("those are already the circle's rules"), rejected(w.founder, d))
+        assertEquals(listOf("halfLifeDays must be from 30 to 730"), rejected(w.founder, d.copy(halfLifeDays = 10)))
+        assertEquals(listOf("reviewersForPause must be from 2 to 9"), rejected(w.founder, d.copy(reviewersForPause = 1)))
+        assertEquals(listOf("thresholds must be positive and strictly increasing"), rejected(w.founder, d.copy(neighbourTenths = d.trustedTenths)))
+        assertEquals(listOf("thresholds must be from 0.1 to 10000 points"), rejected(w.founder, d.copy(stewardTenths = 0)))
+        assertEquals(listOf("incidentCooldownDays must be from 0 to 365"), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
+    }
+
+    @Test
+    fun withAQuorumOfTwoTheSameSettingsMustBeSentByTwoStewardsAfterTheCoolingOffAndInTime() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 2))
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
+        val wanted = w.defaults().copy(defaultPauseDays = 20)
+        val other = w.defaults().copy(defaultPauseDays = 21)
+        w.log += w.founder.configUpdate(w.circle, DAY, wanted)
+        var view = w.foldAs(w.founder)
+        assertEquals(emptyList(), view.market.configs)
+        assertEquals(setOf(w.founder.identity.member), view.market.pendingConfigs.single().voters)
+        // Bea is a new steward: she may not vote for 7 days; a vote for different settings does not count towards these.
+        assertEquals(listOf("a new steward cannot vote until day ${DAY + 7}"), w.reasons(listOf(w.bea.configUpdate(w.circle, DAY + 1, wanted))))
+        view = w.foldAs(w.founder, w.log + w.bea.configUpdate(w.circle, DAY + 7, other))
+        assertEquals(emptyList(), view.market.configs)
+        assertEquals(2, view.market.pendingConfigs.size)
+        view = w.foldAs(w.founder, w.log + w.bea.configUpdate(w.circle, DAY + 7, wanted))
+        assertEquals(listOf(ConfigVersion(DAY + 7, wanted)), view.market.configs)
+        assertEquals(20, view.market.configOn(w.circle, DAY + 7).defaultPauseDays)
+        assertEquals(30, view.market.configOn(w.circle, DAY + 6).defaultPauseDays)
+        // A first vote that is more than 14 days old no longer counts.
+        val stale = w.foldAs(w.founder, w.log + w.bea.configUpdate(w.circle, DAY + 15, wanted))
+        assertEquals(emptyList(), stale.market.configs)
+        assertEquals(DAY + 15, stale.market.pendingConfigs.single { it.settings == wanted }.firstDay)
+    }
 }

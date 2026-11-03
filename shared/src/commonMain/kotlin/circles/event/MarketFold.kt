@@ -57,6 +57,9 @@ data class DisputeState(
     val resolvedDay: Int? = null,
 )
 
+/** The stewards at one moment of the log: who, how many must agree, and when each joined (ADR 0051). */
+class StewardFacts(val stewards: Set<MemberId>, val quorum: Int, val since: Map<MemberId, Int>)
+
 /** Days a pause proposal stays open for reviews (ADR 0050). */
 const val PAUSE_PROPOSAL_WINDOW_DAYS = 14
 
@@ -107,7 +110,18 @@ class MarketView(
     val departed: Map<MemberId, Int> = emptyMap(),
     /** Pauses (ADR 0050), in the order they were proposed. */
     val pauses: List<PauseState> = emptyList(),
+    /** Circle rules that took effect (ADR 0051), earliest first, and the proposals still short of enough votes. */
+    val configs: List<ConfigVersion> = emptyList(),
+    val pendingConfigs: List<PendingConfig> = emptyList(),
+    /** The defaults every circle starts from; [configOn] applies the versions on top. */
+    val baseConfig: circles.policy.CircleConfig? = null,
 ) {
+    /** The circle's rules for a decision dated [day]: the newest version that had taken effect by then (ADR 0051, C1). */
+    fun configOn(circle: CircleId, day: Int): circles.policy.CircleConfig {
+        val base = baseConfig ?: StandingRules.defaultConfig(circle)
+        return configs.lastOrNull { it.fromDay <= day }?.settings?.applyTo(base) ?: base
+    }
+
     /** The pauses in force on [day], in the form the access rule reads. */
     fun livePausesOn(circle: CircleId, day: Int): List<circles.policy.Pause> =
         pauses.filter { it.statusOn(day) == PauseStatus.LIVE }.map {
@@ -124,7 +138,7 @@ private val MARKET_TYPES = setOf(
     EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
-    EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT,
+    EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -141,12 +155,19 @@ internal class MarketFold(
     private val mayBorrow: (MemberId, ItemId) -> Boolean,
     /** The stewards at the moment of each event (ADR 0042: the role floor uses the set as it was). */
     private val stewardsAt: (EventId) -> Set<MemberId> = { emptySet() },
-    private val config: circles.policy.CircleConfig = StandingRules.defaultConfig(circle),
+    private val baseConfig: circles.policy.CircleConfig = StandingRules.defaultConfig(circle),
+    private val stewardFactsAt: (EventId) -> StewardFacts = { StewardFacts(emptySet(), DEFAULT_STEWARD_QUORUM, emptyMap()) },
 ) {
     private val vouches = mutableListOf<circles.policy.Vouch>()
     private val items = mutableMapOf<ItemId, ItemState>()
     private val loans = mutableMapOf<LoanId, LoanState>()
     private val pauses = linkedMapOf<PauseId, PauseState>()
+    private val configs = mutableListOf<ConfigVersion>()
+    private val configProposals = linkedMapOf<ConfigSettings, PendingConfig>()
+
+    /** The circle's rules in force on [day] (ADR 0051). */
+    private fun config(day: Int): circles.policy.CircleConfig =
+        configs.lastOrNull { it.fromDay <= day }?.settings?.applyTo(baseConfig) ?: baseConfig
     private val rejected = mutableMapOf<EventId, String>()
 
     fun fold(events: List<OpenedEvent>): MarketResult {
@@ -157,7 +178,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList()), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -169,6 +190,7 @@ internal class MarketFold(
         EventType.LOAN_DISPUTE -> parse(MarketPayloads.parseDispute(payload)) { dispute(e.author, it, e.day) }
         EventType.LOAN_RESOLVE -> parse(MarketPayloads.parseResolution(payload)) { resolve(e.author, it, e.day, id) }
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
+        EventType.CONFIG_UPDATE -> parse(MarketPayloads.parseConfigUpdate(payload)) { configUpdate(e.author, it, e.day, id) }
         EventType.PAUSE_PROPOSE -> parse(MarketPayloads.parsePausePropose(payload)) { proposePause(e.author, it, e.day, id) }
         EventType.PAUSE_REVIEW -> parse(MarketPayloads.parsePauseReview(payload)) { reviewPause(e.author, it, e.day, id) }
         EventType.PAUSE_APPEAL -> parse(MarketPayloads.parsePauseAppeal(payload)) { appealPause(e.author, it, e.day) }
@@ -236,17 +258,38 @@ internal class MarketFold(
     private fun members(): Set<MemberId> = devices.values.filter { !it.revoked }.map { it.registration.member }.toSet()
 
     private fun isReviewer(member: MemberId, day: Int, id: EventId): Boolean =
-        StandingRules.standingOf(member, config, loans.values, vouchesCounting(day), stewardsAt(id), day).tier.rank >= config.pauseReviewerMinTier.rank
+        StandingRules.standingOf(member, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day).tier.rank >= config(day).pauseReviewerMinTier.rank
 
     /** Reviewers needed for a pause of [subject]: the configured number, at least two, and never more than the eligible reviewers minus one. */
     private fun reviewersNeeded(subject: MemberId, day: Int, id: EventId): Int {
         val eligible = members().count { it != subject && isReviewer(it, day, id) }
-        return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config.reviewersForPause, eligible - 1)))
+        return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config(day).reviewersForPause, eligible - 1)))
+    }
+
+    // ---- circle rules (ADR 0051) ----
+
+    private fun configUpdate(author: MemberId, v: ConfigSettings, day: Int, id: EventId): String? {
+        val facts = stewardFactsAt(id)
+        if (author !in facts.stewards) return "only a steward may change the circle's rules"
+        val since = facts.since[author]
+        if (facts.quorum > 1 && since != null && since != FOUNDING_STEWARD_DAY && day < since + DEFAULT_STEWARD_COOL_OFF_DAYS) return "a new steward cannot vote until day ${since + DEFAULT_STEWARD_COOL_OFF_DAYS}"
+        v.problem(baseConfig)?.let { return it }
+        if (v == ConfigSettings.of(config(day))) return "those are already the circle's rules"
+        val open = configProposals[v]?.takeIf { day <= it.firstDay + DEFAULT_STEWARD_PROPOSAL_DAYS }
+        val proposal = (open ?: PendingConfig(v, emptySet(), day)).let { it.copy(voters = it.voters + author) }
+        if (proposal.voters.size >= minOf(facts.quorum, facts.stewards.size)) {
+            configs += ConfigVersion(day, v)
+            configs.sortBy { it.fromDay }
+            configProposals.remove(v)
+        } else {
+            configProposals[v] = proposal
+        }
+        return null
     }
 
     private fun proposePause(author: MemberId, v: PauseProposal, day: Int, id: EventId): String? {
         if (pauses.containsKey(v.pause)) return "pause id already used"
-        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config.pauseReviewerMinTier.name.lowercase()} member or above may propose a pause"
+        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may propose a pause"
         if (v.subject == author) return "a member cannot propose pausing themselves"
         if (v.subject !in members()) return "the subject is not in the circle"
         if (v.subject in stewardsAt(id)) return "a steward is not paused: the steward rules apply"
@@ -263,7 +306,7 @@ internal class MarketFold(
         if (pause.liftedDay != null) return "the pause has been lifted"
         val status = pause.statusOn(day)
         if (status == PauseStatus.LAPSED || status == PauseStatus.ENDED) return "the pause is over"
-        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config.pauseReviewerMinTier.name.lowercase()} member or above may review"
+        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may review"
         if (pause.liveFrom != null) {
             // Once in force, only a reviewer who agreed may step back; stepping back below the number needed ends the pause.
             if (v.agree || author !in pause.agreeing) return "the pause is already in force"
@@ -304,7 +347,7 @@ internal class MarketFold(
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
         if (v.vouchee == author) return "a member cannot vouch for themselves"
         if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config, loans.values, vouchesCounting(day), stewardsAt(id), day)) return "only a neighbour or above may vouch"
+        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day)) return "only a neighbour or above may vouch"
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }
@@ -315,7 +358,7 @@ internal class MarketFold(
         if (item.owner == author) return "a member cannot borrow their own item"
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
-        val decision = StandingRules.decide(author, item, config, loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day))
+        val decision = StandingRules.decide(author, item, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day))
         if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
         loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
         return null

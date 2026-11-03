@@ -82,6 +82,9 @@ class CircleFold(
         val accepted = mutableListOf<Pair<EventId, Envelope>>()
         // The steward set as it stood after each accepted event, so the standing floor can use "stewards then" (ADR 0042).
         val stewardsAfter = mutableMapOf<EventId, Set<MemberId>>()
+        // The same moment's quorum and when each steward joined, for rules voted by stewards inside sealed events (ADR 0051).
+        val factsAfter = mutableMapOf<EventId, StewardFacts>()
+        var currentFacts = StewardFacts(emptySet(), DEFAULT_STEWARD_QUORUM, emptyMap())
         var currentStewards: Set<MemberId> = emptySet()
         for ((index, envelope) in log.withIndex()) {
             val id = envelope.eventId(crypto)
@@ -91,12 +94,16 @@ class CircleFold(
                 accepted += id to envelope
                 if (state.stewards.keys != currentStewards) currentStewards = state.stewards.keys.toSet()
                 stewardsAfter[id] = currentStewards
+                if (currentFacts.stewards != currentStewards || currentFacts.quorum != state.settings.quorum || currentFacts.since != state.stewards) {
+                    currentFacts = StewardFacts(currentStewards, state.settings.quorum, state.stewards.toMap())
+                }
+                factsAfter[id] = currentFacts
             } else {
                 state.rejected += RejectedEvent(id, envelope.type, problem)
             }
         }
         val opened = accepted.map { (id, envelope) -> OpenedEvent(id, envelope, PayloadSealing.open(cipher, state.keys, envelope)) }
-        val market = MarketFold(cipher, me, circle, state.devices, mayBorrow, { stewardsAfter[it].orEmpty() }).fold(opened)
+        val market = MarketFold(cipher, me, circle, state.devices, mayBorrow, { stewardsAfter[it].orEmpty() }, stewardFactsAt = { factsAfter[it] ?: StewardFacts(emptySet(), DEFAULT_STEWARD_QUORUM, emptyMap()) }).fold(opened)
         val refused = opened.filter { it.id in market.rejected }.map { RejectedEvent(it.id, it.envelope.type, market.rejected.getValue(it.id)) }
         return CircleView(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,

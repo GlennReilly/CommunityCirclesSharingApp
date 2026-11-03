@@ -22,6 +22,7 @@ import circles.app.MAX_DEVICE_NAME_CHARS
 import circles.app.ExportResult
 import circles.event.PauseId
 import circles.app.PauseResult
+import circles.app.RulesResult
 import circles.app.RebuildResult
 import circles.app.RecoveryCodeResult
 import circles.app.ShareMakingResult
@@ -242,8 +243,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (link == null) dispatch(AppAction.Notice("That does not look like an invite link. Paste the whole link you were sent."))
                     else dispatch(AppAction.InviteSeen(link))
                 }
-                FORM_ITEM_ADD -> reportItem(circleApp.addItem(field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS)))
-                FORM_ITEM_EDIT -> state.editing?.let { reportItem(circleApp.editItem(it, field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS))) }
+                FORM_ITEM_ADD -> reportItem(circleApp.addItem(field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS), tierOrNull(field(FIELD_MIN_TIER))))
+                FORM_ITEM_EDIT -> state.editing?.let { reportItem(circleApp.editItem(it, field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS), tierOrNull(field(FIELD_MIN_TIER)))) }
                 FORM_LOAN_REQUEST -> {
                     val from = CalendarDay.parse(field(FIELD_FROM))
                     val to = CalendarDay.parse(field(FIELD_TO))
@@ -272,6 +273,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val recovery = field(FIELD_RECOVERY).toIntOrNull()
                     if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
+                }
+                FORM_RULES -> {
+                    fun tenths(name: String): Int? = field(name).toDoubleOrNull()?.let { (it * 10 + 0.5).toInt() }
+                    val numbers = listOf(tenths("rules-neighbour"), tenths("rules-trusted"), tenths("rules-steward")) +
+                        listOf("rules-halflife", "rules-vouches", "rules-vouch-days", "rules-reviewers", "rules-pause-days", "rules-cooldown").map { field(it).toIntOrNull() }
+                    if (numbers.any { it == null }) dispatch(AppAction.Notice("Fill in every number."))
+                    else reportRules(circleApp.proposeRules(rulesOf(numbers.map { it!! })))
                 }
                 FORM_PAUSE_PROPOSE -> dispatch(
                     AppAction.Notice(
@@ -397,6 +405,18 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    private fun reportRules(result: RulesResult) {
+        dispatch(
+            AppAction.Notice(
+                when (result) {
+                    is RulesResult.Sent -> if (result.takesEffect) "Done. The new rules apply from today." else "Sent. The rules change when enough stewards agree."
+                    is RulesResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    RulesResult.NotAllowed -> "Only a steward can do that."
+                },
+            ),
+        )
+    }
+
     private fun reportSteward(result: StewardResult) {
         dispatch(
             AppAction.Notice(
@@ -471,6 +491,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     }
                     ExportResult.Incomplete -> dispatch(AppAction.Notice("This device does not have the whole log yet. Press Sync now, then try again."))
                     ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Open the circle first."))
+                }
+                ACTION_RULES_AGREE -> target.getAttribute(ATTR_RULES)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 9 }?.let {
+                    reportRules(circleApp?.proposeRules(rulesOf(it)) ?: RulesResult.NotAllowed)
                 }
                 ACTION_PAUSE_REVIEW -> target.getAttribute(ATTR_PAUSE)?.let { id ->
                     val agree = target.getAttribute(ATTR_AGREE) == "true"
@@ -565,3 +588,7 @@ private fun pauseText(result: PauseResult, done: String): String = when (result)
     is PauseResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
     PauseResult.NotAllowed -> "You cannot do that right now."
 }
+
+private fun rulesOf(n: List<Int>) = circles.event.ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8])
+
+private fun tierOrNull(name: String): circles.policy.Tier? = circles.policy.Tier.entries.firstOrNull { it.name == name }

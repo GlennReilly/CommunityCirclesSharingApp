@@ -91,9 +91,27 @@ data class ItemSummary(
     val owner: MemberId,
     val ownedByMe: Boolean,
     val description: String?,
+    /** The lowest tier the owner allows, if they raised it above the class default. */
+    val ownerMinTier: Tier? = null,
     /** For items that are not mine: may I ask to borrow it? */
     val access: AccessSummary? = null,
 )
+
+/** The circle's rules and the proposals for new ones (ADR 0051). */
+data class RulesSummary(
+    val current: circles.event.ConfigSettings,
+    val proposals: List<RulesProposal> = emptyList(),
+)
+
+data class RulesProposal(val settings: circles.event.ConfigSettings, val agreeing: Int, val needed: Int, val iAgree: Boolean, val canAgree: Boolean)
+
+sealed interface RulesResult {
+    data class Sent(val takesEffect: Boolean) : RulesResult
+
+    data class Refused(val reason: String) : RulesResult
+
+    data object NotAllowed : RulesResult
+}
 
 /** Your own standing in the circle (ADR 0042): never shown to anyone else. */
 data class StandingSummary(
@@ -317,6 +335,8 @@ data class HomeData(
     val recoveryShares: RecoverySharesSummary = RecoverySharesSummary(),
     /** Pauses and proposals I may see (ADR 0050), and whether I may propose one and about whom. */
     val pauses: List<PauseSummary> = emptyList(),
+    /** The circle's rules in force today and the proposals for new ones (ADR 0051). */
+    val rules: RulesSummary = RulesSummary(circles.event.ConfigSettings.of(circles.policy.CircleConfig(circles.policy.CircleId(""), ""))),
     val canProposePause: Boolean = false,
     val pauseCandidates: List<MemberId> = emptyList(),
     val stewardList: List<StewardInfo> = emptyList(),
@@ -676,10 +696,42 @@ class CircleApp(
         return RegistrationBatch(events, wrapped, shared)
     }
 
+    // ---- circle rules (ADR 0051) ----
+
+    private fun rulesFor(view: circles.event.CircleView, me: MemberId, now: Int): RulesSummary {
+        val needed = minOf(view.stewardSettings.quorum, view.stewards.size).coerceAtLeast(1)
+        val since = view.stewardSince[me]
+        val coolingOff = view.stewardSettings.quorum > 1 && since != null && since != circles.event.FOUNDING_STEWARD_DAY && now < since + circles.event.DEFAULT_STEWARD_COOL_OFF_DAYS
+        return RulesSummary(
+            circles.event.ConfigSettings.of(view.market.configOn(circles.policy.CircleId(""), now)),
+            view.market.pendingConfigs.filter { now <= it.firstDay + circles.event.DEFAULT_STEWARD_PROPOSAL_DAYS }.map {
+                RulesProposal(it.settings, it.voters.size, needed, me in it.voters, me in view.stewards && me !in it.voters && !coolingOff)
+            },
+        )
+    }
+
+    /** A steward's vote for these circle rules; the same call agrees to someone else's proposal (ADR 0051). */
+    suspend fun proposeRules(settings: circles.event.ConfigSettings): RulesResult {
+        val (s, view) = pauseSession() ?: return RulesResult.NotAllowed
+        if (s.identity.member !in view.stewards) return RulesResult.NotAllowed
+        val event = s.author.configUpdate(s.circle, today(), settings)
+        val id = event.eventId(crypto)
+        s.engine.enqueue(s.circle, event)
+        val after = replica.fold(s.circle, crypto, cipher, s.identity)
+        val refused = after.rejected.firstOrNull { it.id == id }
+        if (refused != null) {
+            replica.dropFromOutbox(s.circle, setOf(id))
+            return RulesResult.Refused(refused.reason)
+        }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return RulesResult.Sent(takesEffect = after.market.configs.any { it.settings == settings && it.fromDay == today() })
+    }
+
     // ---- pauses (ADR 0050) ----
 
     private fun pausesFor(view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseSummary> {
-        val cfg = StandingRules.defaultConfig(circles.policy.CircleId(""))
+        val cfg = view.market.configOn(circles.policy.CircleId(""), now)
         val mayReview = myTier.rank >= cfg.pauseReviewerMinTier.rank
         return view.market.pauses.mapNotNull { pause ->
             val status = pause.statusOn(now)
@@ -1131,24 +1183,24 @@ class CircleApp(
     }
 
     /** Adds an item owned by this member. Its description is sealed with a key of its own; only approved borrowers will get it. */
-    suspend fun addItem(name: String, itemClass: ItemClass, description: String): ItemResult {
+    suspend fun addItem(name: String, itemClass: ItemClass, description: String, minTier: Tier? = null): ItemResult {
         val s = session ?: return ItemResult.NotAllowed
         checkFields(name, description)?.let { return it }
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return ItemResult.NotLetInYet
         s.author.keyRing = view.keys
-        return saveItem(s, view, newItemId(crypto), newDetailKeyId(crypto), ItemKeys.newKey(crypto), name.trim(), itemClass, description.trim())
+        return saveItem(s, view, newItemId(crypto), newDetailKeyId(crypto), ItemKeys.newKey(crypto), name.trim(), itemClass, description.trim(), minTier)
     }
 
     /** Changes an item's name, kind or description. Only its owner can, and only while this device holds the item's key. */
-    suspend fun editItem(item: ItemId, name: String, itemClass: ItemClass, description: String): ItemResult {
+    suspend fun editItem(item: ItemId, name: String, itemClass: ItemClass, description: String, minTier: Tier? = null): ItemResult {
         val s = session ?: return ItemResult.NotAllowed
         checkFields(name, description)?.let { return it }
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         val state = view.market.items[item]?.takeIf { it.owner == s.identity.member && !it.retired } ?: return ItemResult.NotAllowed
         val key = view.market.itemKeys[item to state.detailKeyId] ?: return ItemResult.NotAllowed
         s.author.keyRing = view.keys
-        return saveItem(s, view, item, state.detailKeyId, key, name.trim(), itemClass, description.trim())
+        return saveItem(s, view, item, state.detailKeyId, key, name.trim(), itemClass, description.trim(), minTier)
     }
 
     /** Takes an item off the list (its owner only). Loans already active can still be returned. */
@@ -1168,7 +1220,7 @@ class CircleApp(
         val s = session ?: return VouchResult.NotAllowed
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return VouchResult.NotLetInYet
-        val cfg = StandingRules.defaultConfig(s.circle)
+        val cfg = view.market.configOn(s.circle, today())
         val inCircle = view.devices.values.any { !it.revoked && it.registration.member == member }
         if (member == s.identity.member || !inCircle) return VouchResult.NotAllowed
         if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today())) return VouchResult.NotAllowed
@@ -1189,7 +1241,7 @@ class CircleApp(
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
         val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member && it.owner !in view.market.departed } ?: return LoanResult.NotAllowed
         // The same rule every client applies when folding (ADR 0042); asking first spares the member a request that would be ignored.
-        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.livePausesOn(s.circle, today()))
+        val decision = StandingRules.decide(s.identity.member, state, view.market.configOn(s.circle, today()), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.livePausesOn(s.circle, today()))
         if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
         if (decision is AccessDecision.Paused) return LoanResult.Paused(decision.reasons)
         if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
@@ -1317,11 +1369,13 @@ class CircleApp(
 
     private suspend fun saveItem(
         s: Session, view: circles.event.CircleView, item: ItemId, detailKeyId: String, itemKey: circles.encoding.ByteString,
-        name: String, itemClass: ItemClass, description: String,
+        name: String, itemClass: ItemClass, description: String, minTier: Tier? = null,
     ): ItemResult {
+        // An owner may raise the lowest tier above the class default, never lower it (ADR 0025).
+        val effectiveMin = minTier?.takeIf { it.rank > itemClass.minTier.rank }
         val mine = view.devices.values.filter { !it.revoked && it.registration.member == s.identity.member }.map { it.registration }
         val day = today()
-        s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item, name, itemClass, detailKeyId, itemKey, mine))
+        s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item, name, itemClass, detailKeyId, itemKey, mine, effectiveMin))
         s.engine.enqueue(s.circle, s.author.itemDetail(s.circle, day, item, detailKeyId, itemKey, CborMap.of(DETAIL_DESCRIPTION to CborText(description))))
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
@@ -1349,8 +1403,8 @@ class CircleApp(
             )
             return
         }
-        val cfg = StandingRules.defaultConfig(s.circle)
         val now = today()
+        val cfg = view.market.configOn(s.circle, now)
         val loansNow = view.market.loans.values
         val vouchesNow = view.market.vouchesOn(now)
         val me = s.identity.member
@@ -1377,6 +1431,7 @@ class CircleApp(
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 recoveryShares = recoverySharesOf(view, s.identity.member),
                 pauses = pausesFor(view, me, myStanding.tier, now),
+                rules = rulesFor(view, me, now),
                 canProposePause = myStanding.tier.rank >= cfg.pauseReviewerMinTier.rank,
                 pauseCandidates = if (myStanding.tier.rank < cfg.pauseReviewerMinTier.rank) emptyList() else view.devices.values.filter { !it.revoked }
                     .map { it.registration.member }.distinct()
@@ -1452,6 +1507,7 @@ class CircleApp(
                         itemClass = state.itemClass,
                         owner = state.owner,
                         ownedByMe = state.owner == s.identity.member,
+                        ownerMinTier = state.minTier,
                         description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
                         access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now, view.market.livePausesOn(s.circle, now))) {
                             is AccessDecision.Eligible -> AccessSummary(true, emptyList(), emptyList())

@@ -99,6 +99,10 @@ const val FORM_ITEM_ADD = "item-add-form"
 const val FORM_ITEM_EDIT = "item-edit-form"
 const val FIELD_NAME = "name"
 const val FIELD_KIND = "kind"
+const val FIELD_MIN_TIER = "min-tier"
+const val FORM_RULES = "circle-rules-form"
+const val ACTION_RULES_AGREE = "rules-agree"
+const val ATTR_RULES = "data-rules"
 const val FIELD_DETAILS = "details"
 const val ATTR_ITEM = "data-item"
 const val ATTR_MIN = "data-min"
@@ -649,6 +653,24 @@ private fun FlowContent.itemForm(existing: ItemSummary?) {
             }
         }
         label {
+            attributes["for"] = FIELD_MIN_TIER
+            +"Who may ask: "
+        }
+        select {
+            id = FIELD_MIN_TIER
+            name = FIELD_MIN_TIER
+            option {
+                value = ""
+                selected = existing?.ownerMinTier == null
+                +"Whoever the circle's rules allow for this kind"
+            }
+            for (tier in listOf(Tier.NEIGHBOUR, Tier.TRUSTED)) option {
+                value = tier.name
+                selected = existing?.ownerMinTier == tier
+                +"${tierLabel(tier)} and above"
+            }
+        }
+        label {
             attributes["for"] = FIELD_DETAILS
             +"Details: "
         }
@@ -1138,6 +1160,66 @@ private fun FlowContent.stewards(home: HomeData) {
         }
     }
     section {
+        h2 { +"Circle rules" }
+        val rules = home.rules
+        val now = rules.current
+        ul {
+            li { +"Points for Neighbour, Trusted and Steward level: ${tenthsText(now.neighbourTenths)}, ${tenthsText(now.trustedTenths)} and ${tenthsText(now.stewardTenths)}" }
+            li { +"Points fade by half every ${now.halfLifeDays} days" }
+            li { +"Vouches needed to become a Neighbour: ${now.vouchesForNeighbour}, each lasting up to ${now.vouchValidityDays} days" }
+            li { +"Reviewers needed for a pause: ${now.reviewersForPause}; a pause lasts ${now.defaultPauseDays} days unless chosen otherwise" }
+            li { +"Days higher-value items are on hold after an unreported incident: ${now.incidentCooldownDays}" }
+        }
+        p { +"A change applies from the day enough stewards agree. Things decided before then keep the rules they were decided under." }
+        for (proposal in rules.proposals) {
+            val s = proposal.settings
+            p {
+                +"Proposed: thresholds ${tenthsText(s.neighbourTenths)} / ${tenthsText(s.trustedTenths)} / ${tenthsText(s.stewardTenths)}, half-life ${s.halfLifeDays}, vouches ${s.vouchesForNeighbour} for ${s.vouchValidityDays} days, pause reviewers ${s.reviewersForPause} for ${s.defaultPauseDays} days, cooldown ${s.incidentCooldownDays}. ${proposal.agreeing} of ${proposal.needed} stewards agree."
+            }
+            if (proposal.canAgree) {
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_RULES_AGREE
+                    attributes[ATTR_RULES] = listOf(s.neighbourTenths, s.trustedTenths, s.stewardTenths, s.halfLifeDays, s.vouchesForNeighbour, s.vouchValidityDays, s.reviewersForPause, s.defaultPauseDays, s.incidentCooldownDays).joinToString(":")
+                    +"Agree to these rules"
+                }
+            }
+        }
+        if (home.isSteward) {
+            details {
+                summary { +"Propose different rules" }
+                p { +"Fill in every number. Other stewards must send the same numbers for it to take effect." }
+                form {
+                    id = FORM_RULES
+                    for ((field, label, step, value) in listOf(
+                        Quad("rules-neighbour", "Points for Neighbour: ", "0.5", tenthsText(now.neighbourTenths)),
+                        Quad("rules-trusted", "Points for Trusted: ", "0.5", tenthsText(now.trustedTenths)),
+                        Quad("rules-steward", "Points for Steward level: ", "0.5", tenthsText(now.stewardTenths)),
+                        Quad("rules-halflife", "Days for points to fade by half: ", "1", now.halfLifeDays.toString()),
+                        Quad("rules-vouches", "Vouches needed for Neighbour: ", "1", now.vouchesForNeighbour.toString()),
+                        Quad("rules-vouch-days", "Days a vouch lasts: ", "1", now.vouchValidityDays.toString()),
+                        Quad("rules-reviewers", "Reviewers needed for a pause: ", "1", now.reviewersForPause.toString()),
+                        Quad("rules-pause-days", "Days a pause lasts: ", "1", now.defaultPauseDays.toString()),
+                        Quad("rules-cooldown", "Days on hold after an incident: ", "1", now.incidentCooldownDays.toString()),
+                    )) {
+                        label {
+                            attributes["for"] = field
+                            +label
+                        }
+                        input(type = InputType.number, name = field) {
+                            id = field
+                            required = true
+                            attributes["step"] = step
+                            attributes["min"] = "0"
+                            attributes[ATTR_MIN] = "1"
+                            this.value = value
+                        }
+                    }
+                    formSubmit("Propose these rules", ready = true)
+                }
+            }
+        }
+    }
+    section {
         h2 { +"Rules for stewards" }
         ul {
             li { +"Stewards who must agree: ${home.stewardSettings.quorum}" }
@@ -1613,3 +1695,8 @@ private fun FlowContent.pauseButton(action: String, pause: PauseSummary, text: S
         +text
     }
 }
+
+private data class Quad(val field: String, val label: String, val step: String, val value: String)
+
+/** Tenths of a point as text with one decimal: 25 is "2.5". */
+private fun tenthsText(tenths: Int): String = "${tenths / 10}.${tenths % 10}"

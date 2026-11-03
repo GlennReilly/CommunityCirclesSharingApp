@@ -152,6 +152,10 @@ class EventAuthor(
     fun vouch(circle: CircleId, day: Int, vouchee: MemberId, expiresDay: Int): Envelope =
         build(circle, EventType.VOUCH, day, CborMap.EMPTY, MarketPayloads.vouch(VouchTerms(vouchee, expiresDay)))
 
+    /** A steward's vote for these circle rules; they take effect when enough stewards send the same settings (ADR 0051). */
+    fun configUpdate(circle: CircleId, day: Int, settings: ConfigSettings): Envelope =
+        build(circle, EventType.CONFIG_UPDATE, day, CborMap.EMPTY, MarketPayloads.configUpdate(settings))
+
     fun pausePropose(circle: CircleId, day: Int, pause: PauseId, subject: MemberId, reason: String, days: Int): Envelope =
         build(circle, EventType.PAUSE_PROPOSE, day, CborMap.EMPTY, MarketPayloads.pausePropose(PauseProposal(pause, subject, reason, days)))
 

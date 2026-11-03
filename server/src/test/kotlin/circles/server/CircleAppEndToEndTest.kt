@@ -32,6 +32,7 @@ import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
 import circles.app.PauseResult
+import circles.app.RulesResult
 import circles.app.PauseRole
 import circles.event.LoanStatus
 import circles.event.MAX_LOAN_DAYS
@@ -1136,5 +1137,48 @@ class CircleAppEndToEndTest {
         assertEquals(emptyList(), home(dave.app).pauses)
         assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""), "no longer paused, though still a newcomer")
         listOf(alice, bea, carol, dave).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun stewardsChangeTheCircleRulesFromADayOnAndAnOwnerRaisesWhoMayAsk() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+
+        // The circle starts on the defaults, which everyone sees.
+        val defaults = home(bea.app).rules.current
+        assertEquals(30, defaults.neighbourTenths); assertEquals(180, defaults.halfLifeDays)
+        // Only a steward proposes; bad numbers are explained; the lone steward's vote is enough.
+        assertEquals(RulesResult.NotAllowed, bea.app.proposeRules(defaults.copy(halfLifeDays = 90)))
+        assertEquals(RulesResult.Refused("those are already the circle's rules"), alice.app.proposeRules(defaults))
+        assertEquals(RulesResult.Refused("halfLifeDays must be from 30 to 730"), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
+        assertEquals(RulesResult.Refused("thresholds must be positive and strictly increasing"), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
+        val changed = defaults.copy(halfLifeDays = 90, vouchesForNeighbour = 1)
+        assertEquals(RulesResult.Sent(takesEffect = true), alice.app.proposeRules(changed))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(changed, home(bea.app).rules.current)
+        assertEquals(changed, home(alice.app).rules.current)
+        assertEquals(emptyList(), home(alice.app).rules.proposals)
+
+        // An owner may raise who can ask for an item (never lower it): a newcomer cannot ask for this everyday item.
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "", circles.policy.Tier.TRUSTED) as ItemResult.Saved).item
+        val open = (alice.app.addItem("Crockpot", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(circles.policy.Tier.TRUSTED, home(bea.app).items.single { it.item == ladder }.ownerMinTier)
+        assertEquals(null, home(bea.app).items.single { it.item == open }.ownerMinTier)
+        assertIs<LoanResult.NotYet>(bea.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
+        assertIs<LoanResult.Done>(bea.app.requestLoan(open, TODAY, TODAY + 1, ""))
+        // Asking for less than the class default is ignored: a valuable item stays at least Neighbour.
+        val valuable = (alice.app.addItem("Drill", ItemClass.VALUABLE, "", circles.policy.Tier.NEWCOMER) as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(null, home(bea.app).items.single { it.item == valuable }.ownerMinTier)
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }
