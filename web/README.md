@@ -21,4 +21,6 @@ The budget check measures what is actually bundled. `shared` is a dependency but
 
 The server serves the bundle at `/` (ADR 0037): `./gradlew :server:shadowJar`, then `java -jar server/build/libs/circles-server.jar serve` and open http://localhost:8080 (`:server:run` also works).
 
-Not built yet: service worker, sign-in, IndexedDB layer, sync engine, the screens, an axe check in CI.
+The sync engine, `IndexedDbReplica` and `FetchTransport` live in `shared` (ADR 0038) and are tested there; the shell shows the engine's `SyncState`.
+
+Not built yet: service worker, sign-in and key storage, wiring the engine into the page, the screens, an axe check in CI.

@@ -380,7 +380,7 @@ Load test: 300 members, 20k events, sync from zero in under 10 seconds on the ta
 
 **M3 PWA offline**: Kotlin/JS facade, local replica, outbox, sync engine, screens 1-6, service worker. Done when the offline E2E tests pass.
 
-M3 amendment (2026-11-03, ADR 0009, 0035, 0036): the client is Kotlin/JS with kotlinx-html in module `web`, crypto is noble, local storage is IndexedDB with verify-once ingest. The skeleton (shell, routing, state, bundle budget check) and the sync engine (ADR 0038, in `shared`, with verify-once ingest) are in; the IndexedDB replica, `fetch` transport, snapshot fold, screens and service worker are not.
+M3 amendment (2026-11-03, ADR 0009, 0035, 0036): the client is Kotlin/JS with kotlinx-html in module `web`, crypto is noble, local storage is IndexedDB with verify-once ingest. The skeleton (shell, routing, state, bundle budget check) and the sync engine (ADR 0038, in `shared`, with verify-once ingest) are in; the IndexedDB replica and `fetch` transport are in (tested in Node against fake-indexeddb and a local HTTP server); sign-in and key storage, snapshot fold, scheduler, screens and service worker are not.
 
 **M4 Community mechanics**: vouching, steward screens, pauses with quorum, config updates, QR verification, key rotation on removal, recovery shares and steward-assisted rewrap, standing confirmation flow. Done when handover tests 3-5 pass.
 

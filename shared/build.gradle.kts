@@ -33,6 +33,8 @@ kotlin {
         jsTest.dependencies {
             // ADR 0035: libsodium stays as an independent oracle for the tests only; it is not shipped.
             implementation(npm("libsodium-wrappers", "0.7.15"))
+            // An in-memory IndexedDB so the replica runs the same contract tests in Node as in the browser (ADR 0036).
+            implementation(npm("fake-indexeddb", "6.2.7"))
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

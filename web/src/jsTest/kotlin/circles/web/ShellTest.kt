@@ -1,5 +1,6 @@
 package circles.web
 
+import circles.sync.SyncState
 import kotlinx.html.div
 import kotlinx.html.stream.createHTML
 import kotlin.test.Test
@@ -57,15 +58,18 @@ class ReduceTest {
     }
 
     @Test fun syncStatusIsStored() {
-        assertEquals(SyncStatus.Syncing, reduce(signedIn, AppAction.SyncChanged(SyncStatus.Syncing)).sync)
+        assertEquals(SyncState.Syncing, reduce(signedIn, AppAction.SyncChanged(SyncState.Syncing)).sync)
     }
 
     @Test fun statusSentences() {
-        assertEquals("Up to date", describe(SyncStatus.UpToDate))
-        assertEquals("Syncing", describe(SyncStatus.Syncing))
-        assertEquals("Offline", describe(SyncStatus.Offline(0)))
-        assertEquals("Offline, 1 change waiting", describe(SyncStatus.Offline(1)))
-        assertEquals("Offline, 3 changes waiting", describe(SyncStatus.Offline(3)))
+        assertEquals("Up to date", describe(SyncState.UpToDate))
+        assertEquals("Syncing", describe(SyncState.Syncing))
+        assertEquals("Offline", describe(SyncState.Offline(0)))
+        assertEquals("Offline, 1 change waiting", describe(SyncState.Offline(1)))
+        assertEquals("Offline, 3 changes waiting", describe(SyncState.Offline(3)))
+        assertEquals("The server is busy, trying again soon, 2 changes waiting", describe(SyncState.Busy(2, 30)))
+        assertEquals("Signed out, sign in again to sync", describe(SyncState.SignedOut))
+        assertEquals("The server refused the request (403): HTTP 403, 1 change waiting", describe(SyncState.Problem("The server refused the request (403): HTTP 403", 1)))
     }
 }
 
@@ -87,7 +91,7 @@ class ShellViewTest {
     }
 
     @Test fun statusLineIsALiveRegion() {
-        val html = render(AppState(sync = SyncStatus.Offline(2)))
+        val html = render(AppState(sync = SyncState.Offline(2)))
         assertTrue("""role="status"""" in html)
         assertTrue("Offline, 2 changes waiting" in html)
     }

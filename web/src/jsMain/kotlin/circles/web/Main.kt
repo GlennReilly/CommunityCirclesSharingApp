@@ -1,5 +1,6 @@
 package circles.web
 
+import circles.sync.SyncState
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.dom.clear
@@ -28,8 +29,8 @@ private class Shell(private val root: HTMLElement) {
 
     fun start() {
         window.addEventListener("hashchange", { dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash))) })
-        window.addEventListener("online", { dispatch(AppAction.SyncChanged(SyncStatus.Syncing)) })
-        window.addEventListener("offline", { dispatch(AppAction.SyncChanged(SyncStatus.Offline(changesWaiting = 0))) })
+        window.addEventListener("online", { dispatch(AppAction.SyncChanged(SyncState.Syncing)) })
+        window.addEventListener("offline", { dispatch(AppAction.SyncChanged(SyncState.Offline(changesWaiting = 0))) })
         render(screenChanged = false)
     }
 }
