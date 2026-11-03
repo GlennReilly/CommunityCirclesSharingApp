@@ -51,6 +51,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0045](0045-circle-key-commitments.md) | Circle key commitments | Accepted |
 | [0046](0046-adding-another-device.md) | Adding another device | Accepted |
 | [0047](0047-recovery-code.md) | The recovery code | Accepted |
+| [0048](0048-recovery-shares-in-the-app.md) | Recovery shares in the app | Accepted |
 
 ## Open decisions still to record
 
