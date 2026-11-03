@@ -54,6 +54,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0048](0048-recovery-shares-in-the-app.md) | Recovery shares in the app | Accepted |
 | [0049](0049-item-keys-after-a-removal.md) | Item detail keys after a removal | Accepted |
 | [0050](0050-pauses.md) | Pauses | Accepted |
+| [0051](0051-config-events.md) | Config events | Proposed |
 
 ## Open decisions still to record
 
@@ -62,7 +63,7 @@ From the spec, section 11. Record each as an ADR when it is decided:
 1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Shamir: decided (ADR 0020).
 2. ~~Local replica store in the browser~~: decided, IndexedDB (ADR 0036).
 3. ~~Kotlin/JS bundle size outcome and the fallback plan~~: measured and decided (ADR 0009, 0035): our code is about 77 KB gzipped; the browser uses noble (22 KB) instead of libsodium (245 KB).
-4. Recovery code wordlist and format.
+4. ~~Recovery code wordlist and format~~: decided (ADR 0047).
 5. ~~Whether the server serves SSE in v1 or polling only.~~ Decided: hint-only SSE, optional for clients (ADR 0026).
 6. Default thresholds and half-life, after the pilot.
 7. Whether dispute resolution needs more than one steward (default: one non-party steward).
