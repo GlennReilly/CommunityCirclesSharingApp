@@ -10,7 +10,7 @@ const map = JSON.parse(readFileSync(dir + 'circles.js.map', 'utf8'));
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 function decode(seg) { const out = []; let shift = 0, value = 0; for (const ch of seg) { const d = B64.indexOf(ch); value += (d & 31) << shift; if (d & 32) shift += 5; else { out.push(value & 1 ? -(value >> 1) : value >> 1); value = 0; shift = 0; } } return out; }
 const lines = code.split('\n'); const parts = new Map(); let src = 0;
-const group = (n) => { const m = n.match(/node_modules\/((?:@[^/]+\/)?[^/]+)/); return m ? 'npm:' + m[1] : 'kotlin/other'; };
+const group = (n) => { const m = n.match(/node_modules\/((?:@[^/]+\/)?[^/]+)/); if (m) return 'npm:' + m[1]; const c = n.match(/(?:shared|web)\/src\/[A-Za-z]+\/kotlin\/(circles\/[^/]+)\//); if (c) return 'ours:' + c[1]; const o = n.match(/\/(circles\/[^/]+)\/[^/]+\.kt$/); if (o) return 'ours:' + o[1]; return 'lib:' + n.replace('webpack:///', '').split('/').slice(0, 3).join('/'); };
 map.mappings.split(';').forEach((lineMap, lineNo) => {
   const text = lines[lineNo] ?? ''; let col = 0; const segs = [];
   for (const s of lineMap.split(',')) { if (!s) continue; const f = decode(s); col += f[0]; if (f.length > 1) { src += f[1]; segs.push([col, src]); } else segs.push([col, -1]); }

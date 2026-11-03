@@ -56,7 +56,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0050](0050-pauses.md) | Pauses | Accepted |
 | [0051](0051-config-events.md) | Config events | Accepted |
 | [0052](0052-loan-windows.md) | Loan windows: no double booking, and cancelling | Accepted |
-| [0053](0053-contribution-notes.md) | Contribution notes | Proposed |
+| [0053](0053-contribution-notes.md) | Contribution notes | Accepted |
 
 ## Open decisions still to record
 
