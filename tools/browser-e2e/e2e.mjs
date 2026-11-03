@@ -1,4 +1,4 @@
-import { startServer, startChrome, sleep } from './lib.mjs';
+import { startServer, startChrome, sleep, checkAccessibility, reportAccessibility } from './lib.mjs';
 const PASS = 'correct horse battery staple';
 const PASS_NEW = 'second passphrase for alice';
 const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334); const phone = await startChrome(9336);
@@ -18,11 +18,13 @@ try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Circles'), 'welcome page');
   if (await alice.evaluate('document.querySelectorAll("form, button").length') !== 0) throw new Error('the welcome page has a form or button');
   ok('welcome page offers choices only (no form, no button)');
+  await checkAccessibility(alice, 'welcome page');
   await alice.evaluate('document.querySelector(\'a[href="#/start"]\').click()');
   await until(alice, 'document.getElementById("start-form") !== null', 'start page');
   const labels = await alice.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
   if (!labels.length || labels.some(l => !l.endsWith(': '))) throw new Error('labels: ' + JSON.stringify(labels));
   ok('field labels end with ": " (' + JSON.stringify(labels) + ')');
+  await checkAccessibility(alice, 'start page');
   if (!(await buttonHidden(alice, 'start-form'))) throw new Error('start button visible before a passphrase');
   await type(alice, 'start-form', 'passphrase', 'short'); if (!(await buttonHidden(alice, 'start-form'))) throw new Error('start button visible for a short passphrase');
   await type(alice, 'start-form', 'passphrase', PASS); if (await buttonHidden(alice, 'start-form')) throw new Error('start button still hidden for a long passphrase');
@@ -30,9 +32,11 @@ try {
   ok('start button hidden until the passphrase is long enough');
   await submit(alice, 'start-form', { passphrase: 'short' });
   await until(alice, has(alice, 'Choose a longer passphrase'), 'short passphrase notice'); ok('short passphrase refused with a message');
+  await checkAccessibility(alice, 'start page with an error notice');
   await submit(alice, 'start-form', { passphrase: PASS });
   await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '1 member'), 'alice home'); ok('alice started a circle');
   await until(alice, has(alice, 'Up to date'), 'alice synced'); ok('alice synced (status: Up to date)');
+  await checkAccessibility(alice, 'home');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Key fingerprint: '), 'members page');
   const fingerprint = await alice.evaluate('document.body.innerText.match(/Key fingerprint: ([0-9a-f ]+)/)[1].trim()'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(fingerprint)) throw new Error('fingerprint: ' + fingerprint); ok('members page shows alice with a fingerprint: ' + fingerprint);
   await click(alice, 'invite');
@@ -42,30 +46,38 @@ try {
   await bea.goto(link); await until(bea, has(bea, 'Join a circle') + ' && document.getElementById("join-form") !== null', 'bea join page');
   if (await bea.evaluate('document.body.innerText.includes("Start a circle")')) throw new Error('the join page offers Start a circle');
   ok('the join page has no start option');
+  await checkAccessibility(bea, 'join page');
   const addr = await bea.evaluate('location.href'); if (addr.includes('#/join')) throw new Error('secret left in address bar: ' + addr); ok('invite secret removed from the address bar');
   await submit(bea, 'join-form', { passphrase: PASS });
   await until(bea, has(bea, 'A steward needs to let you in'), 'bea waiting'); ok('bea joined and is waiting for a steward');
+  await checkAccessibility(bea, 'home before being let in');
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
   await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting to be let in'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
+  await checkAccessibility(alice, 'members with someone waiting');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, '!' + has(bea, 'A steward needs to let you in'), 'bea can read'); ok('bea can now read the circle');
   // Items: add, privacy, change, remove.
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'empty items page'); ok('items page starts empty');
+  await checkAccessibility(alice, 'items, empty');
   await alice.evaluate('document.querySelector(\'a[href="#/items/add"]\').click()'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add item page');
   const itemLabels = await alice.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
   if (itemLabels.some(l => !l.endsWith(': '))) throw new Error('item labels: ' + JSON.stringify(itemLabels));
   if (!(await buttonHidden(alice, 'item-add-form'))) throw new Error('add button visible before a name'); ok('add-item button hidden until a name is typed; labels ' + JSON.stringify(itemLabels));
+  await checkAccessibility(alice, 'add item');
   await setField(alice, 'item-add-form', 'name', 'Ladder'); if (await buttonHidden(alice, 'item-add-form')) throw new Error('add button still hidden after a name');
   await setField(alice, 'item-add-form', 'details', 'Garage at the back, ring first');
   await alice.evaluate('document.getElementById("item-add-form").requestSubmit()');
   await until(alice, has(alice, 'Ladder') + ' && ' + has(alice, 'Details: Garage at the back, ring first') + ' && ' + has(alice, 'Yours'), 'ladder listed'); ok('alice added a ladder and sees her own details');
+  await checkAccessibility(alice, 'items, own item with details');
   await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced item');
   await bea.evaluate('location.hash = "#/items"'); await syncUntil(bea, has(bea, 'Ladder') + ' && ' + has(bea, 'Shared by member'), 'bea sees ladder'); ok('bea sees the ladder');
+  await checkAccessibility(bea, 'items, another member\'s item');
   if (await bea.evaluate('document.body.innerText.includes("Garage at the back")')) throw new Error('bea can read the private details'); ok('bea cannot read the private details');
   if (await bea.evaluate('document.querySelector(\'[data-action="edit-item"]\') !== null')) throw new Error('bea is offered Change'); ok('bea is not offered Change or Remove');
   await click(alice, 'edit-item'); await until(alice, 'document.getElementById("item-edit-form") !== null', 'edit page');
   if (await alice.evaluate('document.getElementById("item-edit-form").elements.namedItem("name").value') !== 'Ladder') throw new Error('edit form not prefilled'); ok('change page is prefilled');
+  await checkAccessibility(alice, 'change item');
   await setField(alice, 'item-edit-form', 'name', 'Long ladder'); await alice.evaluate('document.getElementById("item-edit-form").requestSubmit()');
   await until(alice, has(alice, 'Long ladder'), 'renamed'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced edit');
   await syncUntil(bea, has(bea, 'Long ladder'), 'bea sees rename'); ok('rename reached bea');
@@ -76,6 +88,7 @@ try {
   const loanLabels = await bea.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
   if (loanLabels.some(l => !l.endsWith(': '))) throw new Error('request labels: ' + JSON.stringify(loanLabels));
   if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('request button visible before dates'); ok('request page: labels ' + JSON.stringify(loanLabels) + ', button hidden until both dates');
+  await checkAccessibility(bea, 'ask to borrow');
   await setField(bea, 'loan-request-form', 'from', iso(1)); if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('button visible with one date');
   await setField(bea, 'loan-request-form', 'to', iso(3)); await setField(bea, 'loan-request-form', 'note', 'for the fence');
   if (await buttonHidden(bea, 'loan-request-form')) throw new Error('button hidden with both dates');
@@ -87,10 +100,12 @@ try {
   await click(bea, 'handover-loan'); await until(bea, has(bea, 'You have confirmed'), 'bea confirmed'); await sleep(1500); await click(bea, 'sync'); await until(bea, has(bea, 'Up to date'), 'bea synced handover');
   await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'has confirmed'), 'alice sees bea confirm'); await click(alice, 'handover-loan');
   await until(alice, has(alice, 'Out now'), 'loan active for alice'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced handover');
-  await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Out now') + ' && ' + has(bea, 'How did it go: '), 'bea sees the loan active'); ok('both confirmed the hand-over; the loan is out');
+  await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Out now') + ' && ' + has(bea, 'How did it go:'), 'bea sees the loan active'); ok('both confirmed the hand-over; the loan is out');
+  await checkAccessibility(bea, 'borrow, out now with the return form');
   await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "DAMAGED_REPORTED"; f.requestSubmit(); return true; })()');
   await until(bea, has(bea, 'Finished') + ' && ' + has(bea, 'damage reported'), 'bea returned'); await sleep(1500); await click(bea, 'sync'); await until(bea, has(bea, 'Up to date'), 'bea synced return');
   await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Finished') + ' && ' + has(alice, 'damage reported'), 'alice sees the return'); ok('bea reported damage; alice sees it');
+  await checkAccessibility(alice, 'borrow, finished');
   await alice.evaluate('location.hash = "#/items"');
   // Confirmation and disputes: one return confirmed by the owner, one disputed (alice is both the owner and the only steward).
   async function lendOnceAndReturnOk() {
@@ -102,7 +117,7 @@ try {
     await until(alice, has(alice, 'Ready to hand over'), 'approved'); await sleep(1200);
     await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Ready to hand over'), 'bea sees approval'); await click(bea, 'handover-loan'); await sleep(1200);
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'has confirmed'), 'alice sees bea confirm'); await click(alice, 'handover-loan'); await sleep(1200);
-    await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'How did it go: '), 'bea sees it out');
+    await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'How did it go:'), 'bea sees it out');
     await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "OK"; f.requestSubmit(); return true; })()');
     await until(bea, has(bea, 'Thank you. Reported back.'), 'bea returned'); await sleep(1200);
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'It came back fine'), 'alice sees the return');
@@ -113,6 +128,7 @@ try {
   await alice.evaluate('(() => { const d = [...document.querySelectorAll("details")].find(x => x.textContent.includes("Report a problem")); d.open = true; return true; })()');
   await alice.evaluate('(() => { const f = document.querySelector("form[id^=dispute-form-]"); f.elements.namedItem("claim").value = "DAMAGE"; f.elements.namedItem("note").value = "the rail is bent"; f.requestSubmit(); return true; })()');
   await until(alice, has(alice, 'Pending review') + ' && ' + has(alice, "Owner's note: the rail is bent"), 'dispute pending'); ok('the owner reported damage: pending review with the note');
+  await checkAccessibility(alice, 'borrow, dispute pending');
   if (!(await alice.evaluate(has(alice, 'You are the only steward, so nobody else can decide this')))) throw new Error('no single-steward warning'); ok('the only steward is warned that nobody else can decide it');
   if (await alice.evaluate('document.querySelector("[data-action=uphold-dispute]") !== null')) throw new Error('alice can resolve her own dispute'); ok('a party to the loan is not offered the decision');
   await sleep(1500); await click(alice, 'sync'); await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Pending review'), 'bea sees pending review'); ok('the borrower sees "Pending review" too');
@@ -144,15 +160,18 @@ try {
   await until(bea, has(bea, 'Drill') + ' && ' + has(bea, 'Not yet.'), 'bea sees the drill as not yet open', 15000);
   const drillButtons = await bea.evaluate('[...document.querySelectorAll("li")].filter(li => li.innerText.includes("Drill") && li.querySelector("[data-action=borrow-item]")).length');
   if (drillButtons !== 0) throw new Error('bea is offered to borrow the drill'); ok('a newcomer sees the drill as "Not yet" with no borrow button');
+  await checkAccessibility(bea, 'items, a locked item with reasons');
   const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("NEIGHBOUR")) || ""');
   if (!why.includes('vouch')) throw new Error('no vouch route in: ' + why); ok('the reasons name the vouch route');
   await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your tier: Newcomer'), 'bea standing');
   await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your tier: Trusted'), 'alice standing'); ok('standing pages: bea is a newcomer, alice (steward) counts as trusted');
+  await checkAccessibility(alice, 'my standing');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
   if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a newcomer is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
   // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
   await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'This circle has one steward'), 'steward page'); ok('a lone steward is told the circle needs another');
+  await checkAccessibility(alice, 'stewards');
   if (await alice.evaluate('document.querySelector("[data-action=steward-remove]") !== null')) throw new Error('the last steward is offered Step down');
   if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible while empty');
   await setField(alice, 'steward-rules-form', 'quorum', '1'); await setField(alice, 'steward-rules-form', 'inactive-days', '60');
@@ -163,7 +182,9 @@ try {
   await syncUntil(bea, 'location.hash = "#/stewards"; ' + has(bea, 'Can vote from'), 'bea sees she is cooling off'); ok('bea, the new steward, sees when she can vote from');
   if (await bea.evaluate('document.querySelector("[data-action=steward-remove]") === null')) throw new Error('a steward is not offered Step down'); ok('with two stewards a steward may step down or propose removal');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
+  await checkAccessibility(alice, 'sign in (locked)');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
+  await checkAccessibility(alice, 'sign in with an error notice');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
   await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'That passphrase did not work'), 'old passphrase refused'); ok('the old passphrase no longer works');
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked with the new passphrase, circle intact with 2 members');
@@ -171,11 +192,14 @@ try {
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.getElementById("device-link") !== null', 'settings with the device link');
   const deviceLink = await alice.evaluate('document.getElementById("device-link").value');
   if (!/\/#\/device\/[0-9a-f]{32}\/[0-9a-f]{32}$/.test(deviceLink)) throw new Error('device link: ' + deviceLink); ok('settings shows a device link of public ids only');
+  await checkAccessibility(alice, 'settings');
   await phone.goto(deviceLink); await until(phone, has(phone, 'Add this device') + ' && document.getElementById("pair-form") !== null', 'pair page');
+  await checkAccessibility(phone, 'add this device, passphrase form');
   if (await phone.evaluate('location.hash') !== '') throw new Error('the device link stayed in the address bar');
   if (!(await buttonHidden(phone, 'pair-form'))) throw new Error('pair button visible before a passphrase');
   await submit(phone, 'pair-form', { passphrase: PASS });
   await until(phone, has(phone, 'Waiting for your other device') + ' && document.getElementById("this-device-code") !== null', 'phone waits'); ok('the new browser makes its keys and waits to be added');
+  await checkAccessibility(phone, 'add this device, waiting');
   const code = await phone.evaluate('document.getElementById("this-device-code").value');
   const phoneFingerprint = await phone.evaluate('document.body.innerText.match(/Fingerprint: ([0-9a-f ]+)/)[1].trim()');
   await setField(alice, 'add-device-form', 'device-code', 'garbage'); await until(alice, has(alice, 'does not look like a device code'), 'bad code noticed');
@@ -187,6 +211,7 @@ try {
   await click(phone, 'check-now'); await until(phone, has(phone, 'Circle home'), 'phone is in', 25000); ok('the phone was added and opened the circle');
   await phone.evaluate('location.hash = "#/items"'); await until(phone, has(phone, 'Drill') + ' && ' + has(phone, 'Yours'), 'phone sees alice\'s own items'); ok('the phone sees alice\'s own items as hers');
   await phone.evaluate('location.hash = "#/settings"'); await until(phone, has(phone, 'Phone (this device)'), 'phone names itself'); ok('the phone lists itself by the name alice gave it');
+  await checkAccessibility(phone, 'settings of the added device');
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=remove-device]") !== null', 'alice sees the phone to remove');
   await alice.evaluate('document.querySelector("[data-action=remove-device]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key is being changed.'), 'phone removed');
   await sleep(1500); await click(alice, 'sync'); await click(phone, 'sync');
@@ -202,10 +227,11 @@ try {
   if (await alice.evaluate(has(alice, 'Change the key'))) throw new Error('a rotation prompt after a removal that already rotated'); ok('no rotation prompt, because the removal rotated the key');
   await sleep(1500); await click(alice, 'sync'); await sleep(1500);
   await click(bea, 'sync'); await until(bea, has(bea, 'Cannot sign in to the circle. If you were removed, ask a steward'), 'bea cut off'); ok('bea is told she cannot sign in and to ask a steward');
+  await checkAccessibility(bea, 'cut off after removal');
   const stored = await alice.evaluate(`new Promise(r => { const q = indexedDB.open('circles'); q.onsuccess = () => { const tx = q.result.transaction(['keys'], 'readonly'); const g = tx.objectStore('keys').get('identity'); g.onsuccess = () => r(JSON.stringify(g.result)); }; })`);
   if (/seed/i.test(stored.replace(/"(sealed|salt)"/g, ''))) console.log('note: stored text mentions seed', stored.slice(0, 200));
   ok('stored identity is only the wrapped blob: ' + stored.slice(0, 120) + '...');
   console.log('\nALICE LOGS:\n' + alice.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
   console.log('BEA LOGS:\n' + bea.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
 } catch (e) { console.log('FAILED:', e.message); console.log('ALICE LOGS:\n' + alice.logs.join('\n')); console.log('BEA LOGS:\n' + bea.logs.join('\n')); console.log('SERVER:\n' + server.log().slice(-1500)); process.exitCode = 1; }
-finally { alice.stop(); bea.stop(); phone.stop(); server.stop(); }
+finally { if (reportAccessibility() > 0) process.exitCode = 1; alice.stop(); bea.stop(); phone.stop(); server.stop(); }

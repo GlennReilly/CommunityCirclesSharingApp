@@ -1,0 +1,9 @@
+{
+  "name": "circles-browser-checks",
+  "private": true,
+  "type": "module",
+  "description": "Browser checks that run against the built server jar (see README.md). axe-core is the only dependency.",
+  "devDependencies": {
+    "axe-core": "4.11.1"
+  }
+}

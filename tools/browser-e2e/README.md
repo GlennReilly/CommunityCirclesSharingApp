@@ -1,10 +1,12 @@
 # Browser end-to-end check
 
-Drives two real Chrome profiles against the real server jar over the Chrome DevTools Protocol (no npm packages; Node 22+ for the global `WebSocket` and `fetch`). It is not part of `./gradlew check` because it needs Chrome and a built jar.
+Drives real Chrome profiles (two, and a third for pairing a second device) against the real server jar over the Chrome DevTools Protocol (Node 22+ for the global `WebSocket` and `fetch`; the one npm dependency is `axe-core`, installed with `npm ci` in this folder). It is not part of `./gradlew check` because it needs Chrome and a built jar; CI runs it in a separate `browser` job.
 
 ```
 ./gradlew :server:shadowJar
-node tools/browser-e2e/e2e.mjs
+(cd tools/browser-e2e && npm ci)
+node tools/browser-e2e/e2e.mjs            # the whole flow
+A11Y=1 node tools/browser-e2e/e2e.mjs     # the same, and axe-core on 26 page states (WCAG 2.0, 2.1, 2.2 A and AA); fails on any violation
 ```
 
 Needs `google-chrome` and `java` on the PATH (set `CIRCLES_JAR` to use another jar). It starts the server on 127.0.0.1:18081 with a temporary data folder and two headless Chrome instances on debugging ports 9333 and 9334, and stops them at the end.
@@ -19,4 +21,8 @@ node tools/browser-e2e/sw-e2e.mjs
 ```
 
 Serves a temporary copy of `web/build/dist/web` with a tiny static server (no Circles server needed) and checks, in real Chrome: the worker registers and caches the shell; no update prompt after the first install; with the server stopped the page still opens; a changed version waits behind "Update now" while the old one keeps running; after the member agrees, the page reloads, only the new cache remains and the new files are served.
+
+## Accessibility (axe-core)
+
+With `A11Y=1` the script runs axe after the pages listed in `e2e.mjs` (welcome, start, join, sign in with and without an error, home, members, items with an item and with a locked one, add and change item, ask to borrow, borrow out and finished and in dispute, standing, stewards, settings, pairing, cut off). The first run found one real class of failure on six pages: touch targets smaller than the WCAG 2.2 minimum (2.5.8); `styles.css` now sets 44 pixel targets. Rules axe cannot judge (reading level, screen reader flow, keyboard order, colour in high-contrast modes) still need the manual pass in the spec.
 
