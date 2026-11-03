@@ -38,6 +38,7 @@ const val FORM_LINK = "link-form"
 const val FORM_UNLOCK = "unlock-form"
 const val FIELD_PASSPHRASE = "passphrase"
 const val FIELD_LINK = "invite-link"
+const val SUBMIT_ID = "submit"
 const val ACTION_INVITE = "invite"
 const val ACTION_COPY = "copy-invite"
 const val ACTION_ADMIT = "admit"
@@ -108,17 +109,26 @@ fun FlowContent.shell(state: AppState) {
                 h1 { +"Circles" }
                 p { +"Opening your circle..." }
             }
-            AppModel.NoIdentity -> noIdentity(state)
-            is AppModel.Locked -> locked()
+            AppModel.NoIdentity -> newcomer(state)
+            is AppModel.Locked -> signIn()
             is AppModel.Open -> if (state.screen == Screen.Home) home(model.home, state) else comingSoon(state.screen)
         }
+    }
+}
+
+/** The submit button of a passphrase form: hidden until a long enough passphrase is typed (the glue shows it). */
+private fun FlowContent.passphraseSubmit(text: String) {
+    button(type = ButtonType.submit) {
+        id = SUBMIT_ID
+        attributes["hidden"] = "hidden"
+        +text
     }
 }
 
 private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
     label {
         attributes["for"] = FIELD_PASSPHRASE
-        +"Passphrase"
+        +"Passphrase: "
     }
     input(type = InputType.password, name = FIELD_PASSPHRASE) {
         id = FIELD_PASSPHRASE
@@ -141,54 +151,82 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
     }
 }
 
-private fun FlowContent.noIdentity(state: AppState) {
-    h1 { +"Join or sign in" }
-    if (state.pendingInvite != null) {
-        section {
-            h2 { +"Join this circle" }
-            p { +"You were invited to a circle on this server. Choose a passphrase to protect your keys on this device." }
-            form {
-                id = FORM_JOIN
-                passphraseField("new-password", hint = true)
-                button(type = ButtonType.submit) { +"Join" }
-            }
+private fun FlowContent.backToWelcome() {
+    p {
+        a(href = Screen.Welcome.fragment) { +"Back" }
+    }
+}
+
+/** A browser with no identity: a choice first, then one page for each choice. */
+private fun FlowContent.newcomer(state: AppState) {
+    when (state.screen) {
+        Screen.StartCircle -> startCircle()
+        Screen.JoinCircle -> joinCircle(state)
+        else -> welcome()
+    }
+}
+
+private fun FlowContent.welcome() {
+    h1 { +Screen.Welcome.title }
+    p { +"Circles is a way for neighbours to share things and skills. Everything is encrypted on your own device." }
+    ul {
+        li {
+            a(href = Screen.StartCircle.fragment) { +"Start a circle" }
+            +" if you are the first."
         }
-    } else {
-        section {
-            h2 { +"Start a circle" }
-            p { +"You become its first steward and can invite others." }
-            form {
-                id = FORM_START
-                passphraseField("new-password", hint = true)
-                button(type = ButtonType.submit) { +"Start a circle" }
-            }
-        }
-        section {
-            h2 { +"Join with an invite link" }
-            form {
-                id = FORM_LINK
-                label {
-                    attributes["for"] = FIELD_LINK
-                    +"Invite link"
-                }
-                input(type = InputType.text, name = FIELD_LINK) {
-                    id = FIELD_LINK
-                    required = true
-                    attributes["autocomplete"] = "off"
-                    attributes["spellcheck"] = "false"
-                }
-                button(type = ButtonType.submit) { +"Continue" }
-            }
+        li {
+            a(href = Screen.JoinCircle.fragment) { +"Join a circle" }
+            +" if someone sent you an invite link."
         }
     }
 }
 
-private fun FlowContent.locked() {
-    h1 { +"Unlock Circles" }
+private fun FlowContent.startCircle() {
+    h1 { +Screen.StartCircle.title }
+    p { +"You become its first steward and can invite others. Choose a passphrase to protect your keys on this device." }
+    form {
+        id = FORM_START
+        passphraseField("new-password", hint = true)
+        passphraseSubmit("Start a circle")
+    }
+    backToWelcome()
+}
+
+private fun FlowContent.joinCircle(state: AppState) {
+    h1 { +Screen.JoinCircle.title }
+    if (state.pendingInvite == null) {
+        p { +"Paste the invite link you were sent." }
+        form {
+            id = FORM_LINK
+            label {
+                attributes["for"] = FIELD_LINK
+                +"Invite link: "
+            }
+            input(type = InputType.text, name = FIELD_LINK) {
+                id = FIELD_LINK
+                required = true
+                attributes["autocomplete"] = "off"
+                attributes["spellcheck"] = "false"
+            }
+            button(type = ButtonType.submit) { +"Continue" }
+        }
+    } else {
+        p { +"You were invited to a circle on this server. Choose a passphrase to protect your keys on this device." }
+        form {
+            id = FORM_JOIN
+            passphraseField("new-password", hint = true)
+            passphraseSubmit("Join")
+        }
+    }
+    backToWelcome()
+}
+
+private fun FlowContent.signIn() {
+    h1 { +Screen.SignIn.title }
     form {
         id = FORM_UNLOCK
         passphraseField("current-password", hint = false)
-        button(type = ButtonType.submit) { +"Unlock" }
+        passphraseSubmit("Unlock")
     }
     details {
         summary { +"Forget this device" }
@@ -222,7 +260,7 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
         state.newInvite?.let { link ->
             label {
                 attributes["for"] = ID_INVITE_OUTPUT
-                +"Invite link (shown once)"
+                +"Invite link (shown once): "
             }
             input(type = InputType.text) {
                 id = ID_INVITE_OUTPUT

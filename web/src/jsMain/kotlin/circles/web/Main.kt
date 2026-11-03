@@ -9,6 +9,7 @@ import circles.crypto.JsCrypto
 import circles.event.DeviceId
 import circles.keys.JsPasswordHasher
 import circles.keys.KeyVault
+import circles.keys.MIN_PASSPHRASE_CHARS
 import circles.keys.UnlockResult
 import circles.sync.FetchTransport
 import circles.sync.HttpSyncApi
@@ -57,7 +58,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     private fun render(screenChanged: Boolean) {
         root.clear()
         root.append { div { shell(state) } }
-        document.title = if (state.signedIn) "${state.screen.title} - Circles" else "Circles"
+        document.title = if (state.model is AppModel.Loading) "Circles" else "${state.screen.title} - Circles"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
     }
 
@@ -74,6 +75,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         window.addEventListener("online", { app?.syncNow(SyncTrigger.ONLINE) })
         for (type in listOf("keydown", "pointerdown")) document.addEventListener(type, { app?.touch() })
         root.addEventListener("submit", { event -> onSubmit(event) })
+        root.addEventListener("input", { event -> onInput(event) })
         root.addEventListener("click", { event -> onClick(event) })
 
         val crypto = JsCrypto()
@@ -95,6 +97,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }
         scope.launch { circleApp.sync.collect { dispatch(AppAction.SyncChanged(it)) } }
         circleApp.open()
+    }
+
+    /** A passphrase form's button appears only once the passphrase is long enough to be accepted. */
+    private fun onInput(event: Event) {
+        val field = event.target as? HTMLInputElement ?: return
+        if (field.id != FIELD_PASSPHRASE) return
+        val button = field.form?.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
+        button.hidden = field.value.length < MIN_PASSPHRASE_CHARS
     }
 
     private fun onSubmit(event: Event) {

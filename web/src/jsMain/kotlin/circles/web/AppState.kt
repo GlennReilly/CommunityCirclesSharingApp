@@ -5,7 +5,7 @@ import circles.app.InviteLink
 import circles.sync.SyncState
 
 data class AppState(
-    val screen: Screen = Screen.SignIn,
+    val screen: Screen = Screen.Welcome,
     /** What the client knows: loading, no identity, locked, or open with the home data (from `CircleApp`). */
     val model: AppModel = AppModel.Loading,
     val sync: SyncState = SyncState.Offline(changesWaiting = 0),
@@ -33,12 +33,12 @@ sealed interface AppAction {
 
 /** Pure state transition. Signed-out users never leave the sign-in pages; signed-in users never land on them. */
 fun reduce(state: AppState, action: AppAction): AppState = when (action) {
-    is AppAction.Navigate -> state.copy(screen = allowed(state.signedIn, action.screen))
+    is AppAction.Navigate -> state.copy(screen = allowed(state.model, action.screen))
     is AppAction.ModelChanged -> {
         val open = action.model is AppModel.Open
         state.copy(
             model = action.model,
-            screen = if (open) allowed(true, state.screen) else Screen.SignIn,
+            screen = allowed(action.model, state.screen),
             // Leaving the open state forgets anything that was only meant for the open screens.
             newInvite = if (open) state.newInvite else null,
             // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
@@ -46,17 +46,23 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         )
     }
     is AppAction.SyncChanged -> state.copy(sync = action.state)
-    is AppAction.InviteSeen -> state.copy(pendingInvite = action.link)
+    // A link in the address goes straight to the join page, for a browser that has no identity (or is still loading).
+    is AppAction.InviteSeen -> state.copy(
+        pendingInvite = action.link,
+        screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.JoinCircle else state.screen,
+    )
     is AppAction.Notice -> state.copy(notice = action.text)
     is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)
     AppAction.UpdateAccepted -> state.copy(updateAvailable = false)
 }
 
-private fun allowed(signedIn: Boolean, screen: Screen): Screen = when {
-    !signedIn -> Screen.SignIn
-    screen == Screen.SignIn -> Screen.Home
-    else -> screen
+/** Which screen a visitor may see: each state of the app has its own set of pages. */
+private fun allowed(model: AppModel, screen: Screen): Screen = when (model) {
+    is AppModel.Open -> if (screen in Screen.beforeSignIn) Screen.Home else screen
+    is AppModel.Locked -> Screen.SignIn
+    AppModel.NoIdentity -> if (screen in Screen.newcomer) screen else Screen.Welcome
+    AppModel.Loading -> if (screen in Screen.newcomer) screen else Screen.Welcome
 }
 
 /** The sentence for the status line (spec section 6): "Up to date", "Syncing", "Offline, 3 changes waiting", ... */

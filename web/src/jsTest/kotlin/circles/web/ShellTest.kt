@@ -46,20 +46,33 @@ class ScreenTest {
         assertEquals(Screen.Home, Screen.fromFragment("#/items/extra"))
     }
 
-    @Test fun navigationOmitsSignIn() {
-        assertFalse(Screen.SignIn in Screen.navigation)
-        assertEquals(Screen.entries.size - 1, Screen.navigation.size)
+    @Test fun navigationOmitsEveryPageThatComesBeforeSignIn() {
+        for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
+        assertEquals(Screen.entries.size - Screen.beforeSignIn.size, Screen.navigation.size)
+        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle), Screen.newcomer)
     }
 }
 
 class ReduceTest {
-    @Test fun signedOutUsersAreHeldOnSignIn() {
-        val state = reduce(AppState(model = AppModel.NoIdentity), AppAction.Navigate(Screen.Items))
-        assertEquals(Screen.SignIn, state.screen)
+    @Test fun aBrowserWithNoIdentityMayOnlySeeTheNewcomerPages() {
+        val fresh = AppState(model = AppModel.NoIdentity)
+        assertEquals(Screen.Welcome, reduce(fresh, AppAction.Navigate(Screen.Items)).screen)
+        assertEquals(Screen.Welcome, reduce(fresh, AppAction.Navigate(Screen.SignIn)).screen)
+        assertEquals(Screen.StartCircle, reduce(fresh, AppAction.Navigate(Screen.StartCircle)).screen)
+        assertEquals(Screen.JoinCircle, reduce(fresh, AppAction.Navigate(Screen.JoinCircle)).screen)
+    }
+
+    @Test fun aLockedBrowserSeesOnlySignIn() {
+        val locked = AppState(model = AppModel.Locked(circle))
+        for (screen in Screen.entries) assertEquals(Screen.SignIn, reduce(locked, AppAction.Navigate(screen)).screen, screen.name)
+    }
+
+    @Test fun anOpenCircleNeverShowsTheEarlierPages() {
+        for (screen in Screen.beforeSignIn) assertEquals(Screen.Home, reduce(open(), AppAction.Navigate(screen)).screen, screen.name)
     }
 
     @Test fun openingTheCircleLandsOnHome() {
-        val state = reduce(AppState(model = AppModel.NoIdentity, screen = Screen.SignIn), AppAction.ModelChanged(AppModel.Open(home())))
+        val state = reduce(AppState(model = AppModel.NoIdentity, screen = Screen.Welcome), AppAction.ModelChanged(AppModel.Open(home())))
         assertTrue(state.signedIn)
         assertEquals(Screen.Home, state.screen)
     }
@@ -71,10 +84,6 @@ class ReduceTest {
         assertFalse(state.signedIn)
     }
 
-    @Test fun signedInUsersNeverLandOnSignIn() {
-        assertEquals(Screen.Home, reduce(open(), AppAction.Navigate(Screen.SignIn)).screen)
-    }
-
     @Test fun signedInNavigationWorks() {
         assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.Items)).screen)
     }
@@ -82,6 +91,10 @@ class ReduceTest {
     @Test fun anInviteInTheAddressIsKeptOnlyWhileThereIsNoIdentity() {
         val seen = reduce(AppState(model = AppModel.NoIdentity), AppAction.InviteSeen(link))
         assertEquals(link, seen.pendingInvite)
+        assertEquals(Screen.JoinCircle, seen.screen, "a link in the address goes straight to the join page")
+        // It survives the page that was still loading when the link was read.
+        val early = reduce(AppState(), AppAction.InviteSeen(link))
+        assertEquals(Screen.JoinCircle, reduce(early, AppAction.ModelChanged(AppModel.NoIdentity)).screen)
         assertNull(reduce(seen, AppAction.ModelChanged(AppModel.Locked(null))).pendingInvite)
         assertEquals(link, reduce(seen, AppAction.ModelChanged(AppModel.NoIdentity)).pendingInvite)
         // The page reads the link before the app reports its first model, which is Loading.
@@ -131,35 +144,92 @@ class ShellViewTest {
         assertFalse("<nav" in html)
     }
 
-    @Test fun anEmptyBrowserCanStartACircleOrPasteALink() {
-        val html = render(AppState(model = AppModel.NoIdentity))
-        assertTrue("""id="$FORM_START"""" in html)
-        assertTrue("""id="$FORM_LINK"""" in html)
-        assertFalse("""id="$FORM_JOIN"""" in html)
+    private fun newcomer(screen: Screen, invite: InviteLink? = null) = render(AppState(screen = screen, model = AppModel.NoIdentity, pendingInvite = invite))
+
+    @Test fun theWelcomePageOffersTwoChoicesAndNoForm() {
+        val html = newcomer(Screen.Welcome)
+        assertTrue("""href="${Screen.StartCircle.fragment}"""" in html)
+        assertTrue("""href="${Screen.JoinCircle.fragment}"""" in html)
+        assertFalse("<form" in html)
         assertFalse("<nav" in html)
+        assertFalse("<button" in html, "no submit button belongs on the welcome page")
     }
 
-    @Test fun withAnInviteInTheAddressTheJoinFormReplacesBoth() {
-        val html = render(AppState(model = AppModel.NoIdentity, pendingInvite = link))
-        assertTrue("""id="$FORM_JOIN"""" in html)
-        assertFalse("""id="$FORM_START"""" in html)
+    @Test fun startingACircleHasItsOwnPageWithOnlyThePassphraseForm() {
+        val html = newcomer(Screen.StartCircle)
+        assertTrue("""id="$FORM_START"""" in html)
         assertFalse("""id="$FORM_LINK"""" in html)
+        assertFalse("""id="$FORM_JOIN"""" in html)
+        assertTrue("Start a circle" in html)
+        assertTrue("""href="${Screen.Welcome.fragment}"""" in html)
+    }
+
+    @Test fun joiningAsksForTheLinkFirstAndThenForAPassphrase() {
+        val first = newcomer(Screen.JoinCircle)
+        assertTrue("""id="$FORM_LINK"""" in first)
+        assertFalse("""id="$FORM_JOIN"""" in first)
+        assertFalse("Start a circle" in first, "the join page has no start button")
+        val second = newcomer(Screen.JoinCircle, link)
+        assertTrue("""id="$FORM_JOIN"""" in second)
+        assertFalse("""id="$FORM_LINK"""" in second)
+        assertFalse("Start a circle" in second)
+    }
+
+    @Test fun theSignInPageHasNoStartOrJoinOption() {
+        val html = render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle)))
+        assertFalse("Start a circle" in html)
+        assertFalse("Join a circle" in html)
+        assertFalse(FORM_START in html)
+        assertFalse(FORM_JOIN in html)
+    }
+
+    @Test fun everyTextEntryLabelEndsWithAColonAndASpace() {
+        val pages = listOf(
+            newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle), newcomer(Screen.JoinCircle, link),
+            render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
+            render(open().copy(newInvite = "https://x")),
+        )
+        var labels = 0
+        for (html in pages) {
+            for (match in Regex("<label[^>]*>([\\s\\S]*?)</label>").findAll(html)) {
+                labels++
+                assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
+            }
+        }
+        assertEquals(5, labels)
+    }
+
+    @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
+        val pages = listOf(
+            newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle, link),
+            render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
+        )
+        for (html in pages) {
+            val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no submit button in $html")
+            assertTrue("hidden" in button, button)
+        }
+    }
+
+    @Test fun theLinkFormButtonIsNotAPassphraseButtonAndShowsAtOnce() {
+        val html = newcomer(Screen.JoinCircle)
+        assertFalse("""id="$SUBMIT_ID"""" in html)
+        assertTrue("Continue" in html)
     }
 
     @Test fun passphraseFieldsAreLabelledMinLengthAndNeverAutofilledAsAnotherSite() {
-        val join = render(AppState(model = AppModel.NoIdentity, pendingInvite = link))
+        val join = newcomer(Screen.JoinCircle, link)
         assertTrue("""for="$FIELD_PASSPHRASE"""" in join)
         assertTrue("""type="password"""" in join)
         assertTrue("""minlength="12"""" in join)
         assertTrue("""autocomplete="new-password"""" in join)
         assertTrue("""aria-describedby="passphrase-help"""" in join)
         assertTrue("cannot be recovered if you forget it" in join)
-        val unlock = render(AppState(model = AppModel.Locked(circle)))
+        val unlock = render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle)))
         assertTrue("""autocomplete="current-password"""" in unlock)
     }
 
     @Test fun aLockedBrowserShowsOnlyUnlockAndForget() {
-        val html = render(AppState(model = AppModel.Locked(circle)))
+        val html = render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle)))
         assertTrue("""id="$FORM_UNLOCK"""" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_ERASE"""" in html)
         assertFalse("<nav" in html)
@@ -245,7 +315,7 @@ class ShellViewTest {
     }
 
     @Test fun nothingSecretIsPutInTheMarkupExceptTheInviteTheUserAskedFor() {
-        val html = render(AppState(model = AppModel.NoIdentity, pendingInvite = link))
+        val html = newcomer(Screen.JoinCircle, link)
         assertFalse(link.secretSeed.toBase64Url() in html)
     }
 }

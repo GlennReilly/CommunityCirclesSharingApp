@@ -3,12 +3,27 @@ const PASS = 'correct horse battery staple';
 const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334);
 const text = c => c.evaluate('document.getElementById("app").innerText');
 async function until(c, expr, what, ms = 20000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await sleep(250); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
-const submit = (c, formId, fields) => c.evaluate(`(() => { const f = document.getElementById(${JSON.stringify(formId)}); for (const [k, v] of Object.entries(${JSON.stringify(fields)})) { f.elements.namedItem(k).value = v; } f.requestSubmit(); return true; })()`);
+// Types into the form's fields like a person would (an input event per field), then submits.
+const submit = (c, formId, fields) => c.evaluate(`(() => { const f = document.getElementById(${JSON.stringify(formId)}); for (const [k, v] of Object.entries(${JSON.stringify(fields)})) { const e = f.elements.namedItem(k); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); } f.requestSubmit(); return true; })()`);
+const type = (c, formId, name, v) => c.evaluate(`(() => { const e = document.getElementById(${JSON.stringify(formId)}).elements.namedItem(${JSON.stringify(name)}); e.value = ${JSON.stringify(v)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+const buttonHidden = (c, formId) => c.evaluate(`document.getElementById(${JSON.stringify(formId)}).querySelector('#submit').hidden`);
 const click = (c, action, extra = '') => c.evaluate(`(() => { const b = document.querySelector('[data-action="${action}"]${extra}'); if (!b) return 'no button'; b.click(); return true; })()`);
 const has = (c, s) => `document.getElementById("app").innerText.includes(${JSON.stringify(s)})`;
 let step = 0; const ok = m => console.log(`ok ${++step}: ${m}`);
 try {
-  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Start a circle'), 'start form');
+  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Circles'), 'welcome page');
+  if (await alice.evaluate('document.querySelectorAll("form, button").length') !== 0) throw new Error('the welcome page has a form or button');
+  ok('welcome page offers choices only (no form, no button)');
+  await alice.evaluate('document.querySelector(\'a[href="#/start"]\').click()');
+  await until(alice, 'document.getElementById("start-form") !== null', 'start page');
+  const labels = await alice.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
+  if (!labels.length || labels.some(l => !l.endsWith(': '))) throw new Error('labels: ' + JSON.stringify(labels));
+  ok('field labels end with ": " (' + JSON.stringify(labels) + ')');
+  if (!(await buttonHidden(alice, 'start-form'))) throw new Error('start button visible before a passphrase');
+  await type(alice, 'start-form', 'passphrase', 'short'); if (!(await buttonHidden(alice, 'start-form'))) throw new Error('start button visible for a short passphrase');
+  await type(alice, 'start-form', 'passphrase', PASS); if (await buttonHidden(alice, 'start-form')) throw new Error('start button still hidden for a long passphrase');
+  await type(alice, 'start-form', 'passphrase', 'short again');
+  ok('start button hidden until the passphrase is long enough');
   await submit(alice, 'start-form', { passphrase: 'short' });
   await until(alice, has(alice, 'Choose a longer passphrase'), 'short passphrase notice'); ok('short passphrase refused with a message');
   await submit(alice, 'start-form', { passphrase: PASS });
@@ -18,7 +33,9 @@ try {
   await until(alice, 'document.getElementById("invite-output") !== null', 'invite shown');
   const link = await alice.evaluate('document.getElementById("invite-output").value'); ok('invite link made: ' + link.replace(/\/[A-Za-z0-9_-]{43}$/, '/<secret>'));
   await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced invite');
-  await bea.goto(link); await until(bea, has(bea, 'Join this circle'), 'bea join form');
+  await bea.goto(link); await until(bea, has(bea, 'Join a circle') + ' && document.getElementById("join-form") !== null', 'bea join page');
+  if (await bea.evaluate('document.body.innerText.includes("Start a circle")')) throw new Error('the join page offers Start a circle');
+  ok('the join page has no start option');
   const addr = await bea.evaluate('location.href'); if (addr.includes('#/join')) throw new Error('secret left in address bar: ' + addr); ok('invite secret removed from the address bar');
   await submit(bea, 'join-form', { passphrase: PASS });
   await until(bea, has(bea, 'A steward needs to let you in'), 'bea waiting'); ok('bea joined and is waiting for a steward');
@@ -26,9 +43,9 @@ try {
   await click(alice, 'sync'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, '!' + has(bea, 'A steward needs to let you in'), 'bea can read'); ok('bea can now read the circle');
-  await click(alice, 'lock'); await until(alice, has(alice, 'Unlock Circles'), 'alice locked'); ok('alice locked');
+  await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
-  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Unlock Circles'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
+  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
   await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked, circle intact with 2 members');
   const stored = await alice.evaluate(`new Promise(r => { const q = indexedDB.open('circles'); q.onsuccess = () => { const tx = q.result.transaction(['keys'], 'readonly'); const g = tx.objectStore('keys').get('identity'); g.onsuccess = () => r(JSON.stringify(g.result)); }; })`);
   if (/seed/i.test(stored.replace(/"(sealed|salt)"/g, ''))) console.log('note: stored text mentions seed', stored.slice(0, 200));
