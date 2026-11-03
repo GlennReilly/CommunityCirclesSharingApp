@@ -13,6 +13,11 @@ const val MIN_STEWARD_FALLBACK_DELAY_DAYS = 7
 const val MAX_STEWARD_FALLBACK_DELAY_DAYS = 90
 const val DEFAULT_STEWARD_FALLBACK_DELAY_DAYS = 14
 
+/** Recovery shares (ADR 0048): 0 means none; otherwise this many stewards must come together to rebuild the key. */
+const val NO_RECOVERY_SHARES = 0
+const val MIN_STEWARD_RECOVERY_THRESHOLD = 2
+const val MAX_STEWARD_RECOVERY_THRESHOLD = 9
+
 /** Fixed policy, not settings: how long votes may be apart, and how long a new steward waits before voting. */
 const val DEFAULT_STEWARD_PROPOSAL_DAYS = 14
 const val DEFAULT_STEWARD_COOL_OFF_DAYS = 7
@@ -20,11 +25,12 @@ const val DEFAULT_STEWARD_COOL_OFF_DAYS = 7
 /** The `addedDay` of a steward present at `circle.create`: far enough in the past that cooling-off never applies. */
 const val FOUNDING_STEWARD_DAY = -1_000_000
 
-/** The three governance settings every circle has, set at creation and changed by `steward.policy` (ADR 0027). */
+/** The governance settings every circle has, set at creation and changed by `steward.policy` (ADR 0027, 0048). */
 data class StewardSettings(
     val quorum: Int = DEFAULT_STEWARD_QUORUM,
     val inactiveDays: Int = DEFAULT_STEWARD_INACTIVE_DAYS,
     val fallbackDelayDays: Int = DEFAULT_STEWARD_FALLBACK_DELAY_DAYS,
+    val recoveryThreshold: Int = NO_RECOVERY_SHARES,
 ) {
     /** Why these values are not allowed, or null if they are. */
     fun problem(): String? = when {
@@ -33,17 +39,23 @@ data class StewardSettings(
             "inactiveDays must be from $MIN_STEWARD_INACTIVE_DAYS to $MAX_STEWARD_INACTIVE_DAYS"
         fallbackDelayDays !in MIN_STEWARD_FALLBACK_DELAY_DAYS..MAX_STEWARD_FALLBACK_DELAY_DAYS ->
             "fallbackDelayDays must be from $MIN_STEWARD_FALLBACK_DELAY_DAYS to $MAX_STEWARD_FALLBACK_DELAY_DAYS"
+        recoveryThreshold != NO_RECOVERY_SHARES && recoveryThreshold !in MIN_STEWARD_RECOVERY_THRESHOLD..MAX_STEWARD_RECOVERY_THRESHOLD ->
+            "recoveryThreshold must be $NO_RECOVERY_SHARES or from $MIN_STEWARD_RECOVERY_THRESHOLD to $MAX_STEWARD_RECOVERY_THRESHOLD"
         else -> null
     }
 
-    /** Names this exact set of values, so votes for different proposals are never mixed. */
-    fun subject(): String = "$quorum:$inactiveDays:$fallbackDelayDays"
+    /** Names this exact set of values, so votes for different proposals are never mixed. The fourth part is left out when it is 0. */
+    fun subject(): String = "$quorum:$inactiveDays:$fallbackDelayDays" + if (recoveryThreshold == NO_RECOVERY_SHARES) "" else ":$recoveryThreshold"
 
     companion object {
         /** The settings a [subject] string names, or null if it is not one. */
         fun fromSubject(subject: String): StewardSettings? {
             val parts = subject.split(':').map { it.toIntOrNull() ?: return null }
-            return if (parts.size == 3) StewardSettings(parts[0], parts[1], parts[2]) else null
+            return when (parts.size) {
+                3 -> StewardSettings(parts[0], parts[1], parts[2])
+                4 -> StewardSettings(parts[0], parts[1], parts[2], parts[3])
+                else -> null
+            }
         }
     }
 }
@@ -55,17 +67,18 @@ data class StewardPolicy(
     val coolOffDays: Int = DEFAULT_STEWARD_COOL_OFF_DAYS,
     val inactiveDays: Int = DEFAULT_STEWARD_INACTIVE_DAYS,
     val fallbackDelayDays: Int = DEFAULT_STEWARD_FALLBACK_DELAY_DAYS,
+    val recoveryThreshold: Int = NO_RECOVERY_SHARES,
 ) {
     init {
         require(settings.problem() == null) { settings.problem().orEmpty() }
         require(proposalDays >= 0 && coolOffDays >= 0) { "days must not be negative" }
     }
 
-    val settings: StewardSettings get() = StewardSettings(quorum, inactiveDays, fallbackDelayDays)
+    val settings: StewardSettings get() = StewardSettings(quorum, inactiveDays, fallbackDelayDays, recoveryThreshold)
 
-    /** This policy with a circle's own three settings. */
+    /** This policy with a circle's own settings. */
     fun with(settings: StewardSettings): StewardPolicy =
-        copy(quorum = settings.quorum, inactiveDays = settings.inactiveDays, fallbackDelayDays = settings.fallbackDelayDays)
+        copy(quorum = settings.quorum, inactiveDays = settings.inactiveDays, fallbackDelayDays = settings.fallbackDelayDays, recoveryThreshold = settings.recoveryThreshold)
 }
 
 enum class StewardChange { ADD, REMOVE, POLICY }

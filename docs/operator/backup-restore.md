@@ -35,7 +35,7 @@ It prints the file it wrote, `circles-backup-<time>.zip`. It never overwrites an
 java -jar circles-server.jar verify circles-backup-20261103024657.zip
 ```
 
-`verify` does not need a database or a running server and can be run on another machine. It checks every checksum, that nothing extra is in the file, that the database opens and passes SQLite's own integrity check, and that this server is not older than the backup. It reports every problem it finds. On success it prints `OK: backup of schema 6 with N blobs`. Run it on your newest backup now and then.
+`verify` does not need a database or a running server and can be run on another machine. It checks every checksum, that nothing extra is in the file, that the database opens and passes SQLite's own integrity check, and that this server is not older than the backup. It reports every problem it finds. On success it prints `OK: backup of schema 7 with N blobs`. Run it on your newest backup now and then.
 
 ## Restoring
 

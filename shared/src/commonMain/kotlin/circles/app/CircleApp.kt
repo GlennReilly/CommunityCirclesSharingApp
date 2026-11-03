@@ -110,7 +110,7 @@ data class AccessSummary(val canAsk: Boolean, val reasons: List<String>, val how
 data class StewardInfo(val member: MemberId, val isMe: Boolean, val sinceDay: Int?, val votesFromDay: Int?)
 
 /** The three settings that govern stewards (ADR 0027). */
-data class StewardSettingsSummary(val quorum: Int, val inactiveDays: Int, val fallbackDelayDays: Int)
+data class StewardSettingsSummary(val quorum: Int, val inactiveDays: Int, val fallbackDelayDays: Int, val recoveryThreshold: Int = circles.event.NO_RECOVERY_SHARES)
 
 /** A steward change that is waiting for enough stewards to agree. */
 data class ProposalSummary(
@@ -299,6 +299,8 @@ data class RecoverySharesSummary(
     val missingKeyEpochs: List<Int> = emptyList(),
     val minThreshold: Int = MIN_RECOVERY_THRESHOLD,
     val maxThreshold: Int = MIN_RECOVERY_THRESHOLD,
+    /** The circle's setting (0 = off): stewards' devices send fresh shares by themselves after a rotation or steward change. */
+    val automaticThreshold: Int = circles.event.NO_RECOVERY_SHARES,
 )
 
 /** The smallest number of stewards that must come together (a single steward needs no sharing). */
@@ -459,8 +461,8 @@ class CircleApp(
     suspend fun removeSteward(member: MemberId): StewardResult = stewardChange(StewardChange.REMOVE, member.v)
 
     /** Proposes new steward settings, or agrees to the same proposal (ADR 0027). */
-    suspend fun proposeStewardSettings(quorum: Int, inactiveDays: Int, fallbackDelayDays: Int): StewardResult =
-        stewardChange(StewardChange.POLICY, StewardSettings(quorum, inactiveDays, fallbackDelayDays).subject())
+    suspend fun proposeStewardSettings(quorum: Int, inactiveDays: Int, fallbackDelayDays: Int, recoveryThreshold: Int = circles.event.NO_RECOVERY_SHARES): StewardResult =
+        stewardChange(StewardChange.POLICY, StewardSettings(quorum, inactiveDays, fallbackDelayDays, recoveryThreshold).subject())
 
     private suspend fun stewardChange(change: StewardChange, subject: String): StewardResult {
         val s = session ?: return StewardResult.NotAllowed
@@ -508,7 +510,8 @@ class CircleApp(
         s.author.keyRing = view.keys
         val revokes = theirs.map { s.author.deviceRevoke(s.circle, it.registration.device, day) }
         val remaining = view.devices.values.filter { !it.revoked && it.registration.member != member }.map { it.registration }
-        val rotation = s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day)
+        val rotation = s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day) +
+            automaticShares(s, view, view.currentEpoch + 1, remaining, day)
         (revokes + rotation).forEach { s.engine.enqueue(s.circle, it) }
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
@@ -522,7 +525,9 @@ class CircleApp(
         if (s.identity.member !in view.stewards || view.currentEpoch < FIRST_EPOCH || view.unrotatedRemovals.isEmpty()) return RemoveResult.NotAllowed
         s.author.keyRing = view.keys
         val live = view.devices.values.filter { !it.revoked }.map { it.registration }
-        s.author.rotateKeys(s.circle, view.currentEpoch + 1, live, today()).forEach { s.engine.enqueue(s.circle, it) }
+        val day = today()
+        (s.author.rotateKeys(s.circle, view.currentEpoch + 1, live, day) + automaticShares(s, view, view.currentEpoch + 1, live, day))
+            .forEach { s.engine.enqueue(s.circle, it) }
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
         return RemoveResult.Removed
@@ -619,16 +624,49 @@ class CircleApp(
 
     // ---- recovery shares (ADR 0048) ----
 
+    /**
+     * The shares to send with a new key (or when the set is out of date), when the circle asks for them: one per steward,
+     * to each steward's devices in [devices]; any number of stewards below two, or a steward with no device, sends none.
+     */
+    private fun automaticShares(s: Session, view: circles.event.CircleView, epoch: Int, devices: List<circles.event.DeviceRegistration>, day: Int): List<circles.event.Envelope> {
+        val threshold = view.stewardSettings.recoveryThreshold
+        if (threshold == circles.event.NO_RECOVERY_SHARES || view.stewards.size < MIN_RECOVERY_THRESHOLD) return emptyList()
+        val perSteward = view.stewards.sortedBy { it.v }.map { steward -> devices.filter { it.member == steward } }
+        if (perSteward.any { it.isEmpty() }) return emptyList()
+        return s.author.recoverySharesPerSteward(s.circle, epoch, perSteward, minOf(threshold, perSteward.size), day).orEmpty()
+    }
+
+    /**
+     * After a sync: if the circle asks for shares and the newest set does not cover exactly today's stewards, the steward
+     * who sorts first sends a fresh set. Only that one steward acts, so two devices do not make competing sets; the
+     * "make shares now" button is the way out if they are away. Does nothing after a refused share, so it cannot loop.
+     */
+    private suspend fun sendMissingShares(s: Session) {
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val epoch = view.currentEpoch
+        if (view.stewardSettings.recoveryThreshold == circles.event.NO_RECOVERY_SHARES || epoch < FIRST_EPOCH || view.keys[epoch] == null) return
+        if (s.identity.member != view.stewards.minByOrNull { it.v }) return
+        if (view.shareHolders[epoch].orEmpty() == view.stewards) return
+        if (replica.refused(s.circle).any { it.type == circles.event.EventType.RECOVERY_SHARE.wire }) return
+        s.author.keyRing = view.keys
+        val live = view.devices.values.filter { !it.revoked }.map { it.registration }
+        val events = automaticShares(s, view, epoch, live, today())
+        if (events.isEmpty()) return
+        events.forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+    }
+
     private fun recoverySharesOf(view: circles.event.CircleView, me: MemberId): RecoverySharesSummary {
         val current = view.currentEpoch
         val isSteward = me in view.stewards
         return RecoverySharesSummary(
             heldEpochs = view.heldShares.keys.sorted(),
             currentEpoch = current,
-            currentSetSent = current >= FIRST_EPOCH && view.stewards.all { it in view.shareHolders[current].orEmpty() },
+            currentSetSent = current >= FIRST_EPOCH && view.shareHolders[current].orEmpty() == view.stewards,
             mayMake = isSteward && current >= FIRST_EPOCH && view.keys[current] != null && view.stewards.size >= MIN_RECOVERY_THRESHOLD,
             missingKeyEpochs = if (isSteward) (FIRST_EPOCH..current).filter { view.keys[it] == null && view.commitments[it] != null } else emptyList(),
             maxThreshold = maxOf(view.stewards.size, MIN_RECOVERY_THRESHOLD),
+            automaticThreshold = view.stewardSettings.recoveryThreshold,
         )
     }
 
@@ -728,6 +766,7 @@ class CircleApp(
         if (old.isNotEmpty() && me in view.stewards) {
             val remaining = view.devices.values.filter { state -> !state.revoked && old.none { it.registration.device == state.registration.device } }.map { it.registration } + registration
             events += s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day)
+            events += automaticShares(s, view, view.currentEpoch + 1, remaining, day)
         }
         events.forEach { s.engine.enqueue(s.circle, it) }
         pendingRecovery = null
@@ -1170,7 +1209,7 @@ class CircleApp(
                     val coolOffEnds = if (since == circles.event.FOUNDING_STEWARD_DAY || view.stewardSettings.quorum == 1) null else since + DEFAULT_STEWARD_COOL_OFF_DAYS
                     StewardInfo(member, member == me, since.takeIf { it != circles.event.FOUNDING_STEWARD_DAY }, coolOffEnds?.takeIf { it > now })
                 },
-                stewardSettings = StewardSettingsSummary(view.stewardSettings.quorum, view.stewardSettings.inactiveDays, view.stewardSettings.fallbackDelayDays),
+                stewardSettings = StewardSettingsSummary(view.stewardSettings.quorum, view.stewardSettings.inactiveDays, view.stewardSettings.fallbackDelayDays, view.stewardSettings.recoveryThreshold),
                 proposals = proposalsFrom(view, me, now),
                 autoLockMinutes = vault.autoLockMinutes,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
@@ -1255,7 +1294,7 @@ class CircleApp(
             if (now - latest > DEFAULT_STEWARD_PROPOSAL_DAYS) return@mapNotNull null // the window closed without enough agreement
             val needed = if (change == StewardChange.REMOVE) policy.quorum else minOf(policy.quorum, view.stewards.size)
             val iAgree = live.any { it.voter == me }
-            val settings = if (change == StewardChange.POLICY) StewardSettings.fromSubject(subject)?.let { StewardSettingsSummary(it.quorum, it.inactiveDays, it.fallbackDelayDays) } else null
+            val settings = if (change == StewardChange.POLICY) StewardSettings.fromSubject(subject)?.let { StewardSettingsSummary(it.quorum, it.inactiveDays, it.fallbackDelayDays, it.recoveryThreshold) } else null
             val cooling = view.stewardSince[me]?.let { since -> since != circles.event.FOUNDING_STEWARD_DAY && policy.quorum > 1 && now < since + policy.coolOffDays } ?: true
             ProposalSummary(
                 change = change,
@@ -1323,6 +1362,7 @@ class CircleApp(
         mutableSync.value = report.state
         // The stream needs a logged-in device, which a new one is only once its first events are accepted.
         if (report.state == SyncState.UpToDate) session?.hints?.start()
+        session?.let { sendMissingShares(it) }
         refresh()
     }
 

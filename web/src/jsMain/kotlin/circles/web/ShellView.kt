@@ -13,6 +13,7 @@ import circles.event.StewardChange
 import circles.event.MAX_STEWARD_FALLBACK_DELAY_DAYS
 import circles.event.MAX_STEWARD_INACTIVE_DAYS
 import circles.event.MAX_STEWARD_QUORUM
+import circles.event.MAX_STEWARD_RECOVERY_THRESHOLD
 import circles.event.MIN_STEWARD_FALLBACK_DELAY_DAYS
 import circles.event.MIN_STEWARD_INACTIVE_DAYS
 import circles.event.MIN_STEWARD_QUORUM
@@ -104,6 +105,7 @@ const val FORM_STEWARD_RULES = "steward-rules-form"
 const val FIELD_QUORUM = "quorum"
 const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
+const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
 const val FORM_MAKE_SHARES = "make-shares-form"
 const val FORM_REBUILD_KEY = "rebuild-key-form"
@@ -1003,7 +1005,7 @@ private fun FlowContent.agreeButton(proposal: ProposalSummary) {
     val (action, subject) = when (proposal.change) {
         StewardChange.ADD -> ACTION_STEWARD_ADD to proposal.member?.v
         StewardChange.REMOVE -> ACTION_STEWARD_REMOVE to proposal.member?.v
-        StewardChange.POLICY -> ACTION_STEWARD_SETTINGS to proposal.settings?.let { "${it.quorum}:${it.inactiveDays}:${it.fallbackDelayDays}" }
+        StewardChange.POLICY -> ACTION_STEWARD_SETTINGS to proposal.settings?.let { "${it.quorum}:${it.inactiveDays}:${it.fallbackDelayDays}:${it.recoveryThreshold}" }
     }
     button(type = ButtonType.button) {
         attributes[ATTR_ACTION] = action
@@ -1016,7 +1018,8 @@ private fun proposalText(proposal: ProposalSummary): String = when (proposal.cha
     StewardChange.ADD -> "Make member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} a steward"
     StewardChange.REMOVE -> "Remove member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} as a steward"
     StewardChange.POLICY -> proposal.settings?.let {
-        "Change the rules: ${it.quorum} to agree, ${it.inactiveDays} quiet days, ${it.fallbackDelayDays} days to wait"
+        "Change the rules: ${it.quorum} to agree, ${it.inactiveDays} quiet days, ${it.fallbackDelayDays} days to wait, " +
+            (if (it.recoveryThreshold == 0) "no recovery shares" else "${it.recoveryThreshold} stewards to rebuild the key")
     } ?: "Change the rules"
 }
 
@@ -1102,15 +1105,22 @@ private fun FlowContent.stewards(home: HomeData) {
             li { +"Stewards who must agree: ${home.stewardSettings.quorum}" }
             li { +"Days a steward must be quiet before the others may act without them: ${home.stewardSettings.inactiveDays}" }
             li { +"Days the others must wait first: ${home.stewardSettings.fallbackDelayDays}" }
+            li {
+                +(
+                    if (home.stewardSettings.recoveryThreshold == 0) "Recovery shares of the circle key: none"
+                    else "Recovery shares of the circle key: any ${home.stewardSettings.recoveryThreshold} stewards can rebuild it"
+                    )
+            }
         }
         if (home.isSteward) {
-            p { +"To change the rules, fill in all three and propose. Other stewards must agree." }
+            p { +"To change the rules, fill in all four and propose. Other stewards must agree." }
             form {
                 id = FORM_STEWARD_RULES
                 for ((field, label, range) in listOf(
                     Triple(FIELD_QUORUM, "Stewards who must agree: ", MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM),
                     Triple(FIELD_INACTIVE, "Quiet days: ", MIN_STEWARD_INACTIVE_DAYS..MAX_STEWARD_INACTIVE_DAYS),
                     Triple(FIELD_FALLBACK, "Days to wait: ", MIN_STEWARD_FALLBACK_DELAY_DAYS..MAX_STEWARD_FALLBACK_DELAY_DAYS),
+                    Triple(FIELD_RECOVERY, "Stewards to rebuild the key (0 for none): ", 0..MAX_STEWARD_RECOVERY_THRESHOLD),
                 )) {
                     label {
                         attributes["for"] = field
@@ -1359,6 +1369,12 @@ private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
         return
     }
     p { +"The circle key can be split so that no steward holds it alone, and any number of stewards you choose can rebuild it together. Use this only if every device that held the key is lost." }
+    p {
+        +(
+            if (shares.automaticThreshold == 0) "The circle's rules do not ask for shares, so they are only made when you press the button below. Stewards can propose the rule on the Stewards page."
+            else "The circle's rules ask for shares: after the key changes or the stewards change, the first steward's device sends a new set by itself, so any ${shares.automaticThreshold} stewards (or all of them if there are fewer) can rebuild the key."
+            )
+    }
     section {
         h2 { +"Make the shares" }
         p {

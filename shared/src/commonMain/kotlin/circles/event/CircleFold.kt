@@ -146,6 +146,11 @@ class CircleFold(
         var created = false
         val heldShares = mutableMapOf<Int, HeldShare>()
         val shareHolders = mutableMapOf<Int, MutableSet<MemberId>>()
+        /**
+         * The author and log position of the newest share event of each epoch: shares sent one right after another by the
+         * same author are one set, and a set that starts later replaces the holders of the old one.
+         */
+        private val shareBatch = mutableMapOf<Int, Triple<MemberId, Long, MemberId>>()
         fun commitmentsSnapshot(): Map<Int, ByteString> = commitments.toMap()
 
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
@@ -166,7 +171,7 @@ class CircleFold(
                 EventType.STEWARD_POLICY -> stewardPolicyChange(e, sender, position)
                 EventType.KEY_WRAP -> wrap(e, sender)
                 EventType.KEY_ROTATE -> rotate(e, sender)
-                EventType.RECOVERY_SHARE -> recoveryShare(e, sender)
+                EventType.RECOVERY_SHARE -> recoveryShare(e, sender, position)
                 else -> null
             }
         }
@@ -299,13 +304,20 @@ class CircleFold(
         }
 
         /** A share of an epoch's key sent to a steward's device (ADR 0048): only a steward may send, and only to a steward. */
-        private fun recoveryShare(e: Envelope, sender: DeviceRegistration): String? {
+        private fun recoveryShare(e: Envelope, sender: DeviceRegistration, position: Long): String? {
             if (sender.member !in stewards) return "only a steward may send recovery shares"
             val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad recovery.share"
             if (terms.epoch != e.epoch || terms.keyHash != null) return "bad recovery.share"
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (target.registration.member !in stewards) return "a recovery share may only go to a steward"
             if (terms.epoch !in FIRST_EPOCH..epoch) return "epoch ${terms.epoch} has not been started"
+            // A steward's several devices follow each other inside one set; the same steward again after another one starts a new set.
+            val previous = shareBatch[terms.epoch]
+            val targetMember = target.registration.member
+            val continues = previous != null && previous.first == sender.member && previous.second == position - 1 &&
+                (targetMember == previous.third || targetMember !in shareHolders[terms.epoch].orEmpty())
+            if (!continues) shareHolders[terms.epoch] = mutableSetOf()
+            shareBatch[terms.epoch] = Triple(sender.member, position, targetMember)
             shareHolders.getOrPut(terms.epoch) { mutableSetOf() } += target.registration.member
             val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys ?: return null
             return when (val share = RecoveryShares.open(cipher, mine, circle, terms.epoch, terms.wrapped)) {

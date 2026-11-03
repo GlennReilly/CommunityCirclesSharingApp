@@ -187,4 +187,18 @@ abstract class RecoverySharesContract {
         assertIs<ShareCodeResult.NotACode>(ShareCode.parse(crypto, "rs1 abc"))
         assertIs<ShareCodeResult.NotACode>(ShareCode.parse(crypto, ""))
     }
+
+    @Test
+    fun aNewSetReplacesTheHoldersOfTheOldOneEvenOnTheSameDay() = runTest {
+        val circle = Circle(newCrypto(), newCipher())
+        val everyone = circle.stewardDevices
+        circle.log += circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, everyone, 2, circle.day)!!
+        assertEquals(3, circle.fold(circle.a.identity).shareHolders.getValue(FIRST_EPOCH).size)
+        // A later set that leaves the third steward out: the holders are exactly the new set's, not the union.
+        circle.log += circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, everyone.take(2), 2, circle.day)!!
+        assertEquals(setOf(circle.a.identity.member, circle.b.identity.member), circle.fold(circle.a.identity).shareHolders.getValue(FIRST_EPOCH))
+        // Two sets whose events are interleaved with another event are still two sets.
+        circle.log += circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, everyone, 3, circle.day)!!
+        assertEquals(3, circle.fold(circle.a.identity).shareHolders.getValue(FIRST_EPOCH).size)
+    }
 }

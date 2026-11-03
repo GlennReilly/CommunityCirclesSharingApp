@@ -175,8 +175,9 @@ try {
   if (await alice.evaluate('document.querySelector("[data-action=steward-remove]") !== null')) throw new Error('the last steward is offered Step down');
   if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible while empty');
   await setField(alice, 'steward-rules-form', 'quorum', '1'); await setField(alice, 'steward-rules-form', 'inactive-days', '60');
-  if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with two of three'); await setField(alice, 'steward-rules-form', 'fallback-days', '14');
-  if (await buttonHidden(alice, 'steward-rules-form')) throw new Error('rules button hidden with all three'); ok('the rules button waits for all three numbers');
+  if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with two of four'); await setField(alice, 'steward-rules-form', 'fallback-days', '14');
+  if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with three of four'); await setField(alice, 'steward-rules-form', 'recovery-threshold', '0');
+  if (await buttonHidden(alice, 'steward-rules-form')) throw new Error('rules button hidden with all four'); ok('the rules button waits for all four numbers');
   await click(alice, 'steward-add'); await until(alice, has(alice, 'Done. It takes effect now.'), 'bea made steward'); await until(alice, has(alice, 'Steward since') , 'two stewards listed');
   ok('alice made bea a steward (a lone steward needs no one else to agree)');
   await syncUntil(bea, 'location.hash = "#/stewards"; ' + has(bea, 'Can vote from'), 'bea sees she is cooling off'); ok('bea, the new steward, sees when she can vote from');

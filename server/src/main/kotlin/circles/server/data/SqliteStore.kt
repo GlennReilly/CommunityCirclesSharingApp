@@ -142,8 +142,8 @@ class SqliteStore(private val connection: Connection) : Store {
             }) { rows -> buildList { while (rows.next()) add(StewardVote(MemberId(rows.getString(1)), rows.getInt(2), rows.getLong(3))) } }
 
         override fun stewardSettings(circle: CircleId): StewardSettings =
-            query("SELECT steward_quorum, steward_inactive_days, steward_fallback_delay_days FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows ->
-                if (rows.next()) StewardSettings(rows.getInt(1), rows.getInt(2), rows.getInt(3)) else StewardSettings()
+            query("SELECT steward_quorum, steward_inactive_days, steward_fallback_delay_days, steward_recovery_threshold FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows ->
+                if (rows.next()) StewardSettings(rows.getInt(1), rows.getInt(2), rows.getInt(3), rows.getInt(4)) else StewardSettings()
             }
 
         override fun lastEventDayBefore(circle: CircleId, member: MemberId, position: Long): Int? =
@@ -250,18 +250,20 @@ class SqliteStore(private val connection: Connection) : Store {
 
         override fun apply(effect: Effect, serverSeq: Long) {
             when (effect) {
-                is Effect.CreateCircle -> update("INSERT INTO circles (id, created_day, steward_quorum, steward_inactive_days, steward_fallback_delay_days) VALUES (?, ?, ?, ?, ?)") {
+                is Effect.CreateCircle -> update("INSERT INTO circles (id, created_day, steward_quorum, steward_inactive_days, steward_fallback_delay_days, steward_recovery_threshold) VALUES (?, ?, ?, ?, ?, ?)") {
                     it.setString(1, effect.circle.v)
                     it.setInt(2, effect.day)
                     it.setInt(3, effect.settings.quorum)
                     it.setInt(4, effect.settings.inactiveDays)
                     it.setInt(5, effect.settings.fallbackDelayDays)
+                    it.setInt(6, effect.settings.recoveryThreshold)
                 }
-                is Effect.SetStewardSettings -> update("UPDATE circles SET steward_quorum = ?, steward_inactive_days = ?, steward_fallback_delay_days = ? WHERE id = ?") {
+                is Effect.SetStewardSettings -> update("UPDATE circles SET steward_quorum = ?, steward_inactive_days = ?, steward_fallback_delay_days = ?, steward_recovery_threshold = ? WHERE id = ?") {
                     it.setInt(1, effect.settings.quorum)
                     it.setInt(2, effect.settings.inactiveDays)
                     it.setInt(3, effect.settings.fallbackDelayDays)
-                    it.setString(4, effect.circle.v)
+                    it.setInt(4, effect.settings.recoveryThreshold)
+                    it.setString(5, effect.circle.v)
                 }
                 is Effect.RegisterDevice -> registerDevice(effect.circle, effect.registration, serverSeq)
                 is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq, added_day) VALUES (?, ?, ?, ?) ON CONFLICT (circle_id, member_id) DO UPDATE SET added_seq = excluded.added_seq, added_day = excluded.added_day, removed_seq = NULL") {

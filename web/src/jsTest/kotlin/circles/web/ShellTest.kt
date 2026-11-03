@@ -261,7 +261,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 3 + 4, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -722,8 +722,12 @@ class ShellViewTest {
     @Test fun settingsProposalsCarryTheirSettingsAndRemovalsSayWho() {
         val rules = ProposalSummary(StewardChange.POLICY, null, StewardSettingsSummary(1, 60, 14), 1, 2, iAgree = false, canAgree = true)
         val html = stewards(true, listOf(meSteward, beaSteward), listOf(rules))
-        assertTrue("Change the rules: 1 to agree, 60 quiet days, 14 days to wait" in html)
-        assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_SETTINGS" $ATTR_SUBJECT="1:60:14"""" in html)
+        assertTrue("Change the rules: 1 to agree, 60 quiet days, 14 days to wait, no recovery shares" in html)
+        val withShares = ProposalSummary(StewardChange.POLICY, null, StewardSettingsSummary(1, 60, 14, 3), 1, 2, iAgree = false, canAgree = true)
+        val sharesHtml = stewards(true, listOf(meSteward, beaSteward), listOf(withShares))
+        assertTrue("3 stewards to rebuild the key" in sharesHtml)
+        assertTrue("""$ATTR_SUBJECT="1:60:14:3"""" in sharesHtml)
+        assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_SETTINGS" $ATTR_SUBJECT="1:60:14:0"""" in html)
         val removal = ProposalSummary(StewardChange.REMOVE, bea, null, 1, 2, false, true)
         assertTrue("Remove member bbbbbbbb as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
     }
@@ -743,10 +747,10 @@ class ShellViewTest {
         assertTrue("Stewards who must agree: 2" in member, "everyone can read the rules")
     }
 
-    @Test fun theRulesFormHasThreeLabelledNumbersWithTheirRangesAndAHiddenButton() {
+    @Test fun theRulesFormHasFourLabelledNumbersWithTheirRangesAndAHiddenButton() {
         val html = stewards(true, listOf(meSteward))
-        for (label in listOf("Stewards who must agree: ", "Quiet days: ", "Days to wait: ")) assertTrue(label in html, label)
-        assertEquals(3, Regex("""type="number"""").findAll(html).count())
+        for (label in listOf("Stewards who must agree: ", "Quiet days: ", "Days to wait: ", "Stewards to rebuild the key (0 for none): ")) assertTrue(label in html, label)
+        assertEquals(4, Regex("""type="number"""").findAll(html).count())
         assertTrue("""min="1"""" in html && """max="9"""" in html && """min="7"""" in html && """max="365"""" in html && """max="90"""" in html)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_STEWARD_RULES))?.value ?: error("no button")
         assertTrue("hidden" in button)

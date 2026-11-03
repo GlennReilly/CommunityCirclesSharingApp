@@ -34,6 +34,8 @@ private const val KEY_STEWARD_DELAY_DAYS = "stewardFallbackDelayDays"
 private const val KEY_QUORUM = "quorum"
 private const val KEY_INACTIVE_DAYS = "inactiveDays"
 private const val KEY_FALLBACK_DELAY_DAYS = "fallbackDelayDays"
+private const val KEY_STEWARD_RECOVERY_THRESHOLD = "stewardRecoveryThreshold"
+private const val KEY_RECOVERY_THRESHOLD = "recoveryThreshold"
 
 /** A device and its public keys, as registered by `circle.create`, `member.join` and `device.add` (spec 3.2). */
 data class DeviceRegistration(val member: MemberId, val device: DeviceId, val signPub: ByteString, val boxPub: ByteString) {
@@ -72,7 +74,7 @@ object PublicParts {
     /** `public` of `circle.create`: the registration plus three optional steward settings; absent ones take the defaults. */
     fun circleCreate(map: CborMap): Parsed<CircleCreateTerms> {
         val registrationKeys = setOf(KEY_MEMBER, KEY_DEVICE, KEY_SIGN_PUB, KEY_BOX_PUB)
-        val settingKeys = setOf(KEY_STEWARD_QUORUM, KEY_STEWARD_INACTIVE_DAYS, KEY_STEWARD_DELAY_DAYS)
+        val settingKeys = setOf(KEY_STEWARD_QUORUM, KEY_STEWARD_INACTIVE_DAYS, KEY_STEWARD_DELAY_DAYS, KEY_STEWARD_RECOVERY_THRESHOLD)
         if (!map.entries.keys.containsAll(registrationKeys) || !(registrationKeys + settingKeys).containsAll(map.entries.keys)) {
             return Parsed.Invalid("expected the keys ${registrationKeys.sorted()} and optionally ${settingKeys.sorted()}")
         }
@@ -85,6 +87,7 @@ object PublicParts {
             quorum = optionalInt(map, KEY_STEWARD_QUORUM, defaults.quorum) ?: return Parsed.Invalid("stewardQuorum must be a whole number"),
             inactiveDays = optionalInt(map, KEY_STEWARD_INACTIVE_DAYS, defaults.inactiveDays) ?: return Parsed.Invalid("stewardInactiveDays must be a whole number"),
             fallbackDelayDays = optionalInt(map, KEY_STEWARD_DELAY_DAYS, defaults.fallbackDelayDays) ?: return Parsed.Invalid("stewardFallbackDelayDays must be a whole number"),
+            recoveryThreshold = optionalInt(map, KEY_STEWARD_RECOVERY_THRESHOLD, defaults.recoveryThreshold) ?: return Parsed.Invalid("stewardRecoveryThreshold must be a whole number"),
         )
         settings.problem()?.let { return Parsed.Invalid(it) }
         return Parsed.Ok(CircleCreateTerms(registration, settings))
@@ -97,16 +100,19 @@ object PublicParts {
                 KEY_STEWARD_QUORUM to CborInt(settings.quorum.toLong()),
                 KEY_STEWARD_INACTIVE_DAYS to CborInt(settings.inactiveDays.toLong()),
                 KEY_STEWARD_DELAY_DAYS to CborInt(settings.fallbackDelayDays.toLong()),
-            ),
+            ) + if (settings.recoveryThreshold == NO_RECOVERY_SHARES) emptyMap() else mapOf(KEY_STEWARD_RECOVERY_THRESHOLD to CborInt(settings.recoveryThreshold.toLong())),
         )
 
     /** `public` of `steward.policy`: the full new settings. */
     fun stewardSettings(map: CborMap): Parsed<StewardSettings> {
-        exactKeys(map, setOf(KEY_QUORUM, KEY_INACTIVE_DAYS, KEY_FALLBACK_DELAY_DAYS))?.let { return Parsed.Invalid(it) }
+        val required = setOf(KEY_QUORUM, KEY_INACTIVE_DAYS, KEY_FALLBACK_DELAY_DAYS)
+        if (KEY_RECOVERY_THRESHOLD in map.entries.keys) exactKeys(map, required + KEY_RECOVERY_THRESHOLD)?.let { return Parsed.Invalid(it) }
+        else exactKeys(map, required)?.let { return Parsed.Invalid(it) }
         val settings = StewardSettings(
             quorum = smallInt(map, KEY_QUORUM) ?: return Parsed.Invalid("quorum must be a whole number"),
             inactiveDays = smallInt(map, KEY_INACTIVE_DAYS) ?: return Parsed.Invalid("inactiveDays must be a whole number"),
             fallbackDelayDays = smallInt(map, KEY_FALLBACK_DELAY_DAYS) ?: return Parsed.Invalid("fallbackDelayDays must be a whole number"),
+            recoveryThreshold = if (KEY_RECOVERY_THRESHOLD in map.entries.keys) smallInt(map, KEY_RECOVERY_THRESHOLD) ?: return Parsed.Invalid("recoveryThreshold must be a whole number") else NO_RECOVERY_SHARES,
         )
         return settings.problem()?.let { Parsed.Invalid(it) } ?: Parsed.Ok(settings)
     }
@@ -115,7 +121,10 @@ object PublicParts {
         KEY_QUORUM to CborInt(settings.quorum.toLong()),
         KEY_INACTIVE_DAYS to CborInt(settings.inactiveDays.toLong()),
         KEY_FALLBACK_DELAY_DAYS to CborInt(settings.fallbackDelayDays.toLong()),
-    )
+    ).let { base ->
+        // The fourth setting is written only when it is on, so circles without shares keep their earlier bytes.
+        if (settings.recoveryThreshold == NO_RECOVERY_SHARES) base else CborMap(base.entries + (KEY_RECOVERY_THRESHOLD to CborInt(settings.recoveryThreshold.toLong())))
+    }
 
     fun invite(map: CborMap): Parsed<InviteTerms> {
         exactKeys(map, setOf(KEY_INVITE_PUB, KEY_EXPIRES_DAY, KEY_MAX_USES))?.let { return Parsed.Invalid(it) }

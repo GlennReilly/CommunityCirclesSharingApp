@@ -116,7 +116,7 @@ class CliBackupTest {
         val result = run(dir, "migrate", extraEnv = mapOf(ENV_BACKUP_DIR to safe.toString()))
         assertEquals(EXIT_OK, result.code, result.err)
         assertTrue(result.out.contains("Backed up the database and 0 blobs to"), result.out)
-        assertTrue(result.out.contains("Applied migrations 4, 5, 6"), result.out)
+        assertTrue(result.out.contains("Applied migrations 4, 5, 6, 7"), result.out)
         val backup = onlyZip(safe)
         assertTrue(backup.fileName.toString().startsWith("pre-migrate-from-v3-"), backup.fileName.toString())
         assertFalse(Files.exists(dir.resolve("backups")), "nothing is written inside the data directory")
@@ -150,7 +150,7 @@ class CliBackupTest {
         assertEquals(EXIT_OK, result.code, result.err)
         assertTrue(result.out.contains("and 2 blobs to"), result.out)
         assertTrue(run(null, "verify", onlyZip(safe).toString()).out.contains("with 2 blobs"))
-        Database.openFile(data).use { assertEquals(6, Migrator(it).currentVersion()) }
+        Database.openFile(data).use { assertEquals(7, Migrator(it).currentVersion()) }
     }
 
     @Test

@@ -261,8 +261,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val quorum = field(FIELD_QUORUM).toIntOrNull()
                     val inactive = field(FIELD_INACTIVE).toIntOrNull()
                     val fallback = field(FIELD_FALLBACK).toIntOrNull()
-                    if (quorum == null || inactive == null || fallback == null) dispatch(AppAction.Notice("Fill in all three numbers."))
-                    else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback))
+                    val recovery = field(FIELD_RECOVERY).toIntOrNull()
+                    if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
+                    else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
                 }
                 FORM_MAKE_SHARES -> {
                     val threshold = field(FIELD_THRESHOLD).toIntOrNull()
@@ -467,8 +468,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 }
                 ACTION_STEWARD_ADD -> target.getAttribute(ATTR_SUBJECT)?.let { reportSteward(circleApp?.proposeSteward(MemberId(it)) ?: StewardResult.NotAllowed) }
                 ACTION_STEWARD_REMOVE -> target.getAttribute(ATTR_SUBJECT)?.let { reportSteward(circleApp?.removeSteward(MemberId(it)) ?: StewardResult.NotAllowed) }
-                ACTION_STEWARD_SETTINGS -> target.getAttribute(ATTR_SUBJECT)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 3 }?.let {
-                    reportSteward(circleApp?.proposeStewardSettings(it[0], it[1], it[2]) ?: StewardResult.NotAllowed)
+                ACTION_STEWARD_SETTINGS -> target.getAttribute(ATTR_SUBJECT)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 3 || it.size == 4 }?.let {
+                    reportSteward(circleApp?.proposeStewardSettings(it[0], it[1], it[2], it.getOrElse(3) { 0 }) ?: StewardResult.NotAllowed)
                 }
                 ACTION_BORROW_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.BorrowItem(ItemId(it)))

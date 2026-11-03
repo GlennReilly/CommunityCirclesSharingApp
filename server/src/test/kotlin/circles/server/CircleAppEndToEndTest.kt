@@ -894,4 +894,59 @@ class CircleAppEndToEndTest {
         assertEquals(emptyList(), home(bea.app).recoveryShares.missingKeyEpochs)
         assertEquals(circles.app.RebuildResult.AlreadyHaveKey, bea.app.rebuildKey(listOf(aliceCode, beaCode)))
     }
+
+    @Test
+    fun theCirclesRulesMakeSharesByThemselvesAfterEveryChangeOfKeyOrStewards() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val carol = join()
+        fun sync() = runBlocking { repeat(3) { listOf(alice, bea, carol).forEach { it.app.syncOnce() } } }
+
+        // 1. Alone, alice turns the rule on (2 stewards to rebuild) and makes bea a steward; no one pressed "make shares".
+        assertEquals(0, home(alice.app).stewardSettings.recoveryThreshold)
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14, 1)).reason.contains("recoveryThreshold"))
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeStewardSettings(2, 60, 14, 2))
+        sync()
+        assertEquals(2, home(bea.app).stewardSettings.recoveryThreshold)
+        assertEquals(emptyList(), home(alice.app).recoveryShares.heldEpochs, "one steward: nothing to split")
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
+        sync()
+        for (steward in listOf(alice, bea)) {
+            val shares = home(steward.app).recoveryShares
+            assertEquals(listOf(1), shares.heldEpochs, "both stewards were sent a share of the first key")
+            assertTrue(shares.currentSetSent)
+            assertEquals(2, shares.automaticThreshold)
+        }
+        assertEquals(emptyList(), home(carol.app).recoveryShares.heldEpochs, "a member who is not a steward holds none")
+
+        // 2. A removal changes the key: the new key's shares go out in the same batch, so there is no gap.
+        assertEquals(RemoveResult.Removed, alice.app.removeMember(home(carol.app).me))
+        assertTrue(home(alice.app).recoveryShares.currentSetSent, "shares of the new key are already in alice's batch")
+        sync()
+        for (steward in listOf(alice, bea)) assertEquals(listOf(1, 2), home(steward.app).recoveryShares.heldEpochs)
+        assertTrue(home(bea.app).recoveryShares.currentSetSent)
+
+        // 3. Switching it off stops new sets; the old ones stay (they are history).
+        assertEquals(StewardResult.Sent(takesEffect = false), alice.app.proposeStewardSettings(2, 60, 14, 0))
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        assertEquals(listOf(1, 2), home(alice.app).recoveryShares.heldEpochs)
+
+        // 4. Codes made automatically rebuild the key like any others (a check that the shares are consistent).
+        val codes = listOf(assertNotNull(alice.app.shareCode(2)), assertNotNull(bea.app.shareCode(2)))
+        assertEquals(circles.app.RebuildResult.AlreadyHaveKey, alice.app.rebuildKey(codes))
+        sync()
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
 }

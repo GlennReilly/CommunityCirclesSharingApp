@@ -265,4 +265,16 @@ class StewardRulesTest {
         val sixDaysQuiet = Activity(lastDay = mapOf(b to 94))
         assertEquals(StewardOutcome.Pending, StewardRules.decide(shortest, StewardChange.ADD, c, a, 107, stewards, proposalAt100, sixDaysQuiet))
     }
+
+    @Test
+    fun aRecoveryThresholdAloneIsAPolicyChangeAndTurningItOffIsOneToo() {
+        val stewards = mapOf(a to founding)
+        val on = StewardSettings(recoveryThreshold = 2)
+        val onPolicy = policy.with(on)
+        assertEquals(StewardOutcome.Effective, StewardRules.decidePolicy(policy, on, a, 100, stewards, emptyList()))
+        assertTrue(refused(StewardRules.decidePolicy(onPolicy, on, a, 100, stewards, emptyList())).contains("already"))
+        assertEquals(StewardOutcome.Effective, StewardRules.decidePolicy(onPolicy, StewardSettings(), a, 100, stewards, emptyList()), "switching it off is a change, not 'already the settings'")
+        assertTrue(refused(StewardRules.decidePolicy(policy, StewardSettings(recoveryThreshold = 1), a, 100, stewards, emptyList())).contains("recoveryThreshold"))
+        assertEquals(on, onPolicy.settings)
+    }
 }
