@@ -43,6 +43,8 @@ import org.w3c.dom.events.Event
 private const val ROOT_ID = "app"
 private const val MILLIS_PER_DAY = 86_400_000.0
 private const val POLL_MILLIS = 60_000
+private const val UPDATE_CHECK_MILLIS = 60 * 60 * 1000
+private const val WORKER_PATH = "/sw.js"
 private const val MIN_PASSPHRASE_NOTICE = "Choose a longer passphrase: at least %d characters."
 
 /**
@@ -52,6 +54,7 @@ private const val MIN_PASSPHRASE_NOTICE = "Choose a longer passphrase: at least 
 private class Page(private val root: HTMLElement, private val scope: CoroutineScope) {
     private var state = AppState()
     private var app: CircleApp? = null
+    private var registration: dynamic = null
 
     fun dispatch(action: AppAction) {
         val before = state
@@ -74,6 +77,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
 
     suspend fun start() {
         render(screenChanged = false)
+        registerServiceWorker()
         InviteLink.parse(window.location.hash)?.let { link ->
             dispatch(AppAction.InviteSeen(link))
             // The secret in the link must not stay in the address bar or the history entry (ADR 0040).
@@ -108,6 +112,26 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }
         scope.launch { circleApp.sync.collect { dispatch(AppAction.SyncChanged(it)) } }
         circleApp.open()
+    }
+
+    /**
+     * Registers the offline shell (ADR 0041). A new version waits until the member presses "Update now"; the page then
+     * reloads once the new worker has taken over. The very first install is silent.
+     */
+    private fun registerServiceWorker() {
+        val container = window.navigator.asDynamic().serviceWorker ?: return
+        val hadController = container.controller != null
+        container.addEventListener("controllerchange", { if (hadController) window.location.reload() })
+        container.register(WORKER_PATH).then { reg: dynamic ->
+            registration = reg
+            fun watch(worker: dynamic) {
+                worker.addEventListener("statechange", { if (worker.state == "installed" && container.controller != null) dispatch(AppAction.UpdateReady) })
+            }
+            if (reg.waiting != null && container.controller != null) dispatch(AppAction.UpdateReady)
+            reg.addEventListener("updatefound", { val installing = reg.installing; if (installing != null) watch(installing) })
+            window.setInterval({ reg.update() }, UPDATE_CHECK_MILLIS)
+            window.addEventListener("online", { reg.update() })
+        }
     }
 
     /** A form's button appears only once every field that needs text has enough of it (`data-min`, in the views). */
@@ -225,6 +249,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         val circleApp = app
         scope.launch {
             when (target.getAttribute(ATTR_ACTION)) {
+                ACTION_UPDATE -> registration?.waiting?.postMessage(js("({type: 'SKIP_WAITING'})"))
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()

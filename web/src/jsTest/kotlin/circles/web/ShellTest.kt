@@ -575,6 +575,7 @@ class ShellViewTest {
         assertFalse(UPDATE_BUTTON_ID in render(AppState()))
         val html = render(AppState(updateAvailable = true))
         assertTrue(UPDATE_BUTTON_ID in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_UPDATE"""" in html)
         assertTrue("""role="alert"""" in html)
     }
 

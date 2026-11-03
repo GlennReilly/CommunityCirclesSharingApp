@@ -44,6 +44,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0038](0038-client-sync-engine.md) | Client sync engine: shared code, verify once at ingest | Accepted |
 | [0039](0039-device-key-storage-in-the-browser.md) | Device key storage in the browser | Accepted |
 | [0040](0040-invite-link-format.md) | Invite link format | Accepted |
+| [0041](0041-service-worker-and-updates.md) | Service worker: offline shell, no API caching, the member chooses when to update | Accepted |
 
 ## Open decisions still to record
 

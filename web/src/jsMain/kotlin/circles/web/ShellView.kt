@@ -43,6 +43,7 @@ import kotlinx.html.summary
 import kotlinx.html.ul
 
 const val UPDATE_BUTTON_ID = "update-now"
+const val ACTION_UPDATE = "update-now"
 const val MAIN_ID = "main"
 const val NOTICE_ID = "notice"
 
@@ -120,6 +121,7 @@ fun FlowContent.shell(state: AppState) {
                 +"A new version is ready. "
                 button(type = ButtonType.button) {
                     id = UPDATE_BUTTON_ID
+                    attributes[ATTR_ACTION] = ACTION_UPDATE
                     +"Update now"
                 }
             }

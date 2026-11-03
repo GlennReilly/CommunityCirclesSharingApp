@@ -56,7 +56,7 @@ tasks.register<Test>("loadTest") {
 val webDistParent = project(":web").layout.buildDirectory.dir("dist")
 
 tasks.run {
-    dependsOn(":web:webDist")
+    dependsOn(":web:stampWorker")
     classpath(webDistParent)
 }
 
@@ -66,7 +66,7 @@ tasks.shadowJar {
     archiveClassifier = ""
     archiveVersion = ""
     mergeServiceFiles()
-    dependsOn(":web:webDist")
+    dependsOn(":web:stampWorker")
     from(webDistParent)
     // BouncyCastle ships signature files that are invalid once its classes are repackaged.
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")

@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
 
 plugins {
@@ -57,10 +58,33 @@ val checkBundleBudget = tasks.register<BundleBudgetTask>("checkBundleBudget") {
 tasks.named("check") { dependsOn(checkBundleBudget) }
 
 // The deployable client: the bundle plus the static files, in one folder that the server packs (ADR 0037).
+val distFolder = layout.buildDirectory.dir("dist/web")
 val webDist = tasks.register<Sync>("webDist") {
     from(tasks.named("jsBrowserProductionWebpack").map { (it as org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpack).outputDirectory }) {
         include("circles.js")
     }
-    from(layout.projectDirectory.dir("src/jsMain/resources")) { include("index.html", "styles.css") }
-    into(layout.buildDirectory.dir("dist/web"))
+    from(layout.projectDirectory.dir("src/jsMain/resources")) { include("index.html", "styles.css", "sw.js") }
+    into(distFolder)
+}
+
+/** Gives the service worker a version: a hash of the shell files, so a changed shell is a changed worker (ADR 0041). */
+abstract class StampWorkerTask : DefaultTask() {
+    @get:InputDirectory abstract val folder: DirectoryProperty
+
+    @TaskAction
+    fun stamp() {
+        val dir = folder.get().asFile
+        val digest = MessageDigest.getInstance("SHA-256")
+        listOf("circles.js", "index.html", "styles.css").forEach { digest.update(dir.resolve(it).readBytes()) }
+        val buildId = digest.digest().joinToString("") { byte -> "%02x".format(byte) }.take(16)
+        val worker = dir.resolve("sw.js")
+        worker.writeText(worker.readText().replace("__BUILD_ID__", buildId))
+    }
+}
+
+/** The finished client folder; this is what the server packs. */
+val stampWorker = tasks.register<StampWorkerTask>("stampWorker") {
+    dependsOn(webDist)
+    folder.set(distFolder)
+    outputs.upToDateWhen { false }
 }
