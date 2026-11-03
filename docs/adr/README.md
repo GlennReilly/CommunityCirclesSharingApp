@@ -39,13 +39,14 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0033](0033-signed-steward-admin-requests.md) | Signed steward requests for export and import over HTTP | Accepted (point 6 amended by 0034) |
 | [0034](0034-operator-import-token-for-new-circles.md) | An operator-issued import token for new circles (amends 0033) | Accepted |
 | [0035](0035-browser-crypto-with-noble.md) | Browser cryptography with the noble libraries (amends 0018) | Accepted |
+| [0036](0036-browser-local-storage-with-indexeddb.md) | Browser local storage with IndexedDB, and verify once | Accepted |
 
 ## Open decisions still to record
 
 From the spec, section 11. Record each as an ADR when it is decided:
 
 1. ~~libsodium binding for the JVM in M2~~: decided (ADR 0018). Shamir: decided (ADR 0020).
-2. Local replica store in the browser: IndexedDB vs SQLite-WASM on OPFS.
+2. ~~Local replica store in the browser~~: decided, IndexedDB (ADR 0036).
 3. ~~Kotlin/JS bundle size outcome and the fallback plan~~: measured and decided (ADR 0009, 0035): our code is about 77 KB gzipped; the browser uses noble (22 KB) instead of libsodium (245 KB).
 4. Recovery code wordlist and format.
 5. ~~Whether the server serves SSE in v1 or polling only.~~ Decided: hint-only SSE, optional for clients (ADR 0026).
