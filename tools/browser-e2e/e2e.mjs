@@ -91,6 +91,12 @@ try {
   await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
   await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
   await alice.evaluate('location.hash = "#/home"');
+  // Live updates: nobody clicks "Sync now" for Bea here, and the page only polls once a minute, so this proves the event stream works.
+  await bea.evaluate('location.hash = "#/items"'); await sleep(4000); // let both event streams connect
+  await alice.evaluate('location.hash = "#/items/add"'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add page again');
+  await setField(alice, 'item-add-form', 'name', 'Rake'); await alice.evaluate('document.getElementById("item-add-form").requestSubmit()');
+  await until(alice, has(alice, 'Rake'), 'rake listed', 10000);
+  const t0 = Date.now(); await until(bea, has(bea, 'Rake'), 'bea sees the rake without syncing', 15000); ok('bea saw the new item by itself after ' + (Date.now() - t0) + ' ms (event stream, no sync click)');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');

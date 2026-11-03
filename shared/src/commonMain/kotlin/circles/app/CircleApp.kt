@@ -34,7 +34,10 @@ import circles.keys.VaultState
 import circles.policy.CircleId
 import circles.policy.MemberId
 import circles.sync.Replica
+import circles.sync.HintListener
+import circles.sync.StreamTransport
 import circles.sync.SyncApi
+import circles.sync.TokenSource
 import circles.sync.SyncEngine
 import circles.sync.SyncReport
 import circles.sync.SyncScheduler
@@ -169,6 +172,10 @@ class CircleApp(
     private val apiFor: (DeviceIdentity) -> SyncApi,
     /** Today as days since 1970-01-01 (events carry a day, never a time). */
     private val today: () -> Int,
+    /** The event stream of ADR 0026, if the platform has one; without it the app polls (the scheduler's timers). */
+    private val streams: StreamTransport? = null,
+    /** Randomness for delays; tests pass a fixed value. */
+    private val random: () -> Double = { kotlin.random.Random.nextDouble() },
 ) {
     private val mutableModel = MutableStateFlow<AppModel>(AppModel.Loading)
     val model: StateFlow<AppModel> = mutableModel.asStateFlow()
@@ -178,7 +185,7 @@ class CircleApp(
 
     private var session: Session? = null
 
-    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler)
+    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler, val hints: HintListener?)
 
     suspend fun open() {
         vault.open()
@@ -189,12 +196,20 @@ class CircleApp(
             vault.state.collect { state ->
                 if (state is VaultState.Locked && session != null) {
                     val circle = session?.circle
-                    session?.scheduler?.stop()
-                    session = null
+                    stopSession()
                     mutableModel.value = AppModel.Locked(circle)
                 }
             }
         }
+    }
+
+    /** True while the event stream is open, so changes by others arrive within moments instead of by polling. */
+    fun isLive(): Boolean = session?.hints?.connected?.value == true
+
+    private fun stopSession() {
+        session?.scheduler?.stop()
+        session?.hints?.stop()
+        session = null
     }
 
     /** Syncs now and waits for the result (a "sync now" button, tests). Null while locked. */
@@ -259,8 +274,7 @@ class CircleApp(
 
     /** "Delete my data on this device": identity, wrapped keys and the local copy of the log are forgotten. */
     suspend fun erase() {
-        session?.scheduler?.stop()
-        session = null
+        stopSession()
         vault.erase()
         mutableModel.value = AppModel.NoIdentity
     }
@@ -479,12 +493,19 @@ class CircleApp(
     }
 
     private suspend fun activate(identity: DeviceIdentity, circle: CircleId): Session {
-        session?.scheduler?.stop()
-        val engine = SyncEngine(crypto, apiFor(identity), replica)
+        stopSession()
+        val api = apiFor(identity)
+        val engine = SyncEngine(crypto, api, replica)
         val syncer = Syncer { c -> engine.sync(c).also { report -> afterSync(report) } }
-        val scheduler = SyncScheduler(scope, syncer, circle)
+        val scheduler = SyncScheduler(scope, syncer, circle, random)
+        val hints = streams?.let { transport ->
+            (api as? TokenSource)?.let { tokens ->
+                // A hint at or below what is already stored (our own push coming back) needs no pull.
+                HintListener(scope, transport, tokens, circle, random) { newest -> if (newest > replica.cursor(circle)) scheduler.trigger(SyncTrigger.HINT) }
+            }
+        }
         val author = EventAuthor(crypto, identity, cipher, firstCounter = nextCounter(identity, circle))
-        return Session(identity, circle, author, engine, scheduler).also {
+        return Session(identity, circle, author, engine, scheduler, hints).also {
             session = it
             scheduler.start()
         }
@@ -492,6 +513,8 @@ class CircleApp(
 
     private suspend fun afterSync(report: SyncReport) {
         mutableSync.value = report.state
+        // The stream needs a logged-in device, which a new one is only once its first events are accepted.
+        if (report.state == SyncState.UpToDate) session?.hints?.start()
         refresh()
     }
 

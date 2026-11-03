@@ -50,8 +50,14 @@ class HttpSyncApi(
     private val transport: HttpTransport,
     private val crypto: Crypto,
     private val identity: DeviceIdentity,
-) : SyncApi {
+) : SyncApi, TokenSource {
     private var token: String? = null
+
+    override suspend fun token(): ApiOutcome<String> = token?.let { ApiOutcome.Ok(it) } ?: login().also { if (it is ApiOutcome.Ok) token = it.value }
+
+    override fun rejectToken() {
+        token = null
+    }
 
     override suspend fun push(circle: CircleId, events: List<Envelope>): ApiOutcome<List<PushResult>> {
         val results = mutableListOf<PushResult>()

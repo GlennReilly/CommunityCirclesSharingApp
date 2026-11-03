@@ -103,6 +103,10 @@ fun FlowContent.shell(state: AppState) {
                 attributes[ATTR_ACTION] = ACTION_SYNC
                 +"Sync now"
             }
+            button(type = ButtonType.button) {
+                attributes[ATTR_ACTION] = ACTION_LOCK
+                +"Lock now"
+            }
         }
         if (state.updateAvailable) {
             div {
@@ -343,10 +347,6 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
                 }
             }
         }
-    }
-    button(type = ButtonType.button) {
-        attributes[ATTR_ACTION] = ACTION_LOCK
-        +"Lock now"
     }
 }
 

@@ -17,6 +17,7 @@ import circles.event.DeviceId
 import circles.keys.JsPasswordHasher
 import circles.keys.KeyVault
 import circles.keys.UnlockResult
+import circles.sync.FetchStreamTransport
 import circles.sync.FetchTransport
 import circles.sync.HttpSyncApi
 import circles.sync.IdbOpenResult
@@ -100,6 +101,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             scope, crypto, cipher, vault, replica, replica,
             { identity -> HttpSyncApi(FetchTransport(), crypto, identity) },
             { (kotlin.js.Date.now() / MILLIS_PER_DAY).toInt() },
+            FetchStreamTransport(),
         )
         app = circleApp
         scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }

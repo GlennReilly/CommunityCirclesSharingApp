@@ -328,16 +328,18 @@ class ShellViewTest {
         assertFalse("could not be sent" in render(open(home(refused = 0))))
     }
 
-    @Test fun homeCanLockTheSession() {
-        assertTrue("""$ATTR_ACTION="$ACTION_LOCK"""" in render(open()))
-    }
-
-    @Test fun syncNowIsInTheHeaderOfEverySignedInPageAndNowhereElse() {
-        for (screen in listOf(Screen.Home, Screen.Items, Screen.AddItem, Screen.Skills)) {
-            assertTrue("""$ATTR_ACTION="$ACTION_SYNC"""" in render(open().copy(screen = screen)), screen.name)
+    @Test fun syncNowAndLockNowAreInTheHeaderOfEverySignedInPageAndNowhereElse() {
+        for (screen in listOf(Screen.Home, Screen.Items, Screen.AddItem, Screen.Borrow, Screen.Skills)) {
+            val html = render(open().copy(screen = screen))
+            assertTrue("""$ATTR_ACTION="$ACTION_SYNC"""" in html, screen.name)
+            assertTrue("""$ATTR_ACTION="$ACTION_LOCK"""" in html, screen.name)
+            assertTrue(html.indexOf(ACTION_LOCK) < html.indexOf("<nav"), "they sit in the header, above the navigation")
         }
-        assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in render(AppState(model = AppModel.Locked(circle), screen = Screen.SignIn)))
-        assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in render(AppState(model = AppModel.NoIdentity)))
+        for (other in listOf(AppState(model = AppModel.Locked(circle), screen = Screen.SignIn), AppState(model = AppModel.NoIdentity))) {
+            val html = render(other)
+            assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in html)
+            assertFalse("""$ATTR_ACTION="$ACTION_LOCK"""" in html)
+        }
     }
 
     private fun items(home: HomeData) = render(open(home).copy(screen = Screen.Items))
