@@ -122,6 +122,17 @@ class KeyVault(
         return CreateResult.Created(identity)
     }
 
+    /** Saves an identity made from a known [seed] (a device made by pairing or restoring) under a new passphrase, and unlocks it. */
+    suspend fun createFromSeed(passphrase: String, identity: DeviceIdentity): CreateResult {
+        if (store.load() != null) return CreateResult.AlreadyHasIdentity
+        (SeedWrapping.checkPassphrase(passphrase) as? PassphraseCheck.TooShort)?.let { return CreateResult.PassphraseTooShort(it.minimum) }
+        val seed = identity.seed ?: return CreateResult.PassphraseTooShort(MIN_PASSPHRASE_CHARS)
+        val wrapped = SeedWrapping.wrapWithPassphrase(crypto, cipher, hasher, seed, identity.device, passphrase, params)
+        store.save(StoredIdentity(identity.member.v, identity.device.v, wrapped))
+        unlocked(identity)
+        return CreateResult.Created(identity)
+    }
+
     suspend fun unlock(passphrase: String): UnlockResult {
         val stored = store.load() ?: return UnlockResult.NoIdentity
         return when (val result = SeedWrapping.unwrapWithPassphrase(cipher, hasher, stored.wrapped, stored.deviceId, passphrase)) {

@@ -8,7 +8,7 @@ const jar = process.env.CIRCLES_JAR ?? join(dirname(fileURLToPath(import.meta.ur
 
 export async function startServer(port = 18081) {
   const data = mkdtempSync(join(tmpdir(), 'circles-smoke-'));
-  const proc = spawn('java', ['-jar', jar, 'serve'], { env: { ...process.env, CIRCLES_DATA_DIR: data, CIRCLES_BIND: '127.0.0.1', CIRCLES_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn('java', ['-jar', jar, 'serve'], { env: { ...process.env, CIRCLES_DATA_DIR: data, CIRCLES_BIND: '127.0.0.1', CIRCLES_RATE_LIMIT: 'false', CIRCLES_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; proc.stdout.on('data', d => log += d); proc.stderr.on('data', d => log += d);
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch {} await sleep(250); }
   return { url: `http://127.0.0.1:${port}`, stop: () => proc.kill(), log: () => log };

@@ -5,7 +5,7 @@
 const VERSION = '__BUILD_ID__';
 const CACHE_PREFIX = 'circles-shell-';
 const CACHE = CACHE_PREFIX + VERSION;
-const SHELL = ['/', '/circles.js', '/styles.css'];
+const SHELL = ['/', '/circles.js', '/styles.css', '/wordlist.txt'];
 
 self.addEventListener('install', (event) => {
   // Fetch past the HTTP cache so the stored copies really are this version's files. No skipWaiting here: the page asks.

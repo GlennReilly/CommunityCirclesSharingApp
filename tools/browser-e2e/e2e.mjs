@@ -1,7 +1,7 @@
 import { startServer, startChrome, sleep, checkAccessibility, reportAccessibility } from './lib.mjs';
 const PASS = 'correct horse battery staple';
 const PASS_NEW = 'second passphrase for alice';
-const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334); const phone = await startChrome(9336);
+const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334); const phone = await startChrome(9336); const restorer = await startChrome(9337);
 const text = c => c.evaluate('document.getElementById("app").innerText');
 async function until(c, expr, what, ms = 20000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await sleep(250); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
 // Types into the form's fields like a person would (an input event per field), then submits.
@@ -216,6 +216,33 @@ try {
   await alice.evaluate('document.querySelector("[data-action=remove-device]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key is being changed.'), 'phone removed');
   await sleep(1500); await click(alice, 'sync'); await click(phone, 'sync');
   await until(phone, has(phone, 'Cannot sign in to the circle'), 'phone cut off'); ok('the removed phone is told it cannot sign in');
+  // Recovery code: alice writes down 12 words, proves she copied three, then a clean browser restores her from them.
+  await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, 'Make a recovery code, in case you lose every device'), 'home suggests a recovery code'); ok('home suggests making a recovery code');
+  await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=recovery-start]") !== null', 'settings recovery button');
+  await click(alice, 'recovery-start'); await until(alice, 'document.getElementById("recovery-check-form") !== null', 'recovery page');
+  await checkAccessibility(alice, 'your recovery code');
+  const words = await alice.evaluate('[...document.querySelectorAll("main ol li")].map(li => li.textContent)');
+  if (words.length !== 12 || words.some(w => !/^[a-z]{3,8}$/.test(w))) throw new Error('words: ' + JSON.stringify(words));
+  const restoreLink = await alice.evaluate('document.getElementById("recovery-restore-link").value');
+  const places = await alice.evaluate('[...document.querySelectorAll("#recovery-check-form input")].map(i => Number(i.name.replace("word-", "")))');
+  if (places.length !== 3) throw new Error('places: ' + places); ok('a recovery code of 12 words is shown; three places are asked back: ' + places.join(', '));
+  if (!(await buttonHidden(alice, 'recovery-check-form'))) throw new Error('check button visible before the words are typed');
+  for (const p of places) await setField(alice, 'recovery-check-form', 'word-' + p, 'wrongword');
+  await alice.evaluate('document.getElementById("recovery-check-form").requestSubmit()'); await until(alice, has(alice, 'do not match the ones shown'), 'wrong words refused'); ok('wrong words are refused and nothing is saved');
+  for (const p of places) await setField(alice, 'recovery-check-form', 'word-' + p, words[p - 1].toUpperCase());
+  await alice.evaluate('document.getElementById("recovery-check-form").requestSubmit()'); await until(alice, has(alice, 'Your recovery code is saved') + ' && ' + has(alice, 'A recovery code is set up'), 'code saved'); ok('with the right words the recovery code is saved');
+  await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced the recovery device');
+  await restorer.goto(restoreLink); await until(restorer, has(restorer, 'Restore from a recovery code') + ' && document.getElementById("restore-form") !== null', 'restore page');
+  await checkAccessibility(restorer, 'restore from a recovery code');
+  if (await restorer.evaluate('location.hash') !== '') throw new Error('the restore link stayed in the address bar');
+  await restorer.evaluate('(() => { const f = document.getElementById("restore-form"); f.elements.namedItem("words").value = "one two three"; f.elements.namedItem("passphrase").value = ' + JSON.stringify(PASS) + '; f.requestSubmit(); return true; })()');
+  await until(restorer, has(restorer, 'A recovery code has 12 words; you typed 3.'), 'wrong count explained'); ok('too few words are explained');
+  await restorer.evaluate('(() => { const f = document.getElementById("restore-form"); f.elements.namedItem("passphrase").value = ' + JSON.stringify(PASS) + '; f.elements.namedItem("words").value = ' + JSON.stringify(words.map((w, i) => (i === 4 ? 'zzzz' : w)).join(' ')) + '; f.requestSubmit(); return true; })()');
+  await until(restorer, has(restorer, 'Word 5 ("zzzz") is not one of the recovery words'), 'unknown word found'); ok('a mistyped word is named by its place');
+  await restorer.evaluate('(() => { const f = document.getElementById("restore-form"); f.elements.namedItem("passphrase").value = ' + JSON.stringify(PASS) + '; f.elements.namedItem("words").value = ' + JSON.stringify('  ' + words.join('   ').toUpperCase() + '\n') + '; f.requestSubmit(); return true; })()');
+  await until(restorer, has(restorer, 'Circle home'), 'restored', 40000); ok('the 12 words restored alice in a clean browser');
+  await restorer.evaluate('location.hash = "#/items"'); await until(restorer, has(restorer, 'Drill') + ' && ' + has(restorer, 'Yours'), 'restored browser sees her items'); ok('the restored browser sees her own items');
+  await restorer.evaluate('location.hash = "#/settings"'); await until(restorer, has(restorer, 'No recovery code yet') + ' && ' + has(restorer, '(this device)'), 'recovery code used up'); ok('the used recovery code is gone; settings suggests making a new one');
   // Removal: Bea steps down as a steward, Alice removes her as a member; Bea can no longer sign in.
   await bea.evaluate('location.hash = "#/stewards"'); await until(bea, 'document.querySelector("[data-action=steward-remove]") !== null', 'bea step down button');
   await bea.evaluate('(() => { const mine = [...document.querySelectorAll("li")].find(li => li.textContent.includes("Step down as steward")); mine.querySelector("button").click(); return true; })()');
@@ -234,4 +261,4 @@ try {
   console.log('\nALICE LOGS:\n' + alice.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
   console.log('BEA LOGS:\n' + bea.logs.filter(l => !/favicon|Password forms/.test(l)).join('\n'));
 } catch (e) { console.log('FAILED:', e.message); console.log('ALICE LOGS:\n' + alice.logs.join('\n')); console.log('BEA LOGS:\n' + bea.logs.join('\n')); console.log('SERVER:\n' + server.log().slice(-1500)); process.exitCode = 1; }
-finally { if (reportAccessibility() > 0) process.exitCode = 1; alice.stop(); bea.stop(); phone.stop(); server.stop(); }
+finally { if (reportAccessibility() > 0) process.exitCode = 1; alice.stop(); bea.stop(); phone.stop(); restorer.stop(); server.stop(); }

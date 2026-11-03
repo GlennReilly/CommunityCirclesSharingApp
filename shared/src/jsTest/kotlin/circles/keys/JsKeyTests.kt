@@ -26,3 +26,8 @@ class JsCircleAppTest : circles.app.CircleAppContract() {
     override suspend fun newCipher(): Cipher = JsCipher()
     override fun newHasher(): PasswordHasher = JsPasswordHasher()
 }
+
+class JsRecoveryCodesTest : RecoveryCodesContract() {
+    override suspend fun newCrypto(): Crypto = JsCrypto()
+    override suspend fun newCipher(): Cipher = JsCipher()
+}

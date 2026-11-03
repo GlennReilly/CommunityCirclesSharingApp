@@ -6,6 +6,8 @@ enum class Screen(val path: String, val title: String) {
     StartCircle("start", "Start a circle"),
     JoinCircle("join", "Join a circle"),
     PairDevice("pair-device", "Add this device"),
+    Restore("restore", "Restore from a recovery code"),
+    RecoveryCode("recovery-code", "Your recovery code"),
     SignIn("sign-in", "Sign in"),
     Home("home", "Circle home"),
     Items("items", "Items"),
@@ -27,13 +29,13 @@ enum class Screen(val path: String, val title: String) {
             entries.firstOrNull { FRAGMENT_PREFIX + it.path == fragment } ?: Home
 
         /** Pages for a browser with no identity yet: a choice, then one page per choice. */
-        val newcomer: Set<Screen> = setOf(Welcome, StartCircle, JoinCircle, PairDevice)
+        val newcomer: Set<Screen> = setOf(Welcome, StartCircle, JoinCircle, PairDevice, Restore)
 
         /** Pages that are not part of the circle itself: the newcomer pages and the unlock page. */
         val beforeSignIn: Set<Screen> = newcomer + SignIn
 
         /** Pages reached from another page, not from the navigation bar. */
-        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan)
+        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode)
 
         /** Screens shown in the navigation bar once signed in. */
         val navigation: List<Screen> = entries.filter { it !in beforeSignIn && it !in subPages }

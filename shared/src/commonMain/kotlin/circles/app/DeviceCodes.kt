@@ -8,6 +8,7 @@ import circles.policy.CircleId
 import circles.policy.MemberId
 
 private const val DEVICE_PREFIX = "#/device/"
+private const val RESTORE_PREFIX = "#/restore/"
 private const val KEY_BYTES = 32
 private const val FINGERPRINT_HEX_CHARS = 20
 private const val FINGERPRINT_GROUP = 4
@@ -48,6 +49,22 @@ class DeviceLink(val circle: CircleId, val member: MemberId) {
             val parts = trimmed.substring(start + DEVICE_PREFIX.length).split('/')
             if (parts.size != 2 || !parts.all { isValidRandomId(it) }) return null
             return DeviceLink(CircleId(parts[0]), MemberId(parts[1]))
+        }
+    }
+}
+
+/** The link shown with a recovery code (ADR 0047): `{origin}/#/restore/{circle}/{member}`; public ids only. */
+class RestoreLink(val circle: CircleId, val member: MemberId) {
+    fun format(origin: String): String = "${origin.trimEnd('/')}/$RESTORE_PREFIX${circle.v}/${member.v}"
+
+    companion object {
+        fun parse(text: String): RestoreLink? {
+            val trimmed = text.trim()
+            val start = trimmed.indexOf(RESTORE_PREFIX).takeIf { it >= 0 } ?: return null
+            if (start != 0 && trimmed[start - 1] != '/') return null
+            val parts = trimmed.substring(start + RESTORE_PREFIX.length).split('/')
+            if (parts.size != 2 || !parts.all { isValidRandomId(it) }) return null
+            return RestoreLink(CircleId(parts[0]), MemberId(parts[1]))
         }
     }
 }

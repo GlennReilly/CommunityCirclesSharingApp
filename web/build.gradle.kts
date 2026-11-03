@@ -63,7 +63,7 @@ val webDist = tasks.register<Sync>("webDist") {
     from(tasks.named("jsBrowserProductionWebpack").map { (it as org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpack).outputDirectory }) {
         include("circles.js")
     }
-    from(layout.projectDirectory.dir("src/jsMain/resources")) { include("index.html", "styles.css", "sw.js") }
+    from(layout.projectDirectory.dir("src/jsMain/resources")) { include("index.html", "styles.css", "sw.js", "wordlist.txt", "wordlist.LICENSE.txt") }
     into(distFolder)
 }
 
@@ -75,7 +75,7 @@ abstract class StampWorkerTask : DefaultTask() {
     fun stamp() {
         val dir = folder.get().asFile
         val digest = MessageDigest.getInstance("SHA-256")
-        listOf("circles.js", "index.html", "styles.css").forEach { digest.update(dir.resolve(it).readBytes()) }
+        listOf("circles.js", "index.html", "styles.css", "wordlist.txt").forEach { digest.update(dir.resolve(it).readBytes()) }
         val buildId = digest.digest().joinToString("") { byte -> "%02x".format(byte) }.take(16)
         val worker = dir.resolve("sw.js")
         worker.writeText(worker.readText().replace("__BUILD_ID__", buildId))

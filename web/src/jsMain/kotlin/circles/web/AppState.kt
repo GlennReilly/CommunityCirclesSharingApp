@@ -3,6 +3,8 @@ package circles.web
 import circles.app.AppModel
 import circles.app.DeviceLink
 import circles.app.InviteLink
+import circles.app.RecoveryDraft
+import circles.app.RestoreLink
 import circles.policy.ItemId
 import circles.sync.SyncState
 
@@ -26,6 +28,10 @@ data class AppState(
     val pendingDevice: DeviceLink? = null,
     /** The address this page was served from, for the links it shows. */
     val origin: String = "",
+    /** A link to restore from a recovery code, found in the address (ADR 0047). */
+    val pendingRestore: RestoreLink? = null,
+    /** The recovery code being made: shown once, kept only in memory. */
+    val recoveryDraft: RecoveryDraft? = null,
 ) {
     val signedIn: Boolean get() = model is AppModel.Open
 }
@@ -37,6 +43,8 @@ sealed interface AppAction {
     data class InviteSeen(val link: InviteLink?) : AppAction
     data class DeviceLinkSeen(val link: DeviceLink?) : AppAction
     data class OriginKnown(val origin: String) : AppAction
+    data class RestoreLinkSeen(val link: RestoreLink?) : AppAction
+    data class RecoveryDraftReady(val draft: RecoveryDraft?) : AppAction
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
@@ -51,6 +59,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         when {
             it == Screen.EditItem && state.editing == null -> Screen.Items
             it == Screen.RequestLoan && state.borrowing == null -> Screen.Items
+            it == Screen.RecoveryCode && state.recoveryDraft == null -> Screen.Settings
             else -> it
         }
     })
@@ -66,6 +75,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
             pendingInvite = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingInvite,
             pendingDevice = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingDevice,
+            pendingRestore = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingRestore,
+            recoveryDraft = if (open) state.recoveryDraft else null,
         )
     }
     is AppAction.SyncChanged -> state.copy(sync = action.state)
@@ -79,6 +90,11 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.PairDevice else state.screen,
     )
     is AppAction.OriginKnown -> state.copy(origin = action.origin)
+    is AppAction.RestoreLinkSeen -> state.copy(
+        pendingRestore = action.link,
+        screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.Restore else state.screen,
+    )
+    is AppAction.RecoveryDraftReady -> state.copy(recoveryDraft = action.draft, screen = if (action.draft != null && state.signedIn) Screen.RecoveryCode else state.screen)
     is AppAction.Notice -> state.copy(notice = action.text)
     is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)

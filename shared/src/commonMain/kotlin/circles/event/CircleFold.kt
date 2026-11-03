@@ -33,7 +33,7 @@ class CircleView(
     val stewardSince: Map<MemberId, Int> = emptyMap(),
     /** Steward proposals that are valid but have not yet reached their quorum (ADR 0027), in log order. */
     val pendingStewardVotes: List<PendingStewardVote> = emptyList(),
-    /** Members who lost a device or left, with no `key.rotate` since (ADR 0044, 0046). */
+    /** Members with a revoked device that still holds the current epoch's key, so a rotation is due (ADR 0044, 0046). */
     val unrotatedRemovals: Set<MemberId> = emptySet(),
 )
 
@@ -117,12 +117,17 @@ class CircleFold(
                 activityByMember[member]?.any { it.first > position } == true
         }
         val rejected = mutableListOf<RejectedEvent>()
-        private val revokedAt = mutableMapOf<DeviceId, Long>()
-        private var lastRotatePosition = -1L
+        /** The devices that were sent each epoch's key (ADR 0044, 0046). */
+        private val wrappedTo = mutableMapOf<Int, MutableSet<DeviceId>>()
 
-        /** Members with a device revoked after the last key rotation (a whole member leaving, or just one device lost; ADR 0044, 0046). */
-        fun unrotatedRemovals(): Set<MemberId> =
-            devices.values.filter { it.revoked && (revokedAt[it.registration.device] ?: -1L) > lastRotatePosition }.map { it.registration.member }.toSet()
+        /**
+         * Members with a revoked device that holds the current epoch's key: until a rotation leaves it out, it can still read
+         * what is sent from now on (a whole member leaving, or just one device lost).
+         */
+        fun unrotatedRemovals(): Set<MemberId> {
+            val holders = wrappedTo[epoch].orEmpty()
+            return devices.values.filter { it.revoked && it.registration.device in holders }.map { it.registration.member }.toSet()
+        }
 
         val invites = mutableMapOf<EventId, Pair<InviteTerms, Int>>()
         var keys: KeyRing = KeyRing.EMPTY
@@ -143,12 +148,12 @@ class CircleFold(
             return when (type) {
                 EventType.MEMBER_INVITE -> invite(e, id)
                 EventType.DEVICE_ADD -> deviceAdd(e, sender)
-                EventType.DEVICE_REVOKE -> revoke(e, sender, position)
+                EventType.DEVICE_REVOKE -> revoke(e, sender)
                 EventType.STEWARD_ADD -> stewardChange(e, sender, StewardChange.ADD, position)
                 EventType.STEWARD_REMOVE -> stewardChange(e, sender, StewardChange.REMOVE, position)
                 EventType.STEWARD_POLICY -> stewardPolicyChange(e, sender, position)
                 EventType.KEY_WRAP -> wrap(e, sender)
-                EventType.KEY_ROTATE -> rotate(e, sender, position)
+                EventType.KEY_ROTATE -> rotate(e, sender)
                 else -> null
             }
         }
@@ -204,13 +209,12 @@ class CircleFold(
             return null
         }
 
-        private fun revoke(e: Envelope, sender: DeviceRegistration, position: Long): String? {
+        private fun revoke(e: Envelope, sender: DeviceRegistration): String? {
             val target = (PublicParts.revoke(e.public) as? Parsed.Ok)?.value?.let { devices[it] } ?: return "unknown device"
             if (target.revoked) return "device already revoked"
             if (target.registration.member != sender.member && sender.member !in stewards) return "only a steward may revoke another member's device"
             if (target.registration.member != sender.member && target.registration.member in stewards) return "a steward's devices can only be revoked by that steward"
             devices[target.registration.device] = target.copy(revoked = true, revokedDay = e.day)
-            revokedAt[target.registration.device] = position
             return null
         }
 
@@ -267,6 +271,7 @@ class CircleFold(
             } else if (terms.keyHash != null && commitments[terms.epoch] != null && terms.keyHash != commitments[terms.epoch]) {
                 return "the wrap's commitment is not the epoch's commitment"
             }
+            wrappedTo.getOrPut(terms.epoch) { mutableSetOf() } += terms.device
             val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys ?: return null
             return when (val key = CircleKeys.unwrap(cipher, mine, circle, terms.epoch, terms.wrapped)) {
                 is Parsed.Ok -> {
@@ -280,14 +285,13 @@ class CircleFold(
             }
         }
 
-        private fun rotate(e: Envelope, sender: DeviceRegistration, position: Long): String? {
+        private fun rotate(e: Envelope, sender: DeviceRegistration): String? {
             if (sender.member !in stewards) return "only a steward may rotate the circle key"
             val terms = (CircleKeys.keyRotateTerms(e.public) as? Parsed.Ok)?.value ?: return "bad key.rotate"
             val next = terms.epoch
             if (next != e.epoch || epoch == 0 || next != epoch + 1) return "the new epoch must be the current epoch plus one"
             commitments[next] = terms.keyHash ?: return "key.rotate must carry a key commitment"
             epoch = next
-            lastRotatePosition = position
             return null
         }
     }

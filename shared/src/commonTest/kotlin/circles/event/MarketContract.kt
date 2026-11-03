@@ -601,6 +601,8 @@ abstract class MarketContract {
         assertEquals(setOf(w.carol.identity.member, w.bea.identity.member), w.foldAs(w.founder).unrotatedRemovals)
         val remaining = listOf(w.founder.identity.registration)
         w.log += w.founder.rotateKeys(w.circle, 2, remaining, DAY + 3)
+        // A device revoked before a rotation that left it out is no longer a danger, and neither is one that never had the key.
+        assertEquals(emptySet(), w.foldAs(w.founder).unrotatedRemovals)
         val after = w.foldAs(w.founder)
         assertEquals(emptySet(), after.unrotatedRemovals)
         assertEquals(2, after.currentEpoch)
@@ -611,8 +613,9 @@ abstract class MarketContract {
         val inviteEvent = w.founder.invite(w.circle, invite, DAY + 40, 1, DAY + 4)
         w.log += inviteEvent
         w.log += dee.join(w.circle, inviteEvent.eventId(w.crypto), invite, DAY + 4)
+        w.log += w.founder.keyWrap(w.circle, dee.identity.registration, 2, w.founder.keyRing[2]!!, DAY + 4)
         w.log += w.founder.deviceRevoke(w.circle, dee.identity.device, DAY + 5)
-        assertEquals(setOf(dee.identity.member), w.foldAs(w.founder).unrotatedRemovals)
+        assertEquals(setOf(dee.identity.member), w.foldAs(w.founder).unrotatedRemovals, "dee held the current key")
     }
 
     @Test

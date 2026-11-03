@@ -34,6 +34,7 @@ import circles.keys.MIN_PASSPHRASE_CHARS
 import kotlinx.html.ButtonType
 import kotlinx.html.FlowContent
 import kotlinx.html.InputType
+import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
@@ -103,6 +104,12 @@ const val FIELD_QUORUM = "quorum"
 const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_RECOVERY_START = "recovery-start"
+const val ACTION_RECOVERY_CANCEL = "recovery-cancel"
+const val FORM_RECOVERY_CHECK = "recovery-check-form"
+const val FORM_RESTORE = "restore-form"
+const val FIELD_WORDS = "words"
+const val ID_RESTORE_LINK = "recovery-restore-link"
 const val ACTION_REMOVE_DEVICE = "remove-device"
 const val ACTION_CHECK_NOW = "check-now"
 const val ACTION_COPY_FIELD = "copy-field"
@@ -216,6 +223,7 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home, state)
+                Screen.RecoveryCode -> recoveryCodePage(state)
                 Screen.Standing -> standing(model.home.standing)
                 Screen.Stewards -> stewards(model.home)
                 Screen.Items -> items(model.home)
@@ -280,6 +288,7 @@ private fun FlowContent.newcomer(state: AppState) {
         Screen.StartCircle -> startCircle()
         Screen.JoinCircle -> joinCircle(state)
         Screen.PairDevice -> pairDevice(state)
+        Screen.Restore -> restorePage(state)
         else -> welcome()
     }
 }
@@ -383,6 +392,11 @@ private fun FlowContent.home(home: HomeData) {
         if (home.isSteward && home.waiting.isNotEmpty()) {
             li {
                 a(href = Screen.Members.fragment) { +(if (home.waiting.size == 1) "1 person waiting to be let in" else "${home.waiting.size} people waiting to be let in") }
+            }
+        }
+        if (home.canRead && !home.hasRecoveryCode) {
+            li {
+                a(href = Screen.Settings.fragment) { +"Make a recovery code, in case you lose every device" }
             }
         }
     }
@@ -925,6 +939,18 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
         }
     }
     section {
+        h2 { +"Recovery code" }
+        p {
+            +(if (home.hasRecoveryCode) "A recovery code is set up. If you lose every device, the 12 words on your paper bring everything back."
+            else "No recovery code yet. Without one, losing every device means starting again as a new member.")
+        }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_RECOVERY_START
+            +(if (home.hasRecoveryCode) "Make a new recovery code" else "Make a recovery code")
+        }
+        if (home.hasRecoveryCode) p { +"A new code replaces the old one, which stops working." }
+    }
+    section {
         h2 { +"Forget this device" }
         details {
             summary { +"Forget this device" }
@@ -1223,4 +1249,87 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
             formSubmit("Add this device")
         }
     }
+}
+
+/** Writing down a new recovery code, then proving it was copied (ADR 0047). */
+private fun FlowContent.recoveryCodePage(state: AppState) {
+    val draft = state.recoveryDraft
+    h1 { +Screen.RecoveryCode.title }
+    if (draft == null) {
+        p { +"There is no recovery code being made. Start from Settings." }
+        return
+    }
+    p { +"Write these 12 words on paper, in this order. Keep the paper somewhere safe, like a house key. Anyone who has them can act as you, and nobody can look them up for you." }
+    ol {
+        for (word in draft.words) li { +word }
+    }
+    label {
+        attributes["for"] = ID_RESTORE_LINK
+        +"Restore link: "
+    }
+    input(type = InputType.text) {
+        id = ID_RESTORE_LINK
+        value = draft.restoreLink
+        readonly = true
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+        attributes[ATTR_FROM] = ID_RESTORE_LINK
+        +"Copy"
+    }
+    p { +"Keep the link with the paper. It holds no secrets. To restore, open it in any browser and type the words." }
+    h2 { +"Check your copy" }
+    p { +"Type these words from your paper. The code is only saved when they match." }
+    form {
+        id = FORM_RECOVERY_CHECK
+        for (place in draft.askFor) {
+            label {
+                attributes["for"] = "word-$place"
+                +"Word $place: "
+            }
+            input(type = InputType.text, name = "word-$place") {
+                id = "word-$place"
+                required = true
+                attributes[ATTR_MIN] = "1"
+                attributes["autocomplete"] = "off"
+                attributes["autocapitalize"] = "off"
+                attributes["spellcheck"] = "false"
+            }
+        }
+        formSubmit("Check and finish")
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_RECOVERY_CANCEL
+        +"Cancel, do not make a code"
+    }
+}
+
+/** The page a restore link opens in a browser that has no identity yet. */
+private fun FlowContent.restorePage(state: AppState) {
+    h1 { +Screen.Restore.title }
+    if (state.pendingRestore == null) {
+        p { +"To restore from a recovery code, open the restore link that was kept with it." }
+    } else {
+        p { +"Type the 12 words from your paper and choose a passphrase for this browser. This browser becomes a new device of your account, and the paper stops working." }
+        form {
+            id = FORM_RESTORE
+            label {
+                attributes["for"] = FIELD_WORDS
+                +"Your 12 words: "
+            }
+            textArea {
+                id = FIELD_WORDS
+                name = FIELD_WORDS
+                required = true
+                attributes[ATTR_MIN] = "1"
+                attributes["autocomplete"] = "off"
+                attributes["autocapitalize"] = "off"
+                attributes["spellcheck"] = "false"
+                attributes["rows"] = "3"
+            }
+            passphraseField("new-password", hint = true)
+            formSubmit("Restore")
+        }
+    }
+    backToWelcome()
 }

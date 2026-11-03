@@ -19,7 +19,11 @@ import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.LeaveResult
 import circles.app.MAX_DEVICE_NAME_CHARS
+import circles.app.RecoveryCodeResult
 import circles.app.RemoveResult
+import circles.app.RestoreLink
+import circles.app.RestoreResult
+import circles.keys.RecoveryParse
 import circles.app.StartResult
 import circles.app.StewardResult
 import circles.crypto.JsCipher
@@ -40,6 +44,7 @@ import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.await
 import kotlinx.dom.clear
 import kotlinx.html.div
 import kotlinx.html.dom.append
@@ -63,6 +68,19 @@ private const val MIN_PASSPHRASE_NOTICE = "Choose a longer passphrase: at least 
  * Browser glue only: holds the state, re-renders the page, and turns events into [AppAction]s and calls on
  * [CircleApp]. Everything that decides anything lives in `shared` (CircleApp) or in [reduce] and the views.
  */
+private var cachedWordlist: List<String>? = null
+
+/** The recovery wordlist, fetched once from the server's own files (it is not part of the script; ADR 0047). */
+private suspend fun loadWordlist(): List<String> {
+    cachedWordlist?.let { return it }
+    val text = try {
+        window.fetch("/wordlist.txt").await().text().await()
+    } catch (_: Throwable) {
+        return emptyList()
+    }
+    return text.lines().map { it.trim() }.filter { it.isNotEmpty() }.also { cachedWordlist = it }
+}
+
 private class Page(private val root: HTMLElement, private val scope: CoroutineScope) {
     private var state = AppState()
     private var app: CircleApp? = null
@@ -96,6 +114,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             // The secret in the link must not stay in the address bar or the history entry (ADR 0040).
             window.history.replaceState(null, "", window.location.pathname + window.location.search)
         }
+        RestoreLink.parse(window.location.hash)?.let { link ->
+            dispatch(AppAction.RestoreLinkSeen(link))
+            window.history.replaceState(null, "", window.location.pathname + window.location.search)
+        }
         DeviceLink.parse(window.location.hash)?.let { link ->
             dispatch(AppAction.DeviceLinkSeen(link))
             window.history.replaceState(null, "", window.location.pathname + window.location.search)
@@ -126,6 +148,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             { identity -> HttpSyncApi(FetchTransport(), crypto, identity) },
             { (kotlin.js.Date.now() / MILLIS_PER_DAY).toInt() },
             FetchStreamTransport(),
+            wordlist = { loadWordlist() },
         )
         app = circleApp
         scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }
@@ -168,10 +191,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         var ready = true
         val needy = form.querySelectorAll("[$ATTR_MIN]")
         for (index in 0 until needy.length) {
-            val field = needy.item(index) as HTMLInputElement
+            val field = needy.item(index) as? Element ?: continue
             val min = field.getAttribute(ATTR_MIN)?.toIntOrNull() ?: continue
+            val value = field.asDynamic().value as String
             // Passphrases count every character; other text ignores spaces at the ends.
-            val length = if (field.type == "password") field.value.length else field.value.trim().length
+            val length = if (field.getAttribute("type") == "password") value.length else value.trim().length
             if (length < min) ready = false
         }
         button.hidden = !ready
@@ -251,6 +275,39 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         },
                     ),
                 )
+                FORM_RECOVERY_CHECK -> {
+                    val draft = state.recoveryDraft
+                    if (draft == null) dispatch(AppAction.Notice("There is no recovery code being made."))
+                    else when (circleApp.confirmRecoveryCode(state.origin, draft.askFor.map { field("word-$it") })) {
+                        is RecoveryCodeResult.Created -> {
+                            dispatch(AppAction.RecoveryDraftReady(null))
+                            dispatch(AppAction.Notice("Your recovery code is saved. Keep the paper safe."))
+                            window.location.hash = Screen.Settings.fragment
+                        }
+                        RecoveryCodeResult.WrongWords -> dispatch(AppAction.Notice("Those words do not match the ones shown. Check your paper and try again."))
+                        RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can make a recovery code."))
+                        else -> dispatch(AppAction.Notice("That cannot be done right now."))
+                    }
+                }
+                FORM_RESTORE -> state.pendingRestore?.let { link ->
+                    dispatch(AppAction.Notice("Restoring..."))
+                    dispatch(
+                        AppAction.Notice(
+                            when (val result = circleApp.restoreFromCode(link, field(FIELD_WORDS), field(FIELD_PASSPHRASE))) {
+                                RestoreResult.Restored -> "Restored. This browser is now a device of your account."
+                                is RestoreResult.BadWords -> when (val problem = result.problem) {
+                                    is RecoveryParse.WrongCount -> "A recovery code has 12 words; you typed ${problem.count}."
+                                    is RecoveryParse.UnknownWord -> "Word ${problem.position} (\"${problem.word}\") is not one of the recovery words. Check the spelling."
+                                    else -> "Those 12 words do not make a recovery code. A word may be wrong or out of order."
+                                }
+                                is RestoreResult.PassphraseTooShort -> "Choose a longer passphrase: at least ${result.minimum} characters."
+                                RestoreResult.AlreadyHasIdentity -> "This browser already has an identity. Unlock it instead."
+                                RestoreResult.NotFound -> "Nothing in this circle matches those words. Check the words and the link, or the code may have been replaced or used."
+                                RestoreResult.WordlistUnavailable -> "The word list could not be loaded. Check the connection and try again."
+                            },
+                        ),
+                    )
+                }
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
@@ -319,6 +376,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()
+                ACTION_RECOVERY_START -> {
+                    val draft = circleApp?.prepareRecoveryCode(state.origin)
+                    if (draft == null) dispatch(AppAction.Notice("The word list could not be loaded. Check the connection and try again."))
+                    else {
+                        dispatch(AppAction.RecoveryDraftReady(draft))
+                        window.location.hash = Screen.RecoveryCode.fragment
+                    }
+                }
+                ACTION_RECOVERY_CANCEL -> {
+                    circleApp?.discardRecoveryDraft()
+                    dispatch(AppAction.RecoveryDraftReady(null))
+                    window.location.hash = Screen.Settings.fragment
+                }
                 ACTION_REMOVE_MEMBER -> target.getAttribute(ATTR_MEMBER)?.let { id ->
                     dispatch(
                         AppAction.Notice(

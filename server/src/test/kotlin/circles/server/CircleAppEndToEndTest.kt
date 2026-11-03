@@ -11,6 +11,11 @@ import circles.app.DeviceLink
 import circles.app.DeviceRemoval
 import circles.app.Fingerprint
 import circles.app.LeaveResult
+import circles.app.RECOVERY_DEVICE_NAME
+import circles.app.RecoveryCodeResult
+import circles.app.RestoreLink
+import circles.app.RestoreResult
+import circles.keys.RecoveryParse
 import circles.app.RemoveResult
 import circles.app.StewardResult
 import circles.event.DeviceIdentity
@@ -61,6 +66,7 @@ import kotlin.test.assertTrue
 
 private const val PASSPHRASE = "correct horse battery staple"
 private val FAST = Argon2Params(1_024, 1, 1)
+private val WORDS: List<String> = List(2048) { "w" + it.toString().padStart(4, '0') }
 
 /**
  * Two browsers' worth of `CircleApp` against the real server rules: start a circle, make an invite, join with the link,
@@ -76,7 +82,7 @@ class CircleAppEndToEndTest {
         val hasher = JvmPasswordHasher()
         val vault = KeyVault(deadScope, crypto, testCipher, hasher, store, AutoLock.UntilTabCloses, FAST)
         val local = replica ?: InMemoryReplica { it.eventId(crypto) }
-        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today)
+        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today, wordlist = { WORDS })
         return Browser(app, store, local)
     }
 
@@ -712,5 +718,100 @@ class CircleAppEndToEndTest {
         assertFalse(home(alice.app).needsRotation)
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
         assertEquals(Fingerprint.of(crypto, crypto.generateSigningKeyPair().publicKey).length, 24, "five groups of four and four spaces")
+    }
+
+    @Test
+    fun aRecoveryCodeBringsBackAnAccountAndIsUsedUp() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+        val aliceId = home(alice.app).me
+        assertFalse(home(alice.app).hasRecoveryCode)
+
+        // 1. Making a code: twelve words, three places to type back; wrong words or no draft register nothing.
+        assertEquals(RecoveryCodeResult.NoDraft, alice.app.confirmRecoveryCode("https://circles.example", listOf("a", "b", "c")))
+        val draft = assertNotNull(alice.app.prepareRecoveryCode("https://circles.example"))
+        assertEquals(12, draft.words.size)
+        assertEquals(3, draft.askFor.size); assertEquals(3, draft.askFor.toSet().size); assertTrue(draft.askFor.all { it in 1..12 })
+        assertEquals(RecoveryCodeResult.WrongWords, alice.app.confirmRecoveryCode("https://circles.example", listOf("nope", "nope", "nope")))
+        val answers = draft.askFor.map { draft.words[it - 1].uppercase() } // case does not matter
+        val created = assertIs<RecoveryCodeResult.Created>(alice.app.confirmRecoveryCode("https://circles.example", answers))
+        assertEquals(draft.restoreLink, created.restoreLink)
+        assertTrue(home(alice.app).hasRecoveryCode)
+        assertEquals(RECOVERY_DEVICE_NAME, home(alice.app).myDevices.single { !it.isThisOne }.name)
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        alice.app.syncOnce()
+
+        // 2. Every device is lost. In a new browser, the words (here typed in capitals with odd spacing) and the restore link bring everything back.
+        val link = assertNotNull(RestoreLink.parse(draft.restoreLink))
+        val fresh = browser(transport, crypto)
+        fresh.app.open()
+        assertEquals(RestoreResult.PassphraseTooShort(12), fresh.app.restoreFromCode(link, draft.words.joinToString(" "), "short"))
+        assertEquals(RestoreResult.BadWords(RecoveryParse.WrongCount(11)), fresh.app.restoreFromCode(link, draft.words.dropLast(1).joinToString(" "), PASSPHRASE))
+        val typo = draft.words.toMutableList().also { it[4] = "zzzz" }
+        assertEquals(RestoreResult.BadWords(RecoveryParse.UnknownWord(5, "zzzz")), fresh.app.restoreFromCode(link, typo.joinToString(" "), PASSPHRASE))
+        assertEquals(AppModel.NoIdentity, fresh.app.model.value)
+        val someoneElsesLink = RestoreLink(link.circle, MemberId("9".repeat(32)))
+        assertEquals(RestoreResult.NotFound, fresh.app.restoreFromCode(someoneElsesLink, draft.words.joinToString(" "), PASSPHRASE), "the words name nobody in that member's account")
+        assertNull(fresh.store.load())
+        assertEquals(emptyList(), fresh.replica.entries(link.circle), "nothing is kept after a failed restore")
+
+        val spaced = draft.words.joinToString("   ") { it.uppercase() } + "\n"
+        assertEquals(RestoreResult.Restored, fresh.app.restoreFromCode(link, spaced, PASSPHRASE))
+        fresh.app.syncOnce()
+        val restored = home(fresh.app)
+        assertEquals(aliceId, restored.me)
+        assertTrue(restored.isSteward && restored.canRead)
+        assertEquals("Garage at the back", restored.items.single { it.item == ladder }.description, "even the private details of her own items")
+        assertFalse(restored.hasRecoveryCode, "the used code is gone")
+        assertEquals(2, restored.myDevices.size, "her old laptop and the new browser; the recovery device was removed")
+        assertFalse(restored.needsRotation, "a steward restoring changes the key in the same batch")
+        assertNull(fresh.store.load()?.pairing.takeIf { it == true })
+
+        // 3. The paper is now worthless: the same words find nothing, and the removed recovery device cannot sign in.
+        val again = browser(transport, crypto)
+        again.app.open()
+        assertEquals(RestoreResult.NotFound, again.app.restoreFromCode(link, draft.words.joinToString(" "), PASSPHRASE))
+        assertEquals(RestoreResult.AlreadyHasIdentity, fresh.app.restoreFromCode(link, draft.words.joinToString(" "), PASSPHRASE))
+        listOf(alice, bea, fresh).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+        assertEquals(2, home(bea.app).people.single { it.member == aliceId }.devices, "Bea sees Alice's laptop and new browser, not the used recovery device")
+
+        // 4. A member who is not a steward restores too; a steward is then asked to change the key.
+        val beaId = home(bea.app).me
+        val beaDraft = assertNotNull(bea.app.prepareRecoveryCode("https://circles.example"))
+        assertIs<RecoveryCodeResult.Created>(bea.app.confirmRecoveryCode("https://circles.example", beaDraft.askFor.map { beaDraft.words[it - 1] }))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        val beaFresh = browser(transport, crypto)
+        beaFresh.app.open()
+        assertEquals(RestoreResult.Restored, beaFresh.app.restoreFromCode(assertNotNull(RestoreLink.parse(beaDraft.restoreLink)), beaDraft.words.joinToString(" "), PASSPHRASE))
+        assertEquals(beaId, home(beaFresh.app).me)
+        alice.app.syncOnce()
+        assertTrue(home(alice.app).needsRotation, "Bea cannot rotate, so a steward is asked to")
+        assertEquals(RemoveResult.Removed, alice.app.rotateKeyNow())
+
+        // 5. Replacing a code removes the previous one in the same batch.
+        val first = assertNotNull(alice.app.prepareRecoveryCode("https://circles.example"))
+        assertIs<RecoveryCodeResult.Created>(alice.app.confirmRecoveryCode("https://circles.example", first.askFor.map { first.words[it - 1] }))
+        val second = assertNotNull(alice.app.prepareRecoveryCode("https://circles.example"))
+        assertIs<RecoveryCodeResult.Created>(alice.app.confirmRecoveryCode("https://circles.example", second.askFor.map { second.words[it - 1] }))
+        assertEquals(1, home(alice.app).myDevices.count { it.name == RECOVERY_DEVICE_NAME }, "only the newest code is registered")
+        alice.app.syncOnce()
+        val oldTry = browser(transport, crypto)
+        oldTry.app.open()
+        assertEquals(RestoreResult.NotFound, oldTry.app.restoreFromCode(assertNotNull(RestoreLink.parse(first.restoreLink)), first.words.joinToString(" "), PASSPHRASE), "the replaced code no longer works")
+        assertEquals(RestoreResult.Restored, oldTry.app.restoreFromCode(assertNotNull(RestoreLink.parse(second.restoreLink)), second.words.joinToString(" "), PASSPHRASE), "the newest does")
     }
 }

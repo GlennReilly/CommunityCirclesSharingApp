@@ -273,6 +273,8 @@ data class HomeData(
     val needsRotation: Boolean = false,
     /** This member's devices (ADR 0046). */
     val myDevices: List<DeviceSummary> = emptyList(),
+    /** Whether this member has a recovery code registered (ADR 0047). */
+    val hasRecoveryCode: Boolean = false,
     val stewardList: List<StewardInfo> = emptyList(),
     val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
     val proposals: List<ProposalSummary> = emptyList(),
@@ -303,6 +305,35 @@ sealed interface DeviceRemoval {
 data class DevicePreview(val device: DeviceId, val fingerprint: String)
 
 const val MAX_DEVICE_NAME_CHARS = 40
+
+/** The name a recovery device is registered under (ADR 0047). */
+const val RECOVERY_DEVICE_NAME = "Recovery code"
+private const val RECOVERY_CHECK_WORDS = 3
+
+/** A recovery code to write down: its [words] and the [askFor] places (1 to 12) the member must type back to prove they have a copy. */
+data class RecoveryDraft(val words: List<String>, val askFor: List<Int>, val restoreLink: String)
+
+sealed interface RecoveryCodeResult {
+    data class Created(val restoreLink: String) : RecoveryCodeResult
+
+    /** The typed words do not match the code that was shown. */
+    data object WrongWords : RecoveryCodeResult
+    data object NoDraft : RecoveryCodeResult
+    data object WordlistUnavailable : RecoveryCodeResult
+    data object NotLetInYet : RecoveryCodeResult
+    data object NotAllowed : RecoveryCodeResult
+}
+
+sealed interface RestoreResult {
+    data object Restored : RestoreResult
+    data class BadWords(val problem: circles.keys.RecoveryParse) : RestoreResult
+    data class PassphraseTooShort(val minimum: Int) : RestoreResult
+    data object AlreadyHasIdentity : RestoreResult
+
+    /** Nothing in this circle is registered for those words (wrong words, wrong link, or the code was replaced), or the server could not be reached. */
+    data object NotFound : RestoreResult
+    data object WordlistUnavailable : RestoreResult
+}
 
 sealed interface AppModel {
     data object Loading : AppModel
@@ -344,7 +375,10 @@ class CircleApp(
     private val streams: StreamTransport? = null,
     /** Randomness for delays; tests pass a fixed value. */
     private val random: () -> Double = { kotlin.random.Random.nextDouble() },
+    /** The 2048-word list for recovery codes, loaded when needed (the page fetches it as a file; ADR 0047). */
+    private val wordlist: suspend () -> List<String> = { emptyList() },
 ) {
+    private var pendingRecovery: Triple<circles.encoding.ByteString, List<Int>, List<String>>? = null
     private val mutableModel = MutableStateFlow<AppModel>(AppModel.Loading)
     val model: StateFlow<AppModel> = mutableModel.asStateFlow()
 
@@ -508,27 +542,140 @@ class CircleApp(
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return AddDeviceResult.NotLetInYet
         if (view.devices.containsKey(code.device)) return AddDeviceResult.AlreadyKnown
-        val me = s.identity.member
-        val registration = circles.event.DeviceRegistration(me, code.device, code.signPub, code.boxPub)
+        val registration = circles.event.DeviceRegistration(s.identity.member, code.device, code.signPub, code.boxPub)
+        val batch = registrationEvents(s.author, s.circle, s.identity.member, view, registration, name.trim().ifEmpty { null })
+        batch.events.forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return AddDeviceResult.Added(batch.keysWrapped, batch.itemsShared)
+    }
+
+    private class RegistrationBatch(val events: List<circles.event.Envelope>, val keysWrapped: Int, val itemsShared: Int)
+
+    /** The events that make [registration] another device of [me]: `device.add`, a wrap of every epoch held, and the owned items' keys. */
+    private fun registrationEvents(
+        author: EventAuthor,
+        circle: CircleId,
+        me: MemberId,
+        view: circles.event.CircleView,
+        registration: circles.event.DeviceRegistration,
+        name: String?,
+    ): RegistrationBatch {
         val day = today()
-        s.author.keyRing = view.keys
-        val events = mutableListOf(s.author.deviceAdd(s.circle, registration, day, name.trim().ifEmpty { null }))
+        author.keyRing = view.keys
+        val events = mutableListOf(author.deviceAdd(circle, registration, day, name))
         var wrapped = 0
         for (epoch in FIRST_EPOCH..view.keys.latestEpoch) {
             val key = view.keys[epoch] ?: continue
-            events += s.author.keyWrap(s.circle, registration, epoch, key, day)
+            events += author.keyWrap(circle, registration, epoch, key, day)
             wrapped++
         }
         var shared = 0
         for (item in view.market.items.values.filter { it.owner == me && !it.retired }) {
             val itemKey = view.market.itemKeys[item.item to item.detailKeyId] ?: continue
-            events += s.author.itemUpsert(s.circle, day, item.item, item.name, item.itemClass, item.detailKeyId, itemKey, listOf(registration), item.minTier)
+            events += author.itemUpsert(circle, day, item.item, item.name, item.itemClass, item.detailKeyId, itemKey, listOf(registration), item.minTier)
             shared++
         }
+        return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- recovery code (ADR 0047) ----
+
+    /** Step one of making a recovery code: new words to write down and the places to type back. Nothing is sent yet. */
+    suspend fun prepareRecoveryCode(origin: String): RecoveryDraft? {
+        val s = session ?: return null
+        val list = wordlist().takeIf { it.size == circles.keys.RECOVERY_WORDLIST_SIZE } ?: return null
+        val entropy = circles.keys.RecoveryCodes.newEntropy(crypto)
+        val words = circles.keys.RecoveryCodes.wordsOf(crypto, list, entropy)
+        val pool = (1..circles.keys.RECOVERY_WORDS).toMutableList()
+        val bytes = crypto.randomBytes(RECOVERY_CHECK_WORDS)
+        val places = List(RECOVERY_CHECK_WORDS) { index -> pool.removeAt((bytes[index].toInt() and 0xFF) % pool.size) }.sorted()
+        pendingRecovery = Triple(entropy, places, words)
+        return RecoveryDraft(words, places, RestoreLink(s.circle, s.identity.member).format(origin))
+    }
+
+    /**
+     * Step two: the member types back the words asked for; if they match, the recovery device is registered like any other
+     * device, and any earlier recovery device is removed in the same batch (a steward also changes the key at once).
+     */
+    suspend fun confirmRecoveryCode(origin: String, typedWords: List<String>): RecoveryCodeResult {
+        val s = session ?: return RecoveryCodeResult.NotAllowed
+        val (entropy, places, words) = pendingRecovery ?: return RecoveryCodeResult.NoDraft
+        if (typedWords.size != places.size || places.indices.any { typedWords[it].trim().lowercase() != words[places[it] - 1] }) return RecoveryCodeResult.WrongWords
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return RecoveryCodeResult.NotLetInYet
+        val me = s.identity.member
+        val registration = circles.keys.RecoveryCodes.identityOf(crypto, cipher, entropy, me).registration
+        val names = deviceNames(view)
+        val old = view.devices.values.filter { !it.revoked && it.registration.member == me && names[it.registration.device] == RECOVERY_DEVICE_NAME }
+        val batch = registrationEvents(s.author, s.circle, me, view, registration, RECOVERY_DEVICE_NAME)
+        val events = batch.events.toMutableList()
+        val day = today()
+        old.forEach { events += s.author.deviceRevoke(s.circle, it.registration.device, day) }
+        if (old.isNotEmpty() && me in view.stewards) {
+            val remaining = view.devices.values.filter { state -> !state.revoked && old.none { it.registration.device == state.registration.device } }.map { it.registration } + registration
+            events += s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day)
+        }
         events.forEach { s.engine.enqueue(s.circle, it) }
+        pendingRecovery = null
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
-        return AddDeviceResult.Added(wrapped, shared)
+        return RecoveryCodeResult.Created(RestoreLink(s.circle, me).format(origin))
+    }
+
+    /** Forgets a recovery draft that was never confirmed. */
+    fun discardRecoveryDraft() {
+        pendingRecovery = null
+    }
+
+    /**
+     * Restores a member from their recovery words in a browser with no identity (ADR 0047). It signs in as the recovery
+     * device, registers a fresh ordinary device for this browser and removes the recovery device in one batch (so the used
+     * paper is no longer a key), and then runs as the new device under [passphrase].
+     */
+    suspend fun restoreFromCode(link: RestoreLink, text: String, passphrase: String): RestoreResult {
+        if (keyStore.load() != null) return RestoreResult.AlreadyHasIdentity
+        (circles.keys.SeedWrapping.checkPassphrase(passphrase) as? circles.keys.PassphraseCheck.TooShort)?.let { return RestoreResult.PassphraseTooShort(it.minimum) }
+        val list = wordlist().takeIf { it.size == circles.keys.RECOVERY_WORDLIST_SIZE } ?: return RestoreResult.WordlistUnavailable
+        val entropy = when (val parsed = circles.keys.RecoveryCodes.parse(crypto, list, text)) {
+            is circles.keys.RecoveryParse.Valid -> parsed.entropy
+            else -> return RestoreResult.BadWords(parsed)
+        }
+        val recovery = circles.keys.RecoveryCodes.identityOf(crypto, cipher, entropy, link.member)
+        val engine = SyncEngine(crypto, apiFor(recovery), replica)
+        suspend fun fail(): RestoreResult {
+            replica.clear()
+            return RestoreResult.NotFound
+        }
+        if (engine.sync(link.circle).state != SyncState.UpToDate) return fail()
+        val view = replica.fold(link.circle, crypto, cipher, recovery)
+        val registered = view.devices[recovery.device]?.takeIf { !it.revoked && it.registration.member == link.member } ?: return fail()
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return fail()
+        // The recovery identity authors the hand-over: a new ordinary device for this browser, and the end of the recovery device.
+        val author = EventAuthor(crypto, recovery, cipher, firstCounter = nextCounter(recovery, link.circle))
+        val fresh = DeviceIdentity.generate(crypto, cipher, link.member)
+        val batch = registrationEvents(author, link.circle, link.member, view, fresh.registration, null)
+        val events = batch.events.toMutableList()
+        val day = today()
+        // The recovery device sends everything, so its own removal comes last: a revoked device can send nothing more.
+        if (link.member in view.stewards) {
+            val remaining = view.devices.values.filter { !it.revoked && it.registration.device != recovery.device }.map { it.registration } + fresh.registration
+            events += author.rotateKeys(link.circle, view.currentEpoch + 1, remaining, day)
+        }
+        events += author.deviceRevoke(link.circle, registered.registration.device, day)
+        events.forEach { engine.enqueue(link.circle, it) }
+        engine.sync(link.circle)
+        if (replica.outbox(link.circle).isNotEmpty() || replica.refused(link.circle).isNotEmpty()) return fail()
+        // The hand-over is in the log. This browser now becomes the fresh device.
+        when (vault.createFromSeed(passphrase, fresh)) {
+            is CreateResult.Created -> Unit
+            is CreateResult.PassphraseTooShort -> return RestoreResult.PassphraseTooShort(circles.keys.MIN_PASSPHRASE_CHARS)
+            CreateResult.AlreadyHasIdentity -> return RestoreResult.AlreadyHasIdentity
+        }
+        rememberCircle(link.circle)
+        activate(fresh, link.circle).scheduler.trigger(SyncTrigger.OPEN)
+        refresh()
+        return RestoreResult.Restored
     }
 
     /** Removes one of this member's other devices; a steward also changes the circle key in the same batch (ADR 0046, 0044). */
@@ -901,6 +1048,7 @@ class CircleApp(
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
+                hasRecoveryCode = view.devices.values.any { !it.revoked && it.registration.member == me && deviceNames(view)[it.registration.device] == RECOVERY_DEVICE_NAME },
                 myDevices = view.devices.values.filter { !it.revoked && it.registration.member == me }.map { state ->
                     DeviceSummary(state.registration.device, state.registration.device == s.identity.device, deviceNames(view)[state.registration.device])
                 },

@@ -11,6 +11,8 @@ import circles.event.LoanStatus
 import circles.event.ReturnOutcome
 import circles.app.AccessSummary
 import circles.app.DeviceLink
+import circles.app.RecoveryDraft
+import circles.app.RestoreLink
 import circles.app.DeviceSummary
 import circles.app.ProposalSummary
 import circles.app.StewardInfo
@@ -86,7 +88,7 @@ class ScreenTest {
         for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
         for (screen in Screen.subPages) assertFalse(screen in Screen.navigation, screen.name)
         assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size, Screen.navigation.size)
-        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice), Screen.newcomer)
+        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice, Screen.Restore), Screen.newcomer)
     }
 }
 
@@ -848,6 +850,75 @@ class ShellViewTest {
         assertTrue("""maxlength="40"""" in html)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_ADD_DEVICE))?.value ?: error("no button")
         assertTrue("hidden" in button)
+    }
+
+    private val draft = RecoveryDraft(
+        words = listOf("abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident"),
+        askFor = listOf(2, 5, 11), restoreLink = "https://circles.example/#/restore/${circle.v}/${me.v}",
+    )
+
+    @Test fun aRestoreLinkLeadsToTheRestorePage() {
+        val link = RestoreLink(circle, me)
+        val seen = reduce(AppState(model = AppModel.NoIdentity), AppAction.RestoreLinkSeen(link))
+        assertEquals(Screen.Restore, seen.screen)
+        assertEquals(link, seen.pendingRestore)
+        val early = reduce(AppState(), AppAction.RestoreLinkSeen(link))
+        assertEquals(Screen.Restore, reduce(early, AppAction.ModelChanged(AppModel.NoIdentity)).screen, "read before the first model arrives")
+        assertNull(reduce(seen, AppAction.ModelChanged(AppModel.Open(home()))).pendingRestore)
+    }
+
+    @Test fun aRecoveryDraftIsKeptOnlyWhileTheCircleIsOpenAndDroppedOnLock() {
+        val shown = reduce(open().copy(screen = Screen.Settings), AppAction.RecoveryDraftReady(draft))
+        assertEquals(Screen.RecoveryCode, shown.screen)
+        assertEquals(draft, shown.recoveryDraft)
+        assertEquals(Screen.Settings, reduce(open(), AppAction.Navigate(Screen.RecoveryCode)).screen, "no draft, so back to settings")
+        assertEquals(Screen.RecoveryCode, reduce(shown, AppAction.Navigate(Screen.RecoveryCode)).screen)
+        assertNull(reduce(shown, AppAction.ModelChanged(AppModel.Locked(circle))).recoveryDraft, "locking forgets the words")
+        assertNull(reduce(shown, AppAction.RecoveryDraftReady(null)).recoveryDraft)
+        assertFalse(Screen.RecoveryCode in Screen.navigation)
+    }
+
+    @Test fun theRecoveryPageShowsTwelveNumberedWordsTheLinkAndAThreeWordCheck() {
+        val html = render(open().copy(screen = Screen.RecoveryCode, recoveryDraft = draft))
+        assertTrue("<ol>" in html)
+        assertEquals(12, Regex("<li>(abandon|ability|able|about|above|absent|absorb|abstract|absurd|abuse|access|accident)</li>").findAll(html).count())
+        assertTrue("""value="${draft.restoreLink}"""" in html && "readonly" in html)
+        assertTrue("like a house key" in html)
+        assertTrue("""id="$FORM_RECOVERY_CHECK"""" in html)
+        for (place in draft.askFor) assertTrue("Word $place: " in html && """name="word-$place"""" in html, "$place")
+        assertFalse("word-1\"" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("""$ATTR_ACTION="$ACTION_RECOVERY_CANCEL"""" in html)
+    }
+
+    @Test fun theRecoveryPageWithoutADraftSendsYouToSettings() {
+        val html = render(open().copy(screen = Screen.RecoveryCode))
+        assertTrue("There is no recovery code being made." in html)
+        assertFalse(FORM_RECOVERY_CHECK in html)
+    }
+
+    @Test fun theRestorePageAsksForWordsAndAPassphraseOnlyWhenALinkWasOpened() {
+        assertFalse("""id="$FORM_RESTORE"""" in render(AppState(screen = Screen.Restore, model = AppModel.NoIdentity)))
+        val html = render(AppState(screen = Screen.Restore, model = AppModel.NoIdentity, pendingRestore = RestoreLink(circle, me)))
+        assertTrue("""id="$FORM_RESTORE"""" in html)
+        assertTrue("Your 12 words: " in html && "Passphrase: " in html)
+        assertTrue("<textarea" in html && """$ATTR_MIN="1"""" in html && """$ATTR_MIN="12"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("the paper stops working" in html)
+        assertFalse("Start a circle" in html)
+    }
+
+    @Test fun settingsOffersToMakeOrReplaceARecoveryCodeAndHomeSuggestsItUntilThen() {
+        val without = render(open(home()).copy(screen = Screen.Settings))
+        assertTrue("Make a recovery code" in without && """$ATTR_ACTION="$ACTION_RECOVERY_START"""" in without)
+        assertTrue("No recovery code yet" in without)
+        val withCode = render(open(home().copy(hasRecoveryCode = true)).copy(screen = Screen.Settings))
+        assertTrue("Make a new recovery code" in withCode && "A new code replaces the old one" in withCode)
+        assertTrue("Make a recovery code, in case you lose every device" in render(open(home())))
+        assertFalse("recovery code" in render(open(home().copy(hasRecoveryCode = true))).substringAfter("<main"))
+        assertFalse("Make a recovery code, in case" in render(open(home(canRead = false))), "nothing to protect before being let in")
     }
 
     @Test fun statusLineIsALiveRegion() {
