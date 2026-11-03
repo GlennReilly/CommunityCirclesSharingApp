@@ -1,6 +1,6 @@
 # 0049. Item detail keys after a removal
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 
 ## Context
@@ -9,11 +9,11 @@ An item's private details are sealed with its own key (ADR 0025). The owner hold
 
 How much this matters: events written after the removal are also sealed with the new circle key, which the removed member never gets, and their devices can no longer pull. The item key only matters if they obtain later ciphertext and the new circle key as well. It cannot unread what they already saw. So the gain is a second layer for future edits, at the price of the owner's details becoming unreadable to other current borrowers unless they are sent the new key too.
 
-## Decision (proposed)
+## Decision
 
 When a member is removed or leaves, the owner's device changes the detail key of every item that member was ever approved to borrow: a new `detailKeyId`, a new key wrapped to the owner's devices (`item.upsert`) and the details sealed again (`item.detail`).
 
-## Decisions for the owner
+## Decisions for the owner (answered 2026-11-03: A1, B1)
 
 **A. Who else gets the new key.** **A1 (recommended): borrowers with a loan still open** (approved, not yet returned) are sent it in the same `item.upsert`; the fold accepts wraps to devices of members with such a loan. Their view of the details keeps working. **A2: owner's devices only**: simplest, but other borrowers lose the details until the owner approves them again.
 
@@ -25,3 +25,7 @@ When a member is removed or leaves, the owner's device changes the detail key of
 
 - A1 changes a fold rule (wraps in `item.upsert` may also go to open borrowers), so the server and client must agree and old logs still fold.
 - Owners who are offline leave the old key in force until they next open the app.
+
+## As built
+
+`MarketFold.upsert` accepts wraps to devices of the owner and of members with an approved or active loan on that item. After every sync `CircleApp.rotateItemKeysAfterRemovals` finds the owner's items that a departed member was approved for under the current key, makes a new key, sends it in `item.upsert` to the owner's devices and open borrowers' devices, and seals the description again. It does nothing once the key has changed, so there is no loop, and nothing after a refused `item.upsert`. Only descriptions this device can read are re-sealed. Tests: `MarketContract` (JVM and JS) and a real-server test with two borrowers.

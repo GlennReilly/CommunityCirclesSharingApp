@@ -1001,4 +1001,66 @@ class CircleAppEndToEndTest {
             dir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun anItemsDetailKeyChangesWhenAMemberWhoBorrowedItLeavesAndOpenBorrowersKeepReading() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val carol = join()
+        fun sync() = runBlocking { repeat(3) { listOf(alice, bea, carol).filter { it.app.model.value is AppModel.Open }.forEach { it.app.syncOnce() } } }
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
+        val untouched = (alice.app.addItem("Planter", ItemClass.EVERYDAY, "Under the porch") as ItemResult.Saved).item
+        sync()
+        // Bea and Carol are both approved for the ladder; Bea is also approved for nothing else.
+        val beaLoan = (bea.app.requestLoan(ladder, TODAY + 1, TODAY + 2, "") as LoanResult.Done).loan
+        val carolLoan = (carol.app.requestLoan(ladder, TODAY + 3, TODAY + 4, "") as LoanResult.Done).loan
+        sync()
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(beaLoan, approve = true, note = ""))
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(carolLoan, approve = true, note = ""))
+        sync()
+        assertEquals("Garage at the back", home(bea.app).items.single { it.item == ladder }.description)
+        assertEquals("Garage at the back", home(carol.app).items.single { it.item == ladder }.description)
+        assertNull(home(carol.app).items.single { it.item == untouched }.description, "the planter was never lent")
+
+        // Bea's device as it stands now: the old ladder key is in her hands.
+        val stored = assertNotNull(bea.store.load())
+        val beaSeed = (SeedWrapping.unwrapWithPassphrase(testCipher, JvmPasswordHasher(), stored.wrapped, stored.deviceId, PASSPHRASE) as UnwrapResult.Opened).seed
+        val beaIdentity = DeviceIdentity.fromSeed(crypto, testCipher, beaSeed, stored.memberId, stored.deviceId)
+        val circle = home(alice.app).circle
+        val keyBefore = CircleFold(crypto, testCipher, beaIdentity).fold(circle, alice.replica.entries(circle).map { it.envelope }).market.itemKeys.entries.single { it.key.first == ladder }.key.second
+
+        // Alice removes Bea. On her next sync she changes the ladder's key (and only the ladder's).
+        assertEquals(RemoveResult.Removed, alice.app.removeMember(home(bea.app).me))
+        sync()
+        val aliceView = alice.replica.fold(circle, crypto, testCipher, DeviceIdentity.fromSeed(crypto, testCipher, run {
+            val st = assertNotNull(alice.store.load())
+            (SeedWrapping.unwrapWithPassphrase(testCipher, JvmPasswordHasher(), st.wrapped, st.deviceId, PASSPHRASE) as UnwrapResult.Opened).seed
+        }, assertNotNull(alice.store.load()).memberId, assertNotNull(alice.store.load()).deviceId))
+        val ladderState = aliceView.market.items.getValue(ladder)
+        assertTrue(ladderState.detailKeyId != keyBefore, "the ladder has a new key")
+        assertEquals(untouched, aliceView.market.items.values.single { it.item == untouched }.item)
+        assertEquals("Garage at the back", home(alice.app).items.single { it.item == ladder }.description)
+        // Carol, whose loan is still open, got the new key and keeps reading; the planter is unchanged.
+        assertEquals("Garage at the back", home(carol.app).items.single { it.item == ladder }.description)
+        // Bea, folding everything that now exists, has no key for the current ladder details.
+        val asBea = CircleFold(crypto, testCipher, beaIdentity).fold(circle, alice.replica.entries(circle).map { it.envelope })
+        assertEquals(null, asBea.market.itemKeys[ladder to ladderState.detailKeyId])
+        // Nothing was refused, and a further sync changes nothing (no loop).
+        val countBefore = alice.replica.entries(circle).size
+        sync()
+        assertEquals(countBefore, alice.replica.entries(circle).size)
+        listOf(alice, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
 }

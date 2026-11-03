@@ -171,7 +171,7 @@ abstract class MarketContract {
                 "only the owner may retire an item",
                 "only the owner may attach detail",
                 "detail is sealed under a key that is not the item's current one",
-                "keyWraps must go to the owner's own devices",
+                "keyWraps must go to the owner's own devices or to borrowers with an open loan",
                 "unknown item",
             ),
             reasons,
@@ -650,5 +650,27 @@ abstract class MarketContract {
         assertFalse(lastDayCounted.eventId(w.crypto) in rejected, "her vouch still counted before she left")
         assertTrue(dayGone.eventId(w.crypto) in rejected, "from the day she left only the steward's vouch remains")
         assertEquals(mapOf(w.bea.identity.member to day + 3), view.market.departed)
+    }
+
+    @Test
+    fun aNewItemKeyMayGoToBorrowersWithAnOpenLoanButNotToOthers() = runTest {
+        val w = world()
+        w.shareItem()
+        val (loan, request) = w.request()
+        w.log += request
+        w.log += w.approve(loan)
+        val newKey = ItemKeys.newKey(w.crypto)
+        val newId = newDetailKeyId(w.crypto)
+        val toBorrower = w.founder.itemUpsert(w.circle, DAY, w.item, "Extension ladder", ItemClass.ESSENTIAL, newId, newKey, listOf(w.founder.identity.registration, w.bea.identity.registration))
+        val toStranger = w.founder.itemUpsert(w.circle, DAY, w.item, "Extension ladder", ItemClass.ESSENTIAL, newId, newKey, listOf(w.founder.identity.registration, w.carol.identity.registration))
+        assertEquals(listOf("keyWraps must go to the owner's own devices or to borrowers with an open loan"), w.reasons(listOf(toStranger)))
+        val detail = w.founder.itemDetail(w.circle, DAY, w.item, newId, newKey, CborMap.of("address" to CborText(ADDRESS)))
+        val view = w.foldAs(w.bea, w.log + listOf(toBorrower, detail))
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(ADDRESS, w.addressOf(view), "the borrower reads the new details with the new key")
+        assertEquals(null, w.addressOf(w.foldAs(w.carol, w.log + listOf(toBorrower, detail))), "someone who was never sent it cannot")
+        // Once the loan is returned the borrower is no longer one of the people who may be sent a key.
+        val lender = w.foldAs(w.founder, w.log + listOf(w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan), w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK), toBorrower))
+        assertEquals(listOf("keyWraps must go to the owner's own devices or to borrowers with an open loan"), lender.rejected.map { it.reason })
     }
 }

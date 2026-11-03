@@ -666,6 +666,37 @@ class CircleApp(
     }
 
     /**
+     * After a sync (ADR 0049): for each of this member's items that a member who has since left was approved to borrow,
+     * change the item's detail key, sending the new one to this member's devices and to borrowers whose loan is still open,
+     * and seal the details again. Does nothing once the key has changed, and nothing after a refused `item.upsert`.
+     */
+    private suspend fun rotateItemKeysAfterRemovals(s: Session) {
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val departed = view.market.departed.keys
+        if (departed.isEmpty() || replica.refused(s.circle).any { it.type == EventType.ITEM_UPSERT.wire }) return
+        val me = s.identity.member
+        val live = view.devices.values.filter { !it.revoked }.map { it.registration }
+        val day = today()
+        var changed = false
+        for (item in view.market.items.values.filter { it.owner == me && !it.retired }) {
+            val exposed = view.market.loans.values.any { it.item == item.item && it.borrower in departed && it.detailKeyId == item.detailKeyId }
+            if (!exposed) continue
+            val description = ((view.market.details[item.item] as? Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value ?: continue
+            val open = view.market.loans.values
+                .filter { it.item == item.item && it.borrower !in departed && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) }
+                .map { it.borrower }.toSet()
+            val holders = live.filter { it.member == me || it.member in open }
+            val keyId = newDetailKeyId(crypto)
+            val key = ItemKeys.newKey(crypto)
+            s.author.keyRing = view.keys
+            s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item.item, item.name, item.itemClass, keyId, key, holders, item.minTier))
+            s.engine.enqueue(s.circle, s.author.itemDetail(s.circle, day, item.item, keyId, key, CborMap.of(DETAIL_DESCRIPTION to CborText(description))))
+            changed = true
+        }
+        if (changed) s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+    }
+
+    /**
      * After a sync: if the circle asks for shares and the newest set does not cover exactly today's stewards, the steward
      * who sorts first sends a fresh set. Only that one steward acts, so two devices do not make competing sets; the
      * "make shares now" button is the way out if they are away. Does nothing after a refused share, so it cannot loop.
@@ -1391,7 +1422,7 @@ class CircleApp(
         mutableSync.value = report.state
         // The stream needs a logged-in device, which a new one is only once its first events are accepted.
         if (report.state == SyncState.UpToDate) session?.hints?.start()
-        session?.let { sendMissingShares(it) }
+        session?.let { rotateItemKeysAfterRemovals(it); sendMissingShares(it) }
         refresh()
     }
 

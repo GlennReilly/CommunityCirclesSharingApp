@@ -136,7 +136,9 @@ internal class MarketFold(
         }
 
     private fun upsert(author: MemberId, v: ItemUpsert): String? {
-        if (v.keyWraps.any { devices[it.device]?.registration?.member != author }) return "keyWraps must go to the owner's own devices"
+        // Wraps go to the owner's devices and, when the key is changed after a removal (ADR 0049), to members whose loan is still open.
+        val mayHold = loans.values.filter { it.item == v.item && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) }.map { it.borrower }.toSet() + author
+        if (v.keyWraps.any { devices[it.device]?.registration?.member !in mayHold }) return "keyWraps must go to the owner's own devices or to borrowers with an open loan"
         val existing = items[v.item]
         if (existing != null) {
             if (existing.owner != author) return "only the owner may change an item"
