@@ -107,6 +107,7 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_EXPORT = "export-circle"
 const val FORM_MAKE_SHARES = "make-shares-form"
 const val FORM_REBUILD_KEY = "rebuild-key-form"
 const val FIELD_THRESHOLD = "share-threshold"
@@ -933,6 +934,14 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
             formSubmit("Save", ready = true)
         }
         p { +"Locking drops your keys from memory; you type your passphrase to continue." }
+    }
+    section {
+        h2 { +"Export the circle" }
+        p { +"Download a copy of the circle's log as it is on this device, so a new host can be started from it if the old one is lost. It holds only scrambled text and public information: nobody can read the circle's words from it without a member's keys. Keep it private all the same." }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_EXPORT
+            +"Download an export"
+        }
     }
     section {
         h2 { +"Leave the circle" }

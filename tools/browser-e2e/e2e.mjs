@@ -244,6 +244,15 @@ try {
   await until(restorer, has(restorer, 'Circle home'), 'restored', 40000); ok('the 12 words restored alice in a clean browser');
   await restorer.evaluate('location.hash = "#/items"'); await until(restorer, has(restorer, 'Drill') + ' && ' + has(restorer, 'Yours'), 'restored browser sees her items'); ok('the restored browser sees her own items');
   await restorer.evaluate('location.hash = "#/settings"'); await until(restorer, has(restorer, 'No recovery code yet') + ' && ' + has(restorer, '(this device)'), 'recovery code used up'); ok('the used recovery code is gone; settings suggests making a new one');
+  // Export: the settings page offers a download; the file is a zip of the log this browser holds (the object URL is captured, not saved).
+  await bea.evaluate('location.hash = "#/settings"'); await until(bea, 'document.querySelector("[data-action=export-circle]") !== null', 'export button');
+  await bea.evaluate('(() => { window.__exportSizes = []; const original = URL.createObjectURL; URL.createObjectURL = (b) => { window.__exportSizes.push([b.size, b.type]); return original.call(URL, b); }; return true; })()');
+  await syncUntil(bea, 'document.querySelector("[data-action=export-circle]") !== null', 'bea settled'); await click(bea, 'export-circle');
+  await until(bea, 'window.__exportSizes.length === 1 && ' + has(bea, 'Downloaded circles-export-'), 'export downloaded');
+  const [exportSize, exportType] = await bea.evaluate('window.__exportSizes[0]');
+  if (!(exportSize > 500) || exportType !== 'application/zip') throw new Error('bad export ' + exportSize + ' ' + exportType); ok('bea downloaded a zip export of the circle (' + exportSize + ' bytes)');
+  await checkAccessibility(bea, 'settings with export');
+
   // Recovery shares (ADR 0048): two stewards, so alice splits the key 2 of 2; each steward can show a share code; no rebuild form while the key is held.
   await alice.evaluate('location.hash = "#/stewards/recovery-shares"'); await until(alice, has(alice, 'Make the shares'), 'shares page');
   await checkAccessibility(alice, 'recovery shares');

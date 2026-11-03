@@ -3,6 +3,7 @@ package circles.app
 import circles.crypto.Cipher
 import circles.crypto.Crypto
 import circles.encoding.Parsed
+import circles.event.toDto
 import circles.event.CircleKeys
 import circles.event.DeviceId
 import circles.event.DeviceIdentity
@@ -302,6 +303,18 @@ data class RecoverySharesSummary(
     /** The circle's setting (0 = off): stewards' devices send fresh shares by themselves after a rotation or steward change. */
     val automaticThreshold: Int = circles.event.NO_RECOVERY_SHARES,
 )
+
+/** The circle exported from this device's copy of the log (ADR 0030, point 4). */
+sealed interface ExportResult {
+    class Ready(val fileName: String, val bytes: ByteArray, val events: Int) : ExportResult
+
+    /** This device does not hold the whole log from the start (or none of it) yet; sync first. */
+    data object Incomplete : ExportResult
+
+    data object NotAllowed : ExportResult
+}
+
+private const val EXPORT_NAME_ID_CHARS = 8
 
 /** The smallest number of stewards that must come together (a single steward needs no sharing). */
 const val MIN_RECOVERY_THRESHOLD = 2
@@ -620,6 +633,22 @@ class CircleApp(
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- export (ADR 0030) ----
+
+    /**
+     * Builds `circles-export/1` from the log this device holds: ciphertext, public parts and signatures only, no blobs (the
+     * device keeps none), so a new host can be seeded from it. Refuses when the copy has gaps, because the importer replays
+     * from the first event.
+     */
+    suspend fun exportCircle(): ExportResult {
+        val s = session ?: return ExportResult.NotAllowed
+        val entries = replica.entries(s.circle, 0).sortedBy { it.serverSeq }
+        if (entries.isEmpty() || entries.withIndex().any { (index, entry) -> entry.serverSeq != index + 1L }) return ExportResult.Incomplete
+        val built = circles.export.CircleExport.build(crypto, s.circle, entries.map { it.envelope.toDto() }, emptyList())
+        val bytes = circles.export.ZipStore.write(built.entries(emptyMap())) ?: return ExportResult.Incomplete
+        return ExportResult.Ready("circles-export-${s.circle.v.take(EXPORT_NAME_ID_CHARS)}-${CalendarDay.format(today())}.zip", bytes, entries.size)
     }
 
     // ---- recovery shares (ADR 0048) ----

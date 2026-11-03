@@ -1010,4 +1010,11 @@ class ShellViewTest {
         assertTrue("Only stewards hold recovery shares." in html)
         assertFalse(FORM_MAKE_SHARES in html)
     }
+
+    @Test fun settingsOffersAnExportWithAPlainWarning() {
+        val html = render(open(home()).copy(screen = Screen.Settings))
+        assertTrue("""$ATTR_ACTION="$ACTION_EXPORT"""" in html)
+        assertTrue("Keep it private all the same" in html)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EXPORT"""").findAll(html).count())
+    }
 }

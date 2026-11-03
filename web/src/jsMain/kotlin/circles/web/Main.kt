@@ -19,6 +19,7 @@ import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.LeaveResult
 import circles.app.MAX_DEVICE_NAME_CHARS
+import circles.app.ExportResult
 import circles.app.RebuildResult
 import circles.app.RecoveryCodeResult
 import circles.app.ShareMakingResult
@@ -57,6 +58,11 @@ import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.Event
+import org.khronos.webgl.Int8Array
+import org.khronos.webgl.Uint8Array
+import org.w3c.files.Blob
+import org.w3c.files.BlobPropertyBag
+import org.w3c.dom.url.URL
 
 private const val ROOT_ID = "app"
 private const val MILLIS_PER_DAY = 86_400_000.0
@@ -444,6 +450,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_REMOVE_DEVICE -> target.getAttribute(ATTR_DEVICE_ID)?.let { id ->
                     dispatch(AppAction.Notice(if (circleApp?.removeDevice(DeviceId(id)) == DeviceRemoval.Removed) "Removed. The circle's key is being changed." else "That device cannot be removed."))
                 }
+                ACTION_EXPORT -> when (val result = circleApp?.exportCircle()) {
+                    is ExportResult.Ready -> {
+                        download(result.fileName, result.bytes)
+                        dispatch(AppAction.Notice("Downloaded ${result.fileName} with ${result.events} events."))
+                    }
+                    ExportResult.Incomplete -> dispatch(AppAction.Notice("This device does not have the whole log yet. Press Sync now, then try again."))
+                    ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Open the circle first."))
+                }
                 ACTION_SHARE_SHOW -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { epoch ->
                     dispatch(AppAction.ShareCodeShown(epoch, circleApp?.shareCode(epoch)))
                 }
@@ -507,3 +521,20 @@ fun main() {
     val scope = MainScope()
     scope.launch { Page(root, scope).start() }
 }
+
+
+/** Offers [bytes] to the user as a file download without sending them anywhere (an object URL on this page only). */
+private fun download(fileName: String, bytes: ByteArray) {
+    val raw = bytes.unsafeCast<Int8Array>()
+    val blob = Blob(arrayOf(Uint8Array(raw.buffer, raw.byteOffset, raw.length)), BlobPropertyBag(type = "application/zip"))
+    val url = URL.createObjectURL(blob)
+    val link = document.createElement("a") as HTMLElement
+    link.setAttribute("href", url)
+    link.setAttribute("download", fileName)
+    document.body?.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout({ URL.revokeObjectURL(url) }, DOWNLOAD_URL_LIFETIME_MILLIS)
+}
+
+private const val DOWNLOAD_URL_LIFETIME_MILLIS = 10_000

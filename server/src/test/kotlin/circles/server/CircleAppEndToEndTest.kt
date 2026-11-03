@@ -949,4 +949,56 @@ class CircleAppEndToEndTest {
         sync()
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
+
+    @Test
+    fun aMemberExportsTheCircleFromTheBrowserAndANewHostIsSeededFromTheFile() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open()
+        assertEquals(circles.app.ExportResult.NotAllowed, alice.app.exportCircle(), "locked or no circle")
+        alice.app.startCircle(PASSPHRASE)
+        assertEquals(circles.app.ExportResult.Incomplete, alice.app.exportCircle(), "nothing has reached the server yet")
+        alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back")
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+
+        // Any member can export, from the log their own device holds.
+        val ready = assertIs<circles.app.ExportResult.Ready>(bea.app.exportCircle())
+        assertTrue(ready.fileName.startsWith("circles-export-") && ready.fileName.endsWith(".zip"), ready.fileName)
+        val dir = java.nio.file.Files.createTempDirectory("browser-export")
+        try {
+            val file = dir.resolve(ready.fileName)
+            java.nio.file.Files.write(file, ready.bytes)
+            val report = circles.server.backup.ZipExportSource(file).use { circles.export.ExportVerifier.verify(it, crypto) }
+            assertEquals(emptyList(), report.problems)
+            assertEquals(ready.events, report.manifest!!.eventCount)
+            // The file contains no plaintext: the item's words are not in it.
+            val text = ready.bytes.decodeToString(throwOnInvalidSequence = false)
+            assertFalse("Ladder" in text || "Garage" in text)
+
+            // A new host is seeded from it, with the same events and sequence numbers the first host has.
+            val fresh = circles.server.support.TestServer()
+            try {
+                val importer = circles.server.backup.CircleImporter(fresh.services.sync, fresh.services.blobs!!, fresh.crypto)
+                val result = circles.server.backup.ZipExportSource(file).use { importer.import(it) }
+                assertIs<circles.server.backup.ImportResult.Done>(result)
+                val circle = home(bea.app).circle
+                assertEquals(
+                    server.services.sync.pull(circle, 0, 1_000).events,
+                    fresh.services.sync.pull(circle, 0, 1_000).events,
+                )
+            } finally {
+                fresh.close()
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
 }
