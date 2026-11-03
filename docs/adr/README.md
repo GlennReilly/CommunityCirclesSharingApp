@@ -30,6 +30,8 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0024](0024-retire-the-plaintext-v0-format.md) | Retire the plaintext v = 0 format (amends 0014, 0021) | Accepted |
 | [0025](0025-item-and-loan-event-payloads.md) | Item and loan event payloads and folding rules | Accepted |
 | [0026](0026-sse-hints-and-blob-storage.md) | Server-sent event hints and blob storage | Accepted |
+| [0027](0027-steward-quorum-setting-and-inactivity-fallback.md) | Steward quorum as a circle setting, with an inactivity fallback (supersedes 0023 once accepted) | Proposed |
+| [0028](0028-client-image-policy.md) | Client image policy: resize, re-encode, strip metadata | Proposed |
 
 ## Open decisions still to record
 
