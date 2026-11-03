@@ -3,7 +3,7 @@ package circles.crypto
 import org.khronos.webgl.Uint8Array
 import kotlin.js.Promise
 
-/** The parts of `libsodium-wrappers` we call (ADR 0018). Names follow the library, hence the underscores. */
+/** The parts of `libsodium-wrappers` the tests use as an independent oracle (ADR 0035). Names follow the library. */
 @JsModule("libsodium-wrappers")
 @JsNonModule
 @Suppress("FunctionName", "PropertyName", "ClassName")

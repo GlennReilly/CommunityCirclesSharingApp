@@ -111,4 +111,16 @@ abstract class CryptoContract {
         assertNotEquals(crypto.randomBytes(16), crypto.randomBytes(16))
         assertContentEquals(ByteArray(0), crypto.randomBytes(0).toByteArray())
     }
+
+    @Test
+    fun randomBytesWorkForLargeAndBoundaryCounts() = runTest {
+        val crypto = newCrypto()
+        listOf(1, 31, 32, 65_535, 65_536, 65_537, 131_072, 200_000).forEach { n ->
+            val bytes = crypto.randomBytes(n).toByteArray()
+            assertEquals(n, bytes.size)
+            // Not all one value (a fixed fill would fail this for any count of 32 or more).
+            if (n >= 32) assertTrue(bytes.toSet().size > 8, "count $n looks fixed")
+        }
+        assertEquals(0, crypto.randomBytes(0).size)
+    }
 }

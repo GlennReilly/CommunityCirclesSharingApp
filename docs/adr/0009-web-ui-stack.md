@@ -1,6 +1,6 @@
 # 0009. Web UI stack
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-02
 
 ## Context
@@ -30,8 +30,13 @@ Side finding: with three Kotlin modules Gradle loads the Kotlin plugin once per 
 
 ## Decision
 
-Not yet decided. M0 only builds the `shared` module for JS (Node tests). Before M3, spike both options, measuring gzip bundle size against the 250 KB budget and the effort of the Gradle/Vite integration, then accept or reject the TypeScript UI here.
+**The web client is written in Kotlin/JS with `kotlinx-html`**, in a Gradle module that depends on `shared` directly. There is no TypeScript, Vite or npm application of our own. The spec's proposal (Vite, TypeScript, Preact) is not adopted.
+
+- The measurements above show the choice is not about size: Preact adds 6 KB and `kotlinx-html` a few KB, both far inside the budget once the crypto is settled (ADR 0035).
+- One language and one toolchain keep the whole project, tests and build in Gradle, and let the client call the fold, the policy, the export verifier and the signing helpers as plain Kotlin, with no facade to keep narrow.
+- Components are small functions that build DOM with `kotlinx-html` and re-render a subtree from a state value. Focus, live regions and keyboard handling are written deliberately and tested; the accessibility pass in M6 (axe in CI, screen reader checks) is the check on that choice. If it proves too costly, the rendering layer can be replaced without touching the logic, because the logic never depends on it.
+- Compose Multiplatform for Web is not used: its output is far larger than this budget allows.
 
 ## Consequences
 
-The `web` module is a placeholder until this is decided. Keeping the facade narrow (fold, policy, crypto, encode/decode) keeps either choice open.
+The `web` module becomes a Kotlin/JS Gradle module (M3). Rendering is hand-written, so the client must keep view code separate from state and sync logic so tests exercise the logic without a browser. The bundle budget (250 KB gzipped for the shell) is checked in CI once the module exists.

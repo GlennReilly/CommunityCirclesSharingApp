@@ -25,7 +25,13 @@ kotlin {
             implementation(libs.bouncycastle)
         }
         jsMain.dependencies {
-            // ADR 0018: libsodium in the browser (and Node tests).
+            // ADR 0035: audited pure-JavaScript primitives in the browser, pinned exactly.
+            implementation(npm("@noble/curves", "2.4.0"))
+            implementation(npm("@noble/hashes", "2.4.0"))
+            implementation(npm("@noble/ciphers", "2.4.0"))
+        }
+        jsTest.dependencies {
+            // ADR 0035: libsodium stays as an independent oracle for the tests only; it is not shipped.
             implementation(npm("libsodium-wrappers", "0.7.15"))
         }
         commonTest.dependencies {

@@ -12,6 +12,7 @@ Export, import and backup (2026-11-03, ADRs 0030 and 0031): `circles-export/1` a
 Admin endpoints (2026-11-03, ADR 0033): `/api/v1/admin/export/{circleId}` and `/api/v1/admin/import` are authorised by an Ed25519-signed request header (`Circles-Signature`), with a nonce and a 5-minute window; import proves stewardship from the file itself so a brand-new host can accept it, and a circle the host does not have also needs an operator-issued single-use token (ADR 0034, `import-token`, migration V6).
 Operations (2026-11-03): `deploy/` and `docs/operator/` hold the Dockerfile, compose file, Caddyfile, systemd unit and the install, requirements (measured), backup-restore, upgrade and handover guides; the CLI gains `list`; `bootstrap` is not built because this spec never says what it does.
 Image policy (2026-11-03, ADR 0028): `shared` carries `ImagePolicy` (size limits, scaling, the encode ladders, the metadata scan) for every client to apply before sealing a photo.
+Browser crypto and UI stack (2026-11-03, ADRs 0035 and 0009): the browser uses `@noble/curves`, `@noble/hashes` and `@noble/ciphers` (libsodium is a test oracle only) so the shell fits the 250 KB budget; the web client is Kotlin/JS with kotlinx-html, not Vite, TypeScript and Preact. Where section 5 and the ground rules say "libsodium", read this amendment.
 
 v0.2 changes: envelope split into `public` and `encrypted` (3.1, 3.2); optimistic loan returns and `loan.dispute` / `loan.resolve` (3.3); policy corrections C1-C13 with tests (2.1); ADR folder renamed to `docs/adr/`.
 

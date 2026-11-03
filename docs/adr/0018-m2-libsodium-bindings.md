@@ -1,6 +1,6 @@
 # 0018. M2 libsodium bindings: lazysodium on JVM clients (test scope), libsodium-wrappers on JS
 
-- Status: Accepted
+- Status: Accepted (the JS part, points 3 and 5, replaced by ADR 0035; the JVM part stands)
 - Date: 2026-11-02
 
 ## Context
