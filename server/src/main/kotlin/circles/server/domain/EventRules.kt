@@ -11,6 +11,7 @@ import circles.event.EventType
 import circles.event.FIRST_EPOCH
 import circles.event.FOUNDING_STEWARD_DAY
 import circles.event.PublicParts
+import circles.event.StewardActivity
 import circles.event.StewardChange
 import circles.event.StewardOutcome
 import circles.event.StewardPolicy
@@ -38,6 +39,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.RECOVERY_SHARE,
     EventType.STEWARD_ADD,
     EventType.STEWARD_REMOVE,
+    EventType.STEWARD_POLICY,
     EventType.ITEM_UPSERT,
     EventType.ITEM_RETIRE,
     EventType.ITEM_DETAIL,
@@ -50,7 +52,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
 /** Types whose whole payload is secret: empty `public`, a sealed `encrypted` (spec 3.2, ADR 0025). */
 private val OPAQUE_TYPES: Set<EventType> = SUPPORTED_TYPES - setOf(
     EventType.CIRCLE_CREATE, EventType.MEMBER_INVITE, EventType.MEMBER_JOIN, EventType.DEVICE_ADD, EventType.DEVICE_REVOKE,
-    EventType.KEY_WRAP, EventType.KEY_ROTATE, EventType.RECOVERY_SHARE, EventType.STEWARD_ADD, EventType.STEWARD_REMOVE,
+    EventType.KEY_WRAP, EventType.KEY_ROTATE, EventType.RECOVERY_SHARE, EventType.STEWARD_ADD, EventType.STEWARD_REMOVE, EventType.STEWARD_POLICY,
 )
 
 /**
@@ -79,6 +81,7 @@ class EventRules(
             in OPAQUE_TYPES -> opaque(envelope, payloadEmpty, directory)
             EventType.STEWARD_ADD -> stewardChange(envelope, StewardChange.ADD, directory)
             EventType.STEWARD_REMOVE -> stewardChange(envelope, StewardChange.REMOVE, directory)
+            EventType.STEWARD_POLICY -> stewardPolicyChange(envelope, directory)
             else -> deviceAdd(envelope, directory)
         }
     }
@@ -138,20 +141,59 @@ class EventRules(
         }
         val stewards = directory.stewardsWithDays(envelope.circle)
         val outcome = StewardRules.decide(
-            stewardPolicy, change, target, sender.member, envelope.day, stewards,
-            directory.stewardVotes(envelope.circle, change, target),
+            policyOf(envelope, directory), change, target, sender.member, envelope.day, stewards,
+            directory.stewardVotes(envelope.circle, change, target.v), activityOf(envelope, directory),
         )
-        return when (outcome) {
-            is StewardOutcome.Refused -> reject(if (sender.member in stewards) RejectionCode.INVALID_PUBLIC else RejectionCode.NOT_STEWARD, outcome.reason)
-            StewardOutcome.Pending -> Decision.Accept(listOf(Effect.RecordStewardVote(envelope.circle, change, target, sender.member, envelope.day)))
-            StewardOutcome.Effective -> Decision.Accept(
-                listOf(
-                    if (change == StewardChange.ADD) Effect.AddSteward(envelope.circle, target, envelope.day) else Effect.RemoveSteward(envelope.circle, target),
-                    Effect.ClearStewardVotes(envelope.circle, target),
-                ),
-            )
+        return stewardDecision(envelope, change, target.v, sender.member, stewards, outcome) {
+            if (change == StewardChange.ADD) Effect.AddSteward(envelope.circle, target, envelope.day) else Effect.RemoveSteward(envelope.circle, target)
         }
     }
+
+    private fun stewardPolicyChange(envelope: Envelope, directory: Directory): Decision {
+        val sender = sender(envelope, directory).deviceOrReject { return it }
+        val proposed = when (val parsed = PublicParts.stewardSettings(envelope.public)) {
+            is Parsed.Ok -> parsed.value
+            is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
+        }
+        val stewards = directory.stewardsWithDays(envelope.circle)
+        val outcome = StewardRules.decidePolicy(
+            policyOf(envelope, directory), proposed, sender.member, envelope.day, stewards,
+            directory.stewardVotes(envelope.circle, StewardChange.POLICY, proposed.subject()),
+        )
+        return stewardDecision(envelope, StewardChange.POLICY, proposed.subject(), sender.member, stewards, outcome) {
+            Effect.SetStewardSettings(envelope.circle, proposed)
+        }
+    }
+
+    /** Turns a [StewardOutcome] into a decision: refuse, record a pending vote, or apply [effect] and forget the votes. */
+    private inline fun stewardDecision(
+        envelope: Envelope,
+        change: StewardChange,
+        subject: String,
+        voter: circles.policy.MemberId,
+        stewards: Map<circles.policy.MemberId, Int>,
+        outcome: StewardOutcome,
+        effect: () -> Effect,
+    ): Decision =
+        when (outcome) {
+            is StewardOutcome.Refused -> reject(if (voter in stewards) RejectionCode.INVALID_PUBLIC else RejectionCode.NOT_STEWARD, outcome.reason)
+            StewardOutcome.Pending -> Decision.Accept(listOf(Effect.RecordStewardVote(envelope.circle, change, subject, voter, envelope.day)))
+            StewardOutcome.Effective -> Decision.Accept(listOf(effect(), Effect.ClearStewardVotes(envelope.circle, subject)))
+        }
+
+    /** The base policy with this circle's own settings (ADR 0027). */
+    private fun policyOf(envelope: Envelope, directory: Directory): StewardPolicy =
+        stewardPolicy.with(directory.stewardSettings(envelope.circle))
+
+    /** What the circle's log says about each steward's activity, for the inactivity fallback. */
+    private fun activityOf(envelope: Envelope, directory: Directory): StewardActivity =
+        object : StewardActivity {
+            override fun lastEventDayBefore(member: circles.policy.MemberId, position: Long): Int? =
+                directory.lastEventDayBefore(envelope.circle, member, position)
+
+            override fun hasEventAfter(member: circles.policy.MemberId, position: Long): Boolean =
+                directory.hasEventAfter(envelope.circle, member, position)
+        }
 
     private fun recoveryShare(envelope: Envelope, payloadEmpty: Boolean, directory: Directory): Decision {
         val sender = sender(envelope, directory).deviceOrReject { return it }
@@ -203,10 +245,14 @@ class EventRules(
         if (!creationAllowed) return reject(RejectionCode.CREATION_DISABLED, "this server does not accept new circles")
         if (directory.circleExists(envelope.circle)) return reject(RejectionCode.CIRCLE_EXISTS, "circle already exists")
         if (!payloadEmpty) return reject(RejectionCode.INVALID_PAYLOAD, "circle.create has no payload")
-        val registration = selfRegistration(envelope, PublicParts.registration(envelope.public), directory).registrationOrReject { return it }
+        val terms = when (val parsed = PublicParts.circleCreate(envelope.public)) {
+            is Parsed.Ok -> parsed.value
+            is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
+        }
+        val registration = selfRegistration(envelope, Parsed.Ok(terms.registration), directory).registrationOrReject { return it }
         return Decision.Accept(
             listOf(
-                Effect.CreateCircle(envelope.circle, envelope.day),
+                Effect.CreateCircle(envelope.circle, envelope.day, terms.settings),
                 Effect.RegisterDevice(envelope.circle, registration),
                 Effect.AddSteward(envelope.circle, registration.member, FOUNDING_STEWARD_DAY),
             ),

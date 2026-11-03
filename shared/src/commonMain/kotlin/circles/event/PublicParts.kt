@@ -28,6 +28,12 @@ private const val KEY_EXPIRES_DAY = "expiresDay"
 private const val KEY_MAX_USES = "maxUses"
 private const val KEY_NOTE = "note"
 private const val KEY_LABEL = "label"
+private const val KEY_STEWARD_QUORUM = "stewardQuorum"
+private const val KEY_STEWARD_INACTIVE_DAYS = "stewardInactiveDays"
+private const val KEY_STEWARD_DELAY_DAYS = "stewardFallbackDelayDays"
+private const val KEY_QUORUM = "quorum"
+private const val KEY_INACTIVE_DAYS = "inactiveDays"
+private const val KEY_FALLBACK_DELAY_DAYS = "fallbackDelayDays"
 
 /** A device and its public keys, as registered by `circle.create`, `member.join` and `device.add` (spec 3.2). */
 data class DeviceRegistration(val member: MemberId, val device: DeviceId, val signPub: ByteString, val boxPub: ByteString) {
@@ -41,6 +47,9 @@ data class DeviceRegistration(val member: MemberId, val device: DeviceId, val si
 
     fun toPublic(): CborMap = CborMap(fields())
 }
+
+/** What `circle.create` declares: the founder's device and, optionally, the circle's steward settings (ADR 0027). */
+data class CircleCreateTerms(val registration: DeviceRegistration, val settings: StewardSettings)
 
 /** `public` of `member.invite`. */
 data class InviteTerms(val invitePub: ByteString, val expiresDay: Int, val maxUses: Int) {
@@ -59,6 +68,54 @@ object PublicParts {
         exactKeys(map, setOf(KEY_MEMBER, KEY_DEVICE, KEY_SIGN_PUB, KEY_BOX_PUB))?.let { return Parsed.Invalid(it) }
         return readRegistration(map)
     }
+
+    /** `public` of `circle.create`: the registration plus three optional steward settings; absent ones take the defaults. */
+    fun circleCreate(map: CborMap): Parsed<CircleCreateTerms> {
+        val registrationKeys = setOf(KEY_MEMBER, KEY_DEVICE, KEY_SIGN_PUB, KEY_BOX_PUB)
+        val settingKeys = setOf(KEY_STEWARD_QUORUM, KEY_STEWARD_INACTIVE_DAYS, KEY_STEWARD_DELAY_DAYS)
+        if (!map.entries.keys.containsAll(registrationKeys) || !(registrationKeys + settingKeys).containsAll(map.entries.keys)) {
+            return Parsed.Invalid("expected the keys ${registrationKeys.sorted()} and optionally ${settingKeys.sorted()}")
+        }
+        val registration = when (val r = readRegistration(map)) {
+            is Parsed.Ok -> r.value
+            is Parsed.Invalid -> return r
+        }
+        val defaults = StewardSettings()
+        val settings = StewardSettings(
+            quorum = optionalInt(map, KEY_STEWARD_QUORUM, defaults.quorum) ?: return Parsed.Invalid("stewardQuorum must be a whole number"),
+            inactiveDays = optionalInt(map, KEY_STEWARD_INACTIVE_DAYS, defaults.inactiveDays) ?: return Parsed.Invalid("stewardInactiveDays must be a whole number"),
+            fallbackDelayDays = optionalInt(map, KEY_STEWARD_DELAY_DAYS, defaults.fallbackDelayDays) ?: return Parsed.Invalid("stewardFallbackDelayDays must be a whole number"),
+        )
+        settings.problem()?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(CircleCreateTerms(registration, settings))
+    }
+
+    /** `public` of `circle.create`; the settings are written only when [settings] is given. */
+    fun circleCreatePublic(registration: DeviceRegistration, settings: StewardSettings?): CborMap =
+        CborMap(
+            registration.fields() + if (settings == null) emptyMap() else mapOf(
+                KEY_STEWARD_QUORUM to CborInt(settings.quorum.toLong()),
+                KEY_STEWARD_INACTIVE_DAYS to CborInt(settings.inactiveDays.toLong()),
+                KEY_STEWARD_DELAY_DAYS to CborInt(settings.fallbackDelayDays.toLong()),
+            ),
+        )
+
+    /** `public` of `steward.policy`: the full new settings. */
+    fun stewardSettings(map: CborMap): Parsed<StewardSettings> {
+        exactKeys(map, setOf(KEY_QUORUM, KEY_INACTIVE_DAYS, KEY_FALLBACK_DELAY_DAYS))?.let { return Parsed.Invalid(it) }
+        val settings = StewardSettings(
+            quorum = smallInt(map, KEY_QUORUM) ?: return Parsed.Invalid("quorum must be a whole number"),
+            inactiveDays = smallInt(map, KEY_INACTIVE_DAYS) ?: return Parsed.Invalid("inactiveDays must be a whole number"),
+            fallbackDelayDays = smallInt(map, KEY_FALLBACK_DELAY_DAYS) ?: return Parsed.Invalid("fallbackDelayDays must be a whole number"),
+        )
+        return settings.problem()?.let { Parsed.Invalid(it) } ?: Parsed.Ok(settings)
+    }
+
+    fun stewardSettingsPublic(settings: StewardSettings): CborMap = CborMap.of(
+        KEY_QUORUM to CborInt(settings.quorum.toLong()),
+        KEY_INACTIVE_DAYS to CborInt(settings.inactiveDays.toLong()),
+        KEY_FALLBACK_DELAY_DAYS to CborInt(settings.fallbackDelayDays.toLong()),
+    )
 
     fun invite(map: CborMap): Parsed<InviteTerms> {
         exactKeys(map, setOf(KEY_INVITE_PUB, KEY_EXPIRES_DAY, KEY_MAX_USES))?.let { return Parsed.Invalid(it) }
@@ -124,6 +181,9 @@ object PublicParts {
     }
 
     private fun key(map: CborMap, name: String): ByteString? = (map[name] as? CborBytes)?.value?.takeIf { it.size == ED25519_KEY_BYTES }
+
+    /** The integer under [name], [default] if the key is absent, or null if it is present but not a usable integer. */
+    private fun optionalInt(map: CborMap, name: String, default: Int): Int? = if (map[name] == null) default else smallInt(map, name)
 
     private fun smallInt(map: CborMap, name: String): Int? = (map[name] as? CborInt)?.value?.takeIf { it in 0..Int.MAX_VALUE }?.toInt()
 

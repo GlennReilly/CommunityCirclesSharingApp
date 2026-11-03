@@ -1,6 +1,6 @@
 # 0023. Steward changes need a quorum of distinct stewards
 
-- Status: Accepted
+- Status: Superseded by 0027
 - Date: 2026-11-02
 
 ## Context

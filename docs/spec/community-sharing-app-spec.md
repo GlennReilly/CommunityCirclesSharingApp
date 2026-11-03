@@ -7,6 +7,7 @@ M2 amendments (2026-11-02, ADRs 0018-0021): encryption is a separate `Cipher` in
 M3-prep amendment (2026-11-03, ADR 0024): the plaintext `v = 0` format is gone; `v = 1` is the only format, `EventAuthor` always seals, and the server no longer reads any secret part (so it no longer length-checks notes and labels).
 Items and loans (2026-11-03, ADR 0025): payload fields and folding rules for `item.upsert/retire/detail` and `loan.request/respond/handover/return`, with item detail keys wrapped to the owner's and the approved borrower's devices; the server only requires an empty `public` and a sealed payload.
 Streams and blobs (2026-11-03, ADR 0026): SSE is served in v1 as hints only; blob bytes live under `data/blobs/<circleId>/<aa>/<hash>` with a per-circle quota (`CIRCLES_BLOB_QUOTA_MIB`) and the `blobs` table keyed by `(circle_id, hash)` (migration V4).
+Steward governance (2026-11-03, ADR 0027, supersedes 0022 and 0023): steward changes need a quorum of distinct stewards, set per circle (`stewardQuorum`, `stewardInactiveDays`, `stewardFallbackDelayDays` in `circle.create`, changed by `steward.policy`), with an inactivity fallback; migrations V3 and V5. Client image policy (ADR 0028): resize, re-encode and strip metadata on the device before sealing a blob.
 
 v0.2 changes: envelope split into `public` and `encrypted` (3.1, 3.2); optimistic loan returns and `loan.dispute` / `loan.resolve` (3.3); policy corrections C1-C13 with tests (2.1); ADR folder renamed to `docs/adr/`.
 

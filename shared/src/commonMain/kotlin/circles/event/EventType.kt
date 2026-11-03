@@ -13,6 +13,7 @@ enum class EventType(val wire: String) {
     RECOVERY_SHARE("recovery.share"),
     STEWARD_ADD("steward.add"),
     STEWARD_REMOVE("steward.remove"),
+    STEWARD_POLICY("steward.policy"),
     CONFIG_UPDATE("config.update"),
     VOUCH("vouch"),
     ITEM_UPSERT("item.upsert"),

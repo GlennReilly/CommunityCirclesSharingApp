@@ -49,8 +49,8 @@ abstract class CircleFoldContract {
         }
 
         /** Founder creates the circle and the first key, invites bea, bea joins, key wrapped to bea. */
-        fun start() {
-            log += founder.circleCreate(circle, day)
+        fun start(settings: StewardSettings? = null) {
+            log += founder.circleCreate(circle, day, settings)
             log += founder.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, key1, day)
             val inviteKey = InviteKey(crypto.generateSigningKeyPair())
             beaInvite = founder.invite(circle, inviteKey, day + 30, 1, day)
@@ -215,6 +215,95 @@ abstract class CircleFoldContract {
         val gated = CircleFold(w.crypto, w.cipher, w.founder.identity, mayBecomeSteward = { false }).fold(w.circle, w.log + addBea)
         assertEquals(setOf(w.founder.identity.member), gated.stewards)
         assertEquals(listOf("member has not reached the steward standing tier"), gated.rejected.map { it.reason })
+    }
+
+    @Test
+    fun aCircleCreatedWithSettingsKeepsThemAndAQuorumOfOneActsAlone() = runTest {
+        val w = world()
+        w.start(StewardSettings(quorum = 1, inactiveDays = 45, fallbackDelayDays = 10))
+        w.joinCarol()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val beaAddsCarol = w.bea.stewardAdd(w.circle, w.carol.identity.member, day) // new steward, acts today
+        val carolRemovesBea = w.carol.stewardRemove(w.circle, w.bea.identity.member, day)
+        val view = w.fold(w.founder, w.log + listOf(addBea, beaAddsCarol, carolRemovesBea))
+        assertEquals(setOf(w.founder.identity.member, w.carol.identity.member), view.stewards)
+        assertEquals(StewardSettings(1, 45, 10), view.stewardSettings)
+        assertEquals(emptyList(), view.rejected)
+    }
+
+    @Test
+    fun aCircleCreatedWithBadSettingsIsRejectedAsAWhole() = runTest {
+        val w = world()
+        val bad = w.founder.circleCreate(w.circle, day, StewardSettings(inactiveDays = 5))
+        val view = w.fold(w.founder, listOf(bad))
+        assertEquals(1, view.rejected.size)
+        assertTrue(view.rejected.single().reason.startsWith("bad circle.create"), view.rejected.single().reason)
+        assertTrue(view.devices.isEmpty())
+    }
+
+    @Test
+    fun theStewardsChangeTheSettingsTogetherAndOutOfLimitValuesAreRejected() = runTest {
+        val w = world()
+        w.start()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val relaxed = StewardSettings(quorum = 1, inactiveDays = 45, fallbackDelayDays = 10)
+        val first = w.founder.stewardPolicy(w.circle, relaxed, day + 7)
+        val pending = w.fold(w.founder, w.log + listOf(addBea, first))
+        assertEquals(StewardSettings(), pending.stewardSettings, "one vote of two")
+        val second = w.bea.stewardPolicy(w.circle, relaxed, day + 7)
+        val done = w.fold(w.founder, w.log + listOf(addBea, first, second))
+        assertEquals(relaxed, done.stewardSettings)
+        assertEquals(emptyList(), done.rejected)
+        val tooShort = w.founder.stewardPolicy(w.circle, StewardSettings(inactiveDays = 1), day + 7)
+        assertTrue(w.fold(w.founder, w.log + listOf(addBea, tooShort)).rejected.single().reason.startsWith("bad steward.policy"))
+    }
+
+    @Test
+    fun theInactivityFallbackLetsAnActiveStewardActAfterTheQuietPeriodAndTheDelay() = runTest {
+        val w = world()
+        w.start()
+        w.joinCarol()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val quiet = day + 60
+        val proposal = w.founder.stewardAdd(w.circle, w.carol.identity.member, quiet)
+        val tooSoon = w.founder.stewardAdd(w.circle, w.carol.identity.member, quiet + 13)
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), w.fold(w.founder, w.log + listOf(addBea, proposal, tooSoon)).stewards)
+        val after = w.founder.stewardAdd(w.circle, w.carol.identity.member, quiet + 14)
+        val view = w.fold(w.founder, w.log + listOf(addBea, proposal, tooSoon, after))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member, w.carol.identity.member), view.stewards)
+        assertEquals(emptyList(), view.rejected)
+    }
+
+    @Test
+    fun aHelperEventAfterTheProposalOrJustBeforeItBlocksTheFallback() = runTest {
+        val w = world()
+        w.start()
+        w.joinCarol()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val quiet = day + 60
+        val proposal = w.founder.stewardRemove(w.circle, w.bea.identity.member, quiet)
+        val back = w.bea.invite(w.circle, InviteKey(w.crypto.generateSigningKeyPair()), quiet + 30, 1, quiet + 3)
+        val repeat = w.founder.stewardRemove(w.circle, w.bea.identity.member, quiet + 14)
+        val vetoed = w.fold(w.founder, w.log + listOf(addBea, proposal, back, repeat))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), vetoed.stewards)
+        // The same proposal with no event from bea does remove her.
+        val removed = w.fold(w.founder, w.log + listOf(addBea, proposal, repeat))
+        assertEquals(setOf(w.founder.identity.member), removed.stewards)
+        // And an event of hers just before the quiet period was up keeps it from starting at all.
+        val spoke = w.bea.invite(w.circle, InviteKey(w.crypto.generateSigningKeyPair()), quiet + 30, 1, quiet - 5)
+        val early = w.fold(w.founder, w.log + listOf(addBea, spoke, proposal, repeat))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), early.stewards)
+    }
+
+    @Test
+    fun theFallbackCannotChangeTheSettings() = runTest {
+        val w = world()
+        w.start()
+        val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
+        val proposed = StewardSettings(quorum = 1, inactiveDays = 30, fallbackDelayDays = 7)
+        val first = w.founder.stewardPolicy(w.circle, proposed, day + 60)
+        val again = w.founder.stewardPolicy(w.circle, proposed, day + 90)
+        assertEquals(StewardSettings(), w.fold(w.founder, w.log + listOf(addBea, first, again)).stewardSettings)
     }
 
     @Test

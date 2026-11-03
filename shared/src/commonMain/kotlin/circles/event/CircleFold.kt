@@ -26,6 +26,8 @@ class CircleView(
     val events: List<OpenedEvent>,
     val rejected: List<RejectedEvent>,
     val market: MarketView,
+    /** The circle's steward settings in force at the end of the log (ADR 0027). */
+    val stewardSettings: StewardSettings = StewardSettings(),
 )
 
 /**
@@ -54,9 +56,10 @@ class CircleFold(
     fun fold(circle: CircleId, log: List<Envelope>): CircleView {
         val state = State(circle)
         val accepted = mutableListOf<Pair<EventId, Envelope>>()
-        for (envelope in log) {
+        for ((index, envelope) in log.withIndex()) {
             val id = envelope.eventId(crypto)
-            val problem = if (envelope.circle != circle) "event belongs to another circle" else state.apply(envelope, id)
+            val problem = if (envelope.circle != circle) "event belongs to another circle" else state.apply(envelope, id, index.toLong())
+            if (problem == null) state.noteActivity(envelope.author, envelope.day, index.toLong())
             if (problem == null) accepted += id to envelope else state.rejected += RejectedEvent(id, envelope.type, problem)
         }
         val opened = accepted.map { (id, envelope) -> OpenedEvent(id, envelope, PayloadSealing.open(cipher, state.keys, envelope)) }
@@ -64,14 +67,29 @@ class CircleFold(
         val refused = opened.filter { it.id in market.rejected }.map { RejectedEvent(it.id, it.envelope.type, market.rejected.getValue(it.id)) }
         return CircleView(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
-            opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view,
+            opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
         )
     }
 
     private inner class State(val circle: CircleId) {
         val devices = mutableMapOf<DeviceId, DeviceState>()
         val stewards = mutableMapOf<MemberId, Int>()
-        val stewardVotes = mutableListOf<Triple<StewardChange, MemberId, StewardVote>>()
+        val stewardVotes = mutableListOf<Triple<StewardChange, String, StewardVote>>()
+        var settings = StewardSettings()
+        private val activityByMember = mutableMapOf<MemberId, MutableList<Pair<Long, Int>>>()
+
+        /** Every event a member authored that the fold accepted, with its position and day (the fallback reads these). */
+        fun noteActivity(member: MemberId, day: Int, position: Long) {
+            activityByMember.getOrPut(member) { mutableListOf() } += position to day
+        }
+
+        val activity = object : StewardActivity {
+            override fun lastEventDayBefore(member: MemberId, position: Long): Int? =
+                activityByMember[member]?.filter { it.first < position }?.maxOfOrNull { it.second }
+
+            override fun hasEventAfter(member: MemberId, position: Long): Boolean =
+                activityByMember[member]?.any { it.first > position } == true
+        }
         val rejected = mutableListOf<RejectedEvent>()
         val invites = mutableMapOf<EventId, Pair<InviteTerms, Int>>()
         var keys: KeyRing = KeyRing.EMPTY
@@ -79,7 +97,7 @@ class CircleFold(
         var created = false
 
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
-        fun apply(e: Envelope, id: EventId): String? {
+        fun apply(e: Envelope, id: EventId, position: Long): String? {
             val type = EventType.fromWire(e.type)
             if (!created) return if (type == EventType.CIRCLE_CREATE) create(e) else "the log must start with circle.create"
             if (type == EventType.CIRCLE_CREATE) return "circle.create after the circle exists"
@@ -91,8 +109,9 @@ class CircleFold(
                 EventType.MEMBER_INVITE -> invite(e, id)
                 EventType.DEVICE_ADD -> deviceAdd(e, sender)
                 EventType.DEVICE_REVOKE -> revoke(e, sender)
-                EventType.STEWARD_ADD -> stewardChange(e, sender, StewardChange.ADD)
-                EventType.STEWARD_REMOVE -> stewardChange(e, sender, StewardChange.REMOVE)
+                EventType.STEWARD_ADD -> stewardChange(e, sender, StewardChange.ADD, position)
+                EventType.STEWARD_REMOVE -> stewardChange(e, sender, StewardChange.REMOVE, position)
+                EventType.STEWARD_POLICY -> stewardPolicyChange(e, sender, position)
                 EventType.KEY_WRAP -> wrap(e, sender)
                 EventType.KEY_ROTATE -> rotate(e, sender)
                 else -> null
@@ -100,10 +119,15 @@ class CircleFold(
         }
 
         private fun create(e: Envelope): String? {
-            val reg = (PublicParts.registration(e.public) as? Parsed.Ok)?.value ?: return "bad registration"
+            val terms = when (val parsed = PublicParts.circleCreate(e.public)) {
+                is Parsed.Ok -> parsed.value
+                is Parsed.Invalid -> return "bad circle.create: ${parsed.reason}"
+            }
+            val reg = terms.registration
             if (reg.member != e.author || reg.device != e.device) return "registration is not the author's"
             if (!e.hasValidSignature(crypto, reg.signPub)) return "bad signature"
             created = true
+            settings = terms.settings
             devices[reg.device] = DeviceState(reg, revoked = false)
             stewards[reg.member] = FOUNDING_STEWARD_DAY
             return null
@@ -150,26 +174,44 @@ class CircleFold(
             return null
         }
 
-        private fun stewardChange(e: Envelope, sender: DeviceRegistration, change: StewardChange): String? {
+        private fun policyNow(): StewardPolicy = stewardPolicy.with(settings)
+
+        private fun stewardChange(e: Envelope, sender: DeviceRegistration, change: StewardChange, position: Long): String? {
             val target = (PublicParts.steward(e.public) as? Parsed.Ok)?.value ?: return "bad steward change"
             if (change == StewardChange.ADD) {
                 if (devices.values.none { it.registration.member == target }) return "member is not in the circle"
                 if (!mayBecomeSteward(target)) return "member has not reached the steward standing tier"
             }
-            val prior = stewardVotes.filter { it.first == change && it.second == target }.map { it.third }
-            return when (val outcome = StewardRules.decide(stewardPolicy, change, target, sender.member, e.day, stewards, prior)) {
+            val prior = stewardVotes.filter { it.first == change && it.second == target.v }.map { it.third }
+            val outcome = StewardRules.decide(policyNow(), change, target, sender.member, e.day, stewards, prior, activity)
+            return applyOutcome(outcome, change, target.v, StewardVote(sender.member, e.day, position)) {
+                if (change == StewardChange.ADD) stewards[target] = e.day else stewards.remove(target)
+            }
+        }
+
+        private fun stewardPolicyChange(e: Envelope, sender: DeviceRegistration, position: Long): String? {
+            val proposed = when (val parsed = PublicParts.stewardSettings(e.public)) {
+                is Parsed.Ok -> parsed.value
+                is Parsed.Invalid -> return "bad steward.policy: ${parsed.reason}"
+            }
+            val prior = stewardVotes.filter { it.first == StewardChange.POLICY && it.second == proposed.subject() }.map { it.third }
+            val outcome = StewardRules.decidePolicy(policyNow(), proposed, sender.member, e.day, stewards, prior)
+            return applyOutcome(outcome, StewardChange.POLICY, proposed.subject(), StewardVote(sender.member, e.day, position)) { settings = proposed }
+        }
+
+        private inline fun applyOutcome(outcome: StewardOutcome, change: StewardChange, subject: String, vote: StewardVote, effect: () -> Unit): String? =
+            when (outcome) {
                 is StewardOutcome.Refused -> outcome.reason
                 StewardOutcome.Pending -> {
-                    stewardVotes += Triple(change, target, StewardVote(sender.member, e.day))
+                    stewardVotes += Triple(change, subject, vote)
                     null
                 }
                 StewardOutcome.Effective -> {
-                    if (change == StewardChange.ADD) stewards[target] = e.day else stewards.remove(target)
-                    stewardVotes.removeAll { it.second == target }
+                    effect()
+                    stewardVotes.removeAll { it.second == subject }
                     null
                 }
             }
-        }
 
         private fun wrap(e: Envelope, sender: DeviceRegistration): String? {
             val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad key.wrap"

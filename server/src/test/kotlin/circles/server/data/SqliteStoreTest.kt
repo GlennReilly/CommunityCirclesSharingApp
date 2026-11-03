@@ -29,7 +29,7 @@ class SqliteStoreTest {
         val circle = circles.policy.CircleId("aa".repeat(16))
         assertFailsWith<IllegalStateException> {
             store.transaction { tx ->
-                tx.apply(circles.server.domain.Effect.CreateCircle(circle, 1), 1)
+                tx.apply(circles.server.domain.Effect.CreateCircle(circle, 1, circles.event.StewardSettings()), 1)
                 error("boom")
             }
         }
@@ -39,7 +39,7 @@ class SqliteStoreTest {
     @Test
     fun committedWorkIsVisibleToTheNextTransaction() {
         val circle = circles.policy.CircleId("bb".repeat(16))
-        store.transaction { it.apply(circles.server.domain.Effect.CreateCircle(circle, 1), 1) }
+        store.transaction { it.apply(circles.server.domain.Effect.CreateCircle(circle, 1, circles.event.StewardSettings()), 1) }
         assertEquals(true, store.transaction { it.circleExists(circle) })
     }
 }

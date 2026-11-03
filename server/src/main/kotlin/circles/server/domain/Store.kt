@@ -6,6 +6,7 @@ import circles.event.DeviceId
 import circles.event.Envelope
 import circles.event.EventId
 import circles.event.StewardChange
+import circles.event.StewardSettings
 import circles.event.StewardVote
 import circles.policy.CircleId
 import circles.policy.MemberId
@@ -25,8 +26,17 @@ interface Directory {
     /** Current stewards and the day each became one (ADR 0023). */
     fun stewardsWithDays(circle: CircleId): Map<MemberId, Int>
 
-    /** Pending `steward.add` or `steward.remove` events for [target], as recorded by [Effect.RecordStewardVote]. */
-    fun stewardVotes(circle: CircleId, change: StewardChange, target: MemberId): List<StewardVote>
+    /** Pending steward events for [subject], as recorded by [Effect.RecordStewardVote], with their `serverSeq` as position. */
+    fun stewardVotes(circle: CircleId, change: StewardChange, subject: String): List<StewardVote>
+
+    /** The circle's steward settings (ADR 0027); the defaults if the circle is unknown. */
+    fun stewardSettings(circle: CircleId): StewardSettings
+
+    /** The day of the latest event [member] authored in the circle before `serverSeq` [position], or null. */
+    fun lastEventDayBefore(circle: CircleId, member: MemberId, position: Long): Int?
+
+    /** True if [member] authored any event in the circle after `serverSeq` [position]. */
+    fun hasEventAfter(circle: CircleId, member: MemberId, position: Long): Boolean
 
     /** The newest `serverSeq` of the circle, or 0 if it has no events. */
     fun latestSeq(circle: CircleId): Long

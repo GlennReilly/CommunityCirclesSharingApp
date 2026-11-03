@@ -6,6 +6,7 @@ import circles.event.DeviceRegistration
 import circles.event.EventId
 import circles.event.InviteTerms
 import circles.event.StewardChange
+import circles.event.StewardSettings
 import circles.policy.CircleId
 import circles.policy.MemberId
 
@@ -29,7 +30,7 @@ data class SessionRecord(val device: DeviceId, val expiresAtMillis: Long)
 
 /** What the server learns from an accepted event and must remember (spec 3.1, 4.2). */
 sealed interface Effect {
-    data class CreateCircle(val circle: CircleId, val day: Int) : Effect
+    data class CreateCircle(val circle: CircleId, val day: Int, val settings: StewardSettings) : Effect
 
     data class RegisterDevice(val circle: CircleId, val registration: DeviceRegistration) : Effect
 
@@ -39,10 +40,13 @@ sealed interface Effect {
 
     data class UseInvite(val circle: CircleId, val id: EventId) : Effect
 
-    data class RecordStewardVote(val circle: CircleId, val change: StewardChange, val target: MemberId, val voter: MemberId, val day: Int) : Effect
+    /** [subject] is a member id for add and remove, or [StewardSettings.subject] for a policy change. */
+    data class RecordStewardVote(val circle: CircleId, val change: StewardChange, val subject: String, val voter: MemberId, val day: Int) : Effect
 
     /** Forget pending votes about [target] once a change has taken effect. */
-    data class ClearStewardVotes(val circle: CircleId, val target: MemberId) : Effect
+    data class ClearStewardVotes(val circle: CircleId, val subject: String) : Effect
+
+    data class SetStewardSettings(val circle: CircleId, val settings: StewardSettings) : Effect
 
     data class RemoveSteward(val circle: CircleId, val member: MemberId) : Effect
 

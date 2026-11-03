@@ -50,8 +50,9 @@ class EventAuthor(
 ) {
     private var nextCounter = firstCounter
 
-    fun circleCreate(circle: CircleId, day: Int): Envelope =
-        build(circle, EventType.CIRCLE_CREATE, day, identity.registration.toPublic(), CborMap.EMPTY)
+    /** Creates the circle; [settings] are the steward settings of ADR 0027, left out (so the defaults apply) when null. */
+    fun circleCreate(circle: CircleId, day: Int, settings: StewardSettings? = null): Envelope =
+        build(circle, EventType.CIRCLE_CREATE, day, PublicParts.circleCreatePublic(identity.registration, settings), CborMap.EMPTY)
 
     fun invite(circle: CircleId, key: InviteKey, expiresDay: Int, maxUses: Int, day: Int, note: String? = null): Envelope =
         build(circle, EventType.MEMBER_INVITE, day, InviteTerms(key.keys.publicKey, expiresDay, maxUses).toPublic(), textPayload(PublicParts.NOTE, note))
@@ -133,6 +134,10 @@ class EventAuthor(
 
     fun stewardAdd(circle: CircleId, member: MemberId, day: Int, note: String? = null): Envelope =
         build(circle, EventType.STEWARD_ADD, day, PublicParts.stewardPublic(member), textPayload(PublicParts.NOTE, note))
+
+    /** Proposes new steward settings (quorum and the two fallback times); takes effect when the quorum of stewards agree. */
+    fun stewardPolicy(circle: CircleId, settings: StewardSettings, day: Int, note: String? = null): Envelope =
+        build(circle, EventType.STEWARD_POLICY, day, PublicParts.stewardSettingsPublic(settings), textPayload(PublicParts.NOTE, note))
 
     fun stewardRemove(circle: CircleId, member: MemberId, day: Int, note: String? = null): Envelope =
         build(circle, EventType.STEWARD_REMOVE, day, PublicParts.stewardPublic(member), textPayload(PublicParts.NOTE, note))

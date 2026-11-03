@@ -9,6 +9,7 @@ import circles.event.EnvelopeDto
 import circles.event.EventId
 import circles.event.InviteTerms
 import circles.event.StewardChange
+import circles.event.StewardSettings
 import circles.event.StewardVote
 import circles.policy.CircleId
 import circles.policy.MemberId
@@ -125,12 +126,31 @@ class SqliteStore(private val connection: Connection) : Store {
                 buildMap { while (rows.next()) put(MemberId(rows.getString(1)), rows.getInt(2)) }
             }
 
-        override fun stewardVotes(circle: CircleId, change: StewardChange, target: MemberId): List<StewardVote> =
-            query("SELECT voter, day FROM steward_votes WHERE circle_id = ? AND kind = ? AND target = ?", {
+        override fun stewardVotes(circle: CircleId, change: StewardChange, subject: String): List<StewardVote> =
+            query("SELECT voter, day, server_seq FROM steward_votes WHERE circle_id = ? AND kind = ? AND target = ?", {
                 it.setString(1, circle.v)
                 it.setString(2, change.name)
-                it.setString(3, target.v)
-            }) { rows -> buildList { while (rows.next()) add(StewardVote(MemberId(rows.getString(1)), rows.getInt(2))) } }
+                it.setString(3, subject)
+            }) { rows -> buildList { while (rows.next()) add(StewardVote(MemberId(rows.getString(1)), rows.getInt(2), rows.getLong(3))) } }
+
+        override fun stewardSettings(circle: CircleId): StewardSettings =
+            query("SELECT steward_quorum, steward_inactive_days, steward_fallback_delay_days FROM circles WHERE id = ?", { it.setString(1, circle.v) }) { rows ->
+                if (rows.next()) StewardSettings(rows.getInt(1), rows.getInt(2), rows.getInt(3)) else StewardSettings()
+            }
+
+        override fun lastEventDayBefore(circle: CircleId, member: MemberId, position: Long): Int? =
+            query("SELECT MAX(day) FROM events WHERE circle_id = ? AND author = ? AND server_seq < ?", {
+                it.setString(1, circle.v)
+                it.setString(2, member.v)
+                it.setLong(3, position)
+            }) { rows -> if (rows.next()) rows.getInt(1).takeUnless { rows.wasNull() } else null }
+
+        override fun hasEventAfter(circle: CircleId, member: MemberId, position: Long): Boolean =
+            query("SELECT 1 FROM events WHERE circle_id = ? AND author = ? AND server_seq > ? LIMIT 1", {
+                it.setString(1, circle.v)
+                it.setString(2, member.v)
+                it.setLong(3, position)
+            }) { it.next() }
 
         override fun latestSeq(circle: CircleId): Long =
             query("SELECT COALESCE(MAX(server_seq), 0) FROM events WHERE circle_id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getLong(1) else 0L }
@@ -206,9 +226,18 @@ class SqliteStore(private val connection: Connection) : Store {
 
         override fun apply(effect: Effect, serverSeq: Long) {
             when (effect) {
-                is Effect.CreateCircle -> update("INSERT INTO circles (id, created_day) VALUES (?, ?)") {
+                is Effect.CreateCircle -> update("INSERT INTO circles (id, created_day, steward_quorum, steward_inactive_days, steward_fallback_delay_days) VALUES (?, ?, ?, ?, ?)") {
                     it.setString(1, effect.circle.v)
                     it.setInt(2, effect.day)
+                    it.setInt(3, effect.settings.quorum)
+                    it.setInt(4, effect.settings.inactiveDays)
+                    it.setInt(5, effect.settings.fallbackDelayDays)
+                }
+                is Effect.SetStewardSettings -> update("UPDATE circles SET steward_quorum = ?, steward_inactive_days = ?, steward_fallback_delay_days = ? WHERE id = ?") {
+                    it.setInt(1, effect.settings.quorum)
+                    it.setInt(2, effect.settings.inactiveDays)
+                    it.setInt(3, effect.settings.fallbackDelayDays)
+                    it.setString(4, effect.circle.v)
                 }
                 is Effect.RegisterDevice -> registerDevice(effect.circle, effect.registration, serverSeq)
                 is Effect.AddSteward -> update("INSERT INTO stewards (circle_id, member_id, added_seq, added_day) VALUES (?, ?, ?, ?) ON CONFLICT (circle_id, member_id) DO UPDATE SET added_seq = excluded.added_seq, added_day = excluded.added_day, removed_seq = NULL") {
@@ -221,13 +250,13 @@ class SqliteStore(private val connection: Connection) : Store {
                     it.setString(1, effect.circle.v)
                     it.setLong(2, serverSeq)
                     it.setString(3, effect.change.name)
-                    it.setString(4, effect.target.v)
+                    it.setString(4, effect.subject)
                     it.setString(5, effect.voter.v)
                     it.setInt(6, effect.day)
                 }
                 is Effect.ClearStewardVotes -> update("DELETE FROM steward_votes WHERE circle_id = ? AND target = ?") {
                     it.setString(1, effect.circle.v)
-                    it.setString(2, effect.target.v)
+                    it.setString(2, effect.subject)
                 }
                 is Effect.RecordInvite -> update("INSERT INTO invites (circle_id, event_id, author, invite_pub, expires_day, max_uses) VALUES (?, ?, ?, ?, ?, ?)") {
                     it.setString(1, effect.circle.v)
