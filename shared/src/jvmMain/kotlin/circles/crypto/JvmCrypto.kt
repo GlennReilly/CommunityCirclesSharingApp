@@ -28,6 +28,12 @@ class JvmCrypto(private val random: SecureRandom = SecureRandom()) : Crypto {
         return SigningKeyPair(ByteString.of(seed), ByteString.of(publicKey))
     }
 
+    override fun signingKeyPairFromSeed(seed: ByteString): SigningKeyPair {
+        require(seed.size == ED25519_KEY_BYTES) { "Ed25519 seed must be $ED25519_KEY_BYTES bytes" }
+        val publicKey = org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(seed.toByteArray(), 0).generatePublicKey().encoded
+        return SigningKeyPair(seed, ByteString.of(publicKey))
+    }
+
     override fun sign(secretSeed: ByteString, message: ByteArray): ByteString {
         require(secretSeed.size == ED25519_KEY_BYTES) { "Ed25519 seed must be $ED25519_KEY_BYTES bytes" }
         val key = KeyFactory.getInstance(ED25519).generatePrivate(PKCS8EncodedKeySpec(PKCS8_PREFIX + secretSeed.toByteArray()))

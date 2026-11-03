@@ -38,6 +38,11 @@ class JsCrypto : Crypto {
         return SigningKeyPair(seed.toByteString(), ed25519.getPublicKey(seed).toByteString())
     }
 
+    override fun signingKeyPairFromSeed(seed: ByteString): SigningKeyPair {
+        require(seed.size == ED25519_KEY_BYTES) { "Ed25519 seed must be $ED25519_KEY_BYTES bytes" }
+        return SigningKeyPair(seed, ed25519.getPublicKey(seed.toUint8Array()).toByteString())
+    }
+
     override fun sign(secretSeed: ByteString, message: ByteArray): ByteString {
         require(secretSeed.size == ED25519_KEY_BYTES) { "Ed25519 seed must be $ED25519_KEY_BYTES bytes" }
         return ed25519.sign(message.toUint8Array(), secretSeed.toUint8Array()).toByteString()
@@ -96,6 +101,11 @@ class JsCipher : Cipher {
     override fun generateBoxKeyPair(): BoxKeyPair {
         val secret = nobleRandomBytes(X25519_KEY_BYTES)
         return BoxKeyPair(secret.toByteString(), x25519.getPublicKey(secret).toByteString())
+    }
+
+    override fun boxKeyPairFromSecret(secret: ByteString): BoxKeyPair {
+        require(secret.size == X25519_KEY_BYTES) { "secret key must be $X25519_KEY_BYTES bytes" }
+        return BoxKeyPair(secret, x25519.getPublicKey(secret.toUint8Array()).toByteString())
     }
 
     override fun sealBox(recipientPublicKey: ByteString, plaintext: ByteArray): ByteString {

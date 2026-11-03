@@ -30,6 +30,9 @@ interface Cipher {
 
     fun generateBoxKeyPair(): BoxKeyPair
 
+    /** The key pair whose X25519 secret key is [secret] (32 bytes); the same secret always gives the same pair. */
+    fun boxKeyPairFromSecret(secret: ByteString): BoxKeyPair
+
     /** `crypto_box_seal` to [recipientPublicKey]; the result is the plaintext plus [SEALED_BOX_OVERHEAD_BYTES]. */
     fun sealBox(recipientPublicKey: ByteString, plaintext: ByteArray): ByteString
 

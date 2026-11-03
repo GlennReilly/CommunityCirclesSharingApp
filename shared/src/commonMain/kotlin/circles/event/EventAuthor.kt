@@ -21,15 +21,22 @@ class DeviceIdentity(
     val boxPub: ByteString,
     /** The X25519 secret key behind [boxPub]; it never leaves the device. */
     val boxSecret: ByteString,
+    /** The seed both secrets were derived from (ADR 0039), or null for an identity built from loose keys. */
+    val seed: ByteString? = null,
 ) {
     val registration: DeviceRegistration get() = DeviceRegistration(member, device, signing.publicKey, boxPub)
 
     val boxKeys: BoxKeyPair get() = BoxKeyPair(boxSecret, boxPub)
 
     companion object {
-        fun generate(crypto: Crypto, cipher: Cipher, member: MemberId = newMemberId(crypto)): DeviceIdentity {
-            val box = cipher.generateBoxKeyPair()
-            return DeviceIdentity(member, newDeviceId(crypto), crypto.generateSigningKeyPair(), box.publicKey, box.secretKey)
+        /** A new device: a fresh random seed and fresh ids. */
+        fun generate(crypto: Crypto, cipher: Cipher, member: MemberId = newMemberId(crypto)): DeviceIdentity =
+            fromSeed(crypto, cipher, DeviceSeed.newSeed(crypto), member, newDeviceId(crypto))
+
+        /** The identity for [seed]: the same seed always gives the same keys, which is what a recovery restores (ADR 0039). */
+        fun fromSeed(crypto: Crypto, cipher: Cipher, seed: ByteString, member: MemberId, device: DeviceId): DeviceIdentity {
+            val box = DeviceSeed.boxKeyPair(crypto, cipher, seed)
+            return DeviceIdentity(member, device, DeviceSeed.signingKeyPair(crypto, seed), box.publicKey, box.secretKey, seed)
         }
     }
 }

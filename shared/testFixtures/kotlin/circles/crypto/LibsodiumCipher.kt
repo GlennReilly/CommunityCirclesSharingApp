@@ -33,6 +33,13 @@ class LibsodiumCipher : Cipher {
         return if (ok) DecryptResult.Success(out) else DecryptResult.Failure
     }
 
+    override fun boxKeyPairFromSecret(secret: ByteString): BoxKeyPair {
+        require(secret.size == BOX_KEY_BYTES) { "secret key must be $BOX_KEY_BYTES bytes" }
+        val pk = ByteArray(BOX_KEY_BYTES)
+        check(sodium.cryptoScalarMultBase(pk, secret.toByteArray())) { "public key derivation failed" }
+        return BoxKeyPair(secret, ByteString.of(pk))
+    }
+
     override fun generateBoxKeyPair(): BoxKeyPair {
         val pk = ByteArray(BOX_KEY_BYTES)
         val sk = ByteArray(BOX_KEY_BYTES)

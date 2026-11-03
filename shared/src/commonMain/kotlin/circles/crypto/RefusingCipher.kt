@@ -13,6 +13,8 @@ object RefusingCipher : Cipher {
 
     override fun generateBoxKeyPair(): BoxKeyPair = refuse()
 
+    override fun boxKeyPairFromSecret(secret: ByteString): BoxKeyPair = refuse()
+
     override fun sealBox(recipientPublicKey: ByteString, plaintext: ByteArray): ByteString = refuse()
 
     override fun openSealedBox(recipient: BoxKeyPair, sealed: ByteString): DecryptResult = DecryptResult.Failure

@@ -16,6 +16,9 @@ class SigningKeyPair(val secretSeed: ByteString, val publicKey: ByteString)
 interface Crypto {
     fun generateSigningKeyPair(): SigningKeyPair
 
+    /** The key pair whose secret seed is [seed] (32 bytes); the same seed always gives the same pair. */
+    fun signingKeyPairFromSeed(seed: ByteString): SigningKeyPair
+
     fun sign(secretSeed: ByteString, message: ByteArray): ByteString
 
     /** False for a wrong signature, a malformed key or a wrong length; it never throws for bad input. */
