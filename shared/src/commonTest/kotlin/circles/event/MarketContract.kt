@@ -673,4 +673,97 @@ abstract class MarketContract {
         val lender = w.foldAs(w.founder, w.log + listOf(w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan), w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK), toBorrower))
         assertEquals(listOf("keyWraps must go to the owner's own devices or to borrowers with an open loan"), lender.rejected.map { it.reason })
     }
+
+    // ---- pauses (ADR 0050) ----
+
+    /** Three stewards (so three trusted reviewers) and an ordinary member, dave, who is the usual subject. */
+    private fun World.pauseCircle(): EventAuthor {
+        start(StewardSettings(quorum = 1))
+        log += founder.stewardAdd(circle, bea.identity.member, DAY)
+        log += founder.stewardAdd(circle, carol.identity.member, DAY)
+        val dave = person().also { it.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, circleKey) }
+        val invite = InviteKey(crypto.generateSigningKeyPair())
+        val event = founder.invite(circle, invite, DAY + 30, 1, DAY)
+        log += event
+        log += dave.join(circle, event.eventId(crypto), invite, DAY)
+        log += founder.keyWrap(circle, dave.identity.registration, FIRST_EPOCH, circleKey, DAY)
+        return dave
+    }
+
+    private fun CircleView.pause(id: PauseId): PauseState = market.pauses.single { it.pause == id }
+
+    @Test
+    fun twoReviewersPlaceAPauseThatEndsOnItsOwnAndEssentialsStayOpen() = runTest {
+        val w = World(newCrypto(), newCipher())
+        val dave = w.pauseCircle()
+        val id = newPauseId(w.crypto)
+        w.log += w.founder.pausePropose(w.circle, DAY, id, dave.identity.member, "keeps keeping things", 30)
+        var view = w.foldAs(dave)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(PauseStatus.PROPOSED, view.pause(id).statusOn(DAY))
+        assertEquals(2, view.pause(id).needed, "three reviewers can be asked, two are needed")
+        assertEquals(emptyList(), view.market.livePausesOn(w.circle, DAY))
+        w.log += w.bea.pauseReview(w.circle, DAY + 1, id, true)
+        view = w.foldAs(dave)
+        assertEquals(PauseStatus.LIVE, view.pause(id).statusOn(DAY + 1))
+        assertEquals(DAY + 31, view.pause(id).untilDay)
+        assertEquals(1, view.market.livePausesOn(w.circle, DAY + 5).size)
+        assertEquals(PauseStatus.ENDED, view.pause(id).statusOn(DAY + 31))
+        assertEquals(emptyList(), view.market.livePausesOn(w.circle, DAY + 31))
+        // The access rule reads it: an everyday item is paused, an essential one is not.
+        val everyday = w.share(w.founder, ItemClass.EVERYDAY)
+        val essential = w.share(w.founder, ItemClass.ESSENTIAL)
+        val request = w.requestOf(dave, essential.first, DAY + 2)
+        val view2 = w.foldAs(dave, w.log + request)
+        assertEquals(emptyList(), view2.rejected, "essentials stay open during a pause")
+        assertTrue(everyday.first != essential.first)
+    }
+
+    @Test
+    fun theRulesForProposingReviewingAndLifting() = runTest {
+        val w = World(newCrypto(), newCipher())
+        val dave = w.pauseCircle()
+        val id = newPauseId(w.crypto)
+        val proposal = w.founder.pausePropose(w.circle, DAY, id, dave.identity.member, "a reason", 30)
+        w.log += proposal
+        fun rejected(vararg extra: Envelope) = w.foldAs(w.founder, w.log + extra.toList()).rejected.map { it.reason }
+        assertEquals(listOf("a member cannot propose pausing themselves"), rejected(w.bea.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.bea.identity.member, "x", 5)))
+        assertEquals(listOf("a steward is not paused: the steward rules apply"), rejected(w.bea.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.carol.identity.member, "x", 5)))
+        assertEquals(listOf("only a trusted member or above may propose a pause"), rejected(dave.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.bea.identity.member, "x", 5)).let { it.take(1) })
+        assertEquals(listOf("that member already has a pause or a proposal"), rejected(w.carol.pausePropose(w.circle, DAY, newPauseId(w.crypto), dave.identity.member, "again", 5)))
+        assertEquals(listOf("the subject cannot review their own pause"), rejected(dave.pauseReview(w.circle, DAY, id, true)))
+        assertEquals(listOf("unknown pause"), rejected(w.bea.pauseReview(w.circle, DAY, newPauseId(w.crypto), true)))
+        assertEquals(listOf("the pause is over"), rejected(w.bea.pauseReview(w.circle, DAY + PAUSE_PROPOSAL_WINDOW_DAYS + 1, id, true)), "a proposal lapses")
+        // Lifting: not by a bystander, not by a reviewer before any appeal; the proposer may cancel before it takes effect.
+        val notAllowed = "only a reviewer after an appeal, another steward, or the proposer before it takes effect may lift a pause"
+        assertEquals(listOf(notAllowed), rejected(dave.pauseLift(w.circle, DAY, id)))
+        assertEquals(emptyList(), rejected(w.founder.pauseLift(w.circle, DAY, id)))
+        // Reviews take effect, then a reviewer withdraws below the number needed and it ends.
+        w.log += w.bea.pauseReview(w.circle, DAY, id, true)
+        assertEquals(PauseStatus.LIVE, w.foldAs(dave).pause(id).statusOn(DAY))
+        assertEquals(listOf("the pause is already in force"), rejected(w.carol.pauseReview(w.circle, DAY, id, true)))
+        assertEquals(listOf("the pause is already in force"), rejected(w.carol.pauseReview(w.circle, DAY, id, false)))
+        val withdrawn = w.foldAs(dave, w.log + w.bea.pauseReview(w.circle, DAY + 2, id, false))
+        assertEquals(PauseStatus.LIFTED, withdrawn.pause(id).statusOn(DAY + 3))
+        assertEquals(emptyList(), withdrawn.market.livePausesOn(w.circle, DAY + 3))
+        // The subject appeals once; afterwards a reviewer may lift; a steward who is not the proposer always may.
+        assertEquals(listOf("only the subject may appeal"), rejected(w.bea.pauseAppeal(w.circle, DAY, id, "no")))
+        w.log += dave.pauseAppeal(w.circle, DAY + 1, id, "it was the weather")
+        assertEquals(listOf("the subject has already appealed"), rejected(dave.pauseAppeal(w.circle, DAY + 1, id, "again")))
+        assertEquals("it was the weather", w.foldAs(dave).pause(id).appealNote)
+        assertEquals(false, w.foldAs(dave).market.livePausesOn(w.circle, DAY + 1).single().appealOpen)
+        assertEquals(PauseStatus.LIFTED, w.foldAs(dave, w.log + w.bea.pauseLift(w.circle, DAY + 2, id)).pause(id).statusOn(DAY + 2))
+        assertEquals(PauseStatus.LIFTED, w.foldAs(dave, w.log + w.carol.pauseLift(w.circle, DAY + 2, id)).pause(id).statusOn(DAY + 2))
+    }
+
+    @Test
+    fun aCircleWithTooFewTrustedMembersCannotPauseAnyone() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1)) // only the founder is a steward, bea and carol are newcomers
+        val id = newPauseId(w.crypto)
+        assertEquals(
+            listOf("the circle has too few trusted members to review a pause"),
+            w.reasons(listOf(w.founder.pausePropose(w.circle, DAY, id, w.bea.identity.member, "x", 5))),
+        )
+    }
 }

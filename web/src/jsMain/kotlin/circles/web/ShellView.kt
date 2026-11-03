@@ -3,6 +3,13 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MIN_RECOVERY_THRESHOLD
+import circles.app.PauseRole
+import circles.app.PauseSummary
+import circles.event.MAX_PAUSE_APPEAL_CHARS
+import circles.event.MAX_PAUSE_DAYS
+import circles.event.MAX_PAUSE_REASON_CHARS
+import circles.event.MIN_PAUSE_DAYS
+import circles.event.PauseStatus
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
 import circles.app.DeviceLink
@@ -107,6 +114,17 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_PAUSE_REVIEW = "pause-review"
+const val ACTION_PAUSE_LIFT = "pause-lift"
+const val ATTR_PAUSE = "data-pause"
+const val ATTR_AGREE = "data-agree"
+const val FORM_PAUSE_PROPOSE = "pause-propose-form"
+const val FORM_PAUSE_APPEAL = "pause-appeal-form"
+const val FIELD_PAUSE_SUBJECT = "pause-subject"
+const val FIELD_PAUSE_REASON = "pause-reason"
+const val FIELD_PAUSE_DAYS = "pause-days"
+const val FIELD_PAUSE_NOTE = "pause-note"
+const val DEFAULT_PAUSE_FORM_DAYS = 30
 const val ACTION_EXPORT = "export-circle"
 const val FORM_MAKE_SHARES = "make-shares-form"
 const val FORM_REBUILD_KEY = "rebuild-key-form"
@@ -235,7 +253,8 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home, state)
                 Screen.RecoveryCode -> recoveryCodePage(state)
-                Screen.Standing -> standing(model.home.standing)
+                Screen.Standing -> standing(model.home.standing, model.home)
+                Screen.Pauses -> pausesPage(model.home)
                 Screen.Stewards -> stewards(model.home)
                 Screen.RecoveryShares -> recoverySharesPage(model.home, state)
                 Screen.Items -> items(model.home)
@@ -400,6 +419,13 @@ private fun FlowContent.home(home: HomeData) {
             li {
                 a(href = Screen.Borrow.fragment) { +(if (toAnswer == 1) "1 request waiting for your answer" else "$toAnswer requests waiting for your answer") }
             }
+        }
+        home.pauses.firstOrNull { it.role == PauseRole.SUBJECT }?.let {
+            li { a(href = Screen.Pauses.fragment) { +(if (it.status == PauseStatus.LIVE) "Your access is paused" else "A pause has been proposed for you") } }
+        }
+        val toReview = home.pauses.count { it.canReview }
+        if (toReview > 0) {
+            li { a(href = Screen.Pauses.fragment) { +(if (toReview == 1) "1 pause proposal waiting for your answer" else "$toReview pause proposals waiting for your answer") } }
         }
         if (home.isSteward && home.waiting.isNotEmpty()) {
             li {
@@ -991,7 +1017,7 @@ private fun tierLabel(tier: Tier): String = when (tier) {
 }
 
 /** Only your own standing, in plain words with the reasons; nobody else's tier or points are ever shown (spec 6). */
-private fun FlowContent.standing(standing: StandingSummary?) {
+private fun FlowContent.standing(standing: StandingSummary?, home: HomeData? = null) {
     h1 { +Screen.Standing.title }
     if (standing == null) {
         p { +"Your standing appears once the circle has been read." }
@@ -1007,6 +1033,9 @@ private fun FlowContent.standing(standing: StandingSummary?) {
     section {
         h2 { +"How to unlock more" }
         ul { for (step in standing.howToUnlock) li { +step } }
+    }
+    if (home != null && (home.canProposePause || home.pauses.isNotEmpty())) {
+        p { a(href = Screen.Pauses.fragment) { +"Pauses" } }
     }
 }
 
@@ -1474,4 +1503,113 @@ private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
         }
     }
     a(href = Screen.Stewards.fragment) { +"Back to stewards" }
+}
+
+/** Pauses (ADR 0050): what the subject sees, what reviewers may do, and the form to propose one. */
+private fun FlowContent.pausesPage(home: HomeData) {
+    h1 { +Screen.Pauses.title }
+    p { +"A pause is a last resort. While one is in force, that member cannot ask to borrow anything except essentials. Loans already agreed carry on. A pause ends on its date, or sooner if it is lifted." }
+    if (home.pauses.isEmpty()) p { +"No pauses are proposed or in force that you can see." }
+    for (pause in home.pauses) {
+        section {
+            if (pause.role == PauseRole.SUBJECT) {
+                h2 { +(if (pause.status == PauseStatus.LIVE) "Your access is paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "A pause has been proposed for you") }
+                p { +"Reason given: ${pause.reason}" }
+                p { +"Essentials stay open to you. ${pause.agreeing} of ${pause.needed} reviewers have agreed." }
+                if (pause.reviewers.isNotEmpty()) p { +"Agreed so far: ${pause.reviewers.joinToString(", ") { "member ${it.v.take(MEMBER_SHORT_CHARS)}" }}" }
+                if (pause.appeal != null) p { +"Your appeal: ${pause.appeal}" }
+                if (pause.canAppeal) {
+                    p { +"You can write one note to the reviewers. Any of them may then lift the pause." }
+                    form {
+                        id = FORM_PAUSE_APPEAL
+                        attributes[ATTR_PAUSE] = pause.pause.v
+                        label {
+                            attributes["for"] = FIELD_PAUSE_NOTE
+                            +"Your note: "
+                        }
+                        textArea {
+                            id = FIELD_PAUSE_NOTE
+                            name = FIELD_PAUSE_NOTE
+                            required = true
+                            attributes[ATTR_MIN] = "1"
+                            attributes["maxlength"] = MAX_PAUSE_APPEAL_CHARS.toString()
+                        }
+                        formSubmit("Send my appeal")
+                    }
+                }
+            } else {
+                h2 { +"Member ${pause.subject.v.take(MEMBER_SHORT_CHARS)}: ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}" }
+                p { +"Reason: ${pause.reason}" }
+                p { +"${pause.agreeing} of ${pause.needed} reviewers have agreed." }
+                if (pause.appeal != null) p { +"The member's appeal: ${pause.appeal}" }
+                if (pause.iAgree == true) p { +"You agreed." } else if (pause.iAgree == false) p { +"You did not agree." }
+                if (pause.canReview) {
+                    pauseButton(ACTION_PAUSE_REVIEW, pause, "Agree to the pause", agree = true)
+                    pauseButton(ACTION_PAUSE_REVIEW, pause, "Do not agree", agree = false)
+                }
+                if (pause.canStepBack) pauseButton(ACTION_PAUSE_REVIEW, pause, "Step back from this pause", agree = false)
+                if (pause.canLift) {
+                    details {
+                        summary { +(if (pause.status == PauseStatus.LIVE) "Lift this pause" else "Cancel this proposal") }
+                        p { +"Their access to everything opens again at once." }
+                        pauseButton(ACTION_PAUSE_LIFT, pause, if (pause.status == PauseStatus.LIVE) "Lift the pause" else "Cancel the proposal", agree = null)
+                    }
+                }
+            }
+        }
+    }
+    if (home.canProposePause && home.pauseCandidates.isNotEmpty()) {
+        section {
+            h2 { +"Propose a pause" }
+            p { +"You count as the first reviewer. It takes effect when enough other trusted members agree within 14 days, and the member is told at once." }
+            form {
+                id = FORM_PAUSE_PROPOSE
+                label {
+                    attributes["for"] = FIELD_PAUSE_SUBJECT
+                    +"Member: "
+                }
+                select {
+                    id = FIELD_PAUSE_SUBJECT
+                    name = FIELD_PAUSE_SUBJECT
+                    for (member in home.pauseCandidates) option {
+                        value = member.v
+                        +"Member ${member.v.take(MEMBER_SHORT_CHARS)}"
+                    }
+                }
+                label {
+                    attributes["for"] = FIELD_PAUSE_REASON
+                    +"Reason: "
+                }
+                textArea {
+                    id = FIELD_PAUSE_REASON
+                    name = FIELD_PAUSE_REASON
+                    required = true
+                    attributes[ATTR_MIN] = "1"
+                    attributes["maxlength"] = MAX_PAUSE_REASON_CHARS.toString()
+                }
+                label {
+                    attributes["for"] = FIELD_PAUSE_DAYS
+                    +"Days: "
+                }
+                input(type = InputType.number, name = FIELD_PAUSE_DAYS) {
+                    id = FIELD_PAUSE_DAYS
+                    required = true
+                    value = DEFAULT_PAUSE_FORM_DAYS.toString()
+                    attributes["min"] = MIN_PAUSE_DAYS.toString()
+                    attributes["max"] = MAX_PAUSE_DAYS.toString()
+                    attributes[ATTR_MIN] = "1"
+                }
+                formSubmit("Propose the pause")
+            }
+        }
+    }
+}
+
+private fun FlowContent.pauseButton(action: String, pause: PauseSummary, text: String, agree: Boolean?) {
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = action
+        attributes[ATTR_PAUSE] = pause.pause.v
+        if (agree != null) attributes[ATTR_AGREE] = agree.toString()
+        +text
+    }
 }

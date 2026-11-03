@@ -253,6 +253,11 @@ try {
   if (!(exportSize > 500) || exportType !== 'application/zip') throw new Error('bad export ' + exportSize + ' ' + exportType); ok('bea downloaded a zip export of the circle (' + exportSize + ' bytes)');
   await checkAccessibility(bea, 'settings with export');
 
+  // Pauses (ADR 0050): nobody is paused; the page explains what a pause is, and passes the accessibility check.
+  await alice.evaluate('location.hash = "#/pauses"'); await until(alice, has(alice, 'No pauses are proposed or in force that you can see.'), 'pauses page');
+  if (!(await alice.evaluate(has(alice, 'except essentials')))) throw new Error('the pause page does not say essentials stay open'); ok('the pauses page explains that essentials stay open');
+  await checkAccessibility(alice, 'pauses');
+
   // Recovery shares (ADR 0048): two stewards, so alice splits the key 2 of 2; each steward can show a share code; no rebuild form while the key is held.
   await alice.evaluate('location.hash = "#/stewards/recovery-shares"'); await until(alice, has(alice, 'Make the shares'), 'shares page');
   await checkAccessibility(alice, 'recovery shares');

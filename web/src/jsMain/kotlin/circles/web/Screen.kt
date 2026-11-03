@@ -17,6 +17,7 @@ enum class Screen(val path: String, val title: String) {
     Borrow("borrow", "Borrow"),
     RequestLoan("borrow/request", "Ask to borrow"),
     Standing("standing", "My standing"),
+    Pauses("pauses", "Pauses"),
     Members("members", "Members"),
     Stewards("stewards", "Stewards"),
     RecoveryShares("stewards/recovery-shares", "Recovery shares of the circle key"),
@@ -36,7 +37,7 @@ enum class Screen(val path: String, val title: String) {
         val beforeSignIn: Set<Screen> = newcomer + SignIn
 
         /** Pages reached from another page, not from the navigation bar. */
-        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares)
+        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares, Pauses)
 
         /** Screens shown in the navigation bar once signed in. */
         val navigation: List<Screen> = entries.filter { it !in beforeSignIn && it !in subPages }

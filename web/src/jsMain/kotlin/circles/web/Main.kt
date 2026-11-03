@@ -20,6 +20,8 @@ import circles.policy.ItemId
 import circles.app.LeaveResult
 import circles.app.MAX_DEVICE_NAME_CHARS
 import circles.app.ExportResult
+import circles.event.PauseId
+import circles.app.PauseResult
 import circles.app.RebuildResult
 import circles.app.RecoveryCodeResult
 import circles.app.ShareMakingResult
@@ -271,6 +273,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
                 }
+                FORM_PAUSE_PROPOSE -> dispatch(
+                    AppAction.Notice(
+                        pauseText(
+                            circleApp.proposePause(MemberId(field(FIELD_PAUSE_SUBJECT)), field(FIELD_PAUSE_REASON), field(FIELD_PAUSE_DAYS).toIntOrNull() ?: 0),
+                            "The pause is proposed. The member can see it now. It takes effect when enough other trusted members agree.",
+                        ),
+                    ),
+                )
+                FORM_PAUSE_APPEAL -> form.getAttribute(ATTR_PAUSE)?.let { id ->
+                    dispatch(AppAction.Notice(pauseText(circleApp.appealPause(PauseId(id), field(FIELD_PAUSE_NOTE)), "Your appeal was sent to the reviewers.")))
+                }
                 FORM_MAKE_SHARES -> {
                     val threshold = field(FIELD_THRESHOLD).toIntOrNull()
                     dispatch(
@@ -378,6 +391,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             is LoanResult.BadDates -> dispatch(AppAction.Notice("Choose dates from today on, with the end not before the start and at most ${result.maximumDays} days."))
             is LoanResult.NoteTooLong -> dispatch(AppAction.Notice("Keep the note to ${result.maximum} characters or fewer."))
             is LoanResult.NotYet -> dispatch(AppAction.Notice("Not yet: " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
+            is LoanResult.Paused -> dispatch(AppAction.Notice((result.reasons + "You can still borrow essentials. Open Pauses to appeal.").joinToString(" ")))
             LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
             LoanResult.NotAllowed -> dispatch(AppAction.Notice("That cannot be done right now. Try syncing, then again."))
         }
@@ -457,6 +471,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     }
                     ExportResult.Incomplete -> dispatch(AppAction.Notice("This device does not have the whole log yet. Press Sync now, then try again."))
                     ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Open the circle first."))
+                }
+                ACTION_PAUSE_REVIEW -> target.getAttribute(ATTR_PAUSE)?.let { id ->
+                    val agree = target.getAttribute(ATTR_AGREE) == "true"
+                    dispatch(AppAction.Notice(pauseText(circleApp?.reviewPause(PauseId(id), agree) ?: PauseResult.NotAllowed, if (agree) "You agreed." else "Your answer was recorded.")))
+                }
+                ACTION_PAUSE_LIFT -> target.getAttribute(ATTR_PAUSE)?.let { id ->
+                    dispatch(AppAction.Notice(pauseText(circleApp?.liftPause(PauseId(id)) ?: PauseResult.NotAllowed, "Done. The pause is lifted.")))
                 }
                 ACTION_SHARE_SHOW -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { epoch ->
                     dispatch(AppAction.ShareCodeShown(epoch, circleApp?.shareCode(epoch)))
@@ -538,3 +559,9 @@ private fun download(fileName: String, bytes: ByteArray) {
 }
 
 private const val DOWNLOAD_URL_LIFETIME_MILLIS = 10_000
+
+private fun pauseText(result: PauseResult, done: String): String = when (result) {
+    PauseResult.Sent -> done
+    is PauseResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+    PauseResult.NotAllowed -> "You cannot do that right now."
+}

@@ -1017,4 +1017,58 @@ class ShellViewTest {
         assertTrue("Keep it private all the same" in html)
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EXPORT"""").findAll(html).count())
     }
+
+    // ---- pauses (ADR 0050) ----
+
+    private val pauseId = circles.event.PauseId("a".repeat(32))
+
+    private fun pauseSummary(role: circles.app.PauseRole = circles.app.PauseRole.REVIEWER, status: circles.event.PauseStatus = circles.event.PauseStatus.PROPOSED, init: circles.app.PauseSummary.() -> circles.app.PauseSummary = { this }) =
+        circles.app.PauseSummary(
+            pauseId, role, bea, "keeps returning things damaged", 30, status, agreeing = 1, needed = 2, iAgree = null,
+            untilDay = if (status == circles.event.PauseStatus.LIVE) 20_790 else null, appeal = null, proposedByMe = false, reviewers = emptyList(),
+            canReview = false, canStepBack = false, canAppeal = false, canLift = false,
+        ).init()
+
+    private fun pausesPage(vararg pauses: circles.app.PauseSummary, candidates: List<circles.policy.MemberId> = emptyList(), canPropose: Boolean = false) =
+        render(open(home().copy(pauses = pauses.toList(), canProposePause = canPropose, pauseCandidates = candidates)).copy(screen = Screen.Pauses))
+
+    @Test fun theSubjectIsToldPlainlyAndMayAppealOnceWithTheEssentialsReminder() {
+        val html = pausesPage(pauseSummary(circles.app.PauseRole.SUBJECT, circles.event.PauseStatus.LIVE) { copy(canAppeal = true, reviewers = listOf(me)) })
+        assertTrue("Your access is paused until" in html)
+        assertTrue("Essentials stay open to you." in html)
+        assertTrue("Reason given: keeps returning things damaged" in html)
+        assertTrue("""id="$FORM_PAUSE_APPEAL"""" in html && """$ATTR_PAUSE="${pauseId.v}"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_PAUSE_APPEAL))?.value ?: error("no button")
+        assertTrue("hidden" in button, "the appeal button waits for text")
+        assertFalse(ACTION_PAUSE_REVIEW in html)
+        val appealed = pausesPage(pauseSummary(circles.app.PauseRole.SUBJECT) { copy(appeal = "I was away") })
+        assertTrue("Your appeal: I was away" in appealed)
+        assertFalse(FORM_PAUSE_APPEAL in appealed)
+    }
+
+    @Test fun reviewersSeeCountsAndButtonsButNotWhoAgreedAndCanLiftBehindADisclosure() {
+        val html = pausesPage(pauseSummary { copy(canReview = true) }, pauseSummary(status = circles.event.PauseStatus.LIVE) { copy(canStepBack = true, canLift = true, iAgree = true, appeal = "I was away") })
+        assertTrue("1 of 2 reviewers have agreed." in html)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_PAUSE_REVIEW" $ATTR_PAUSE="${pauseId.v}" $ATTR_AGREE="true"""").findAll(html).count())
+        assertTrue("Do not agree" in html && "Step back from this pause" in html)
+        assertTrue("The member's appeal: I was away" in html && "You agreed." in html)
+        assertTrue("<summary>Lift this pause</summary>" in html && """$ATTR_ACTION="$ACTION_PAUSE_LIFT"""" in html)
+        assertFalse("Agreed so far" in html)
+    }
+
+    @Test fun theProposeFormIsOnlyForTrustedMembersWithSomeoneToPropose() {
+        assertFalse(FORM_PAUSE_PROPOSE in pausesPage(canPropose = true))
+        assertFalse(FORM_PAUSE_PROPOSE in pausesPage(candidates = listOf(bea)))
+        val html = pausesPage(canPropose = true, candidates = listOf(bea))
+        assertTrue("""id="$FORM_PAUSE_PROPOSE"""" in html && """value="30"""" in html)
+        assertTrue("No pauses are proposed or in force that you can see." in html)
+    }
+
+    @Test fun homeAndStandingPointToPausesOnlyWhenThereIsSomethingToDo() {
+        assertFalse("Pauses" in render(open(home())).substringAfter("<main"))
+        assertTrue("Your access is paused" in render(open(home().copy(pauses = listOf(pauseSummary(circles.app.PauseRole.SUBJECT, circles.event.PauseStatus.LIVE))))))
+        assertTrue("1 pause proposal waiting for your answer" in render(open(home().copy(pauses = listOf(pauseSummary { copy(canReview = true) })))))
+        assertTrue(Screen.Pauses.fragment in render(open(home().copy(canProposePause = true)).copy(screen = Screen.Standing, model = AppModel.Open(home(steward = false).copy(canProposePause = true, standing = StandingSummary(circles.policy.Tier.TRUSTED, "3.0", emptyList(), emptyList()))))))
+        assertFalse(Screen.Pauses in Screen.navigation)
+    }
 }

@@ -111,12 +111,13 @@ object StandingRules {
         vouches: List<Vouch>,
         stewards: Set<MemberId>,
         day: Int,
+        pauses: List<circles.policy.Pause> = emptyList(),
     ): AccessDecision {
         val standing = standingOf(borrower, cfg, loans, vouches, stewards, day)
         val policyItem = Item(
             id = item.item, owner = item.owner, name = item.name, itemClass = item.itemClass, ownerMinTier = item.minTier, circles = setOf(cfg.id),
         )
-        return AccessPolicy.canBorrow(borrower, policyItem, cfg, standing, emptyList(), day)
+        return AccessPolicy.canBorrow(borrower, policyItem, cfg, standing, pauses, day)
     }
 
     /** The circle's rules until config events exist (a later slice): the library defaults. */

@@ -219,8 +219,45 @@ sealed interface LoanResult {
     /** The circle's access rules say not yet; [reasons] and [howToUnlock] are for the member to read. */
     data class NotYet(val reasons: List<String>, val howToUnlock: List<String>) : LoanResult
 
+    /** The member's access is paused (ADR 0050); [reasons] name the expiry and the appeal route. */
+    data class Paused(val reasons: List<String>) : LoanResult
+
     /** Your own item, a retired item, someone else's loan, or a step the loan is not ready for. */
     data object NotAllowed : LoanResult
+}
+
+enum class PauseRole { SUBJECT, REVIEWER }
+
+/** A pause or proposal this member may see (ADR 0050): the subject and the trusted members and stewards who may review it. */
+data class PauseSummary(
+    val pause: circles.event.PauseId,
+    val role: PauseRole,
+    val subject: MemberId,
+    val reason: String,
+    val days: Int,
+    val status: circles.event.PauseStatus,
+    val agreeing: Int,
+    val needed: Int,
+    /** My own answer, if I gave one. */
+    val iAgree: Boolean?,
+    val untilDay: Int?,
+    val appeal: String?,
+    val proposedByMe: Boolean,
+    /** Who agreed, shown to the subject only. */
+    val reviewers: List<MemberId>,
+    val canReview: Boolean,
+    val canStepBack: Boolean,
+    val canAppeal: Boolean,
+    val canLift: Boolean,
+)
+
+sealed interface PauseResult {
+    data object Sent : PauseResult
+
+    /** The circle's rules refuse it now; [reason] is plain text to show. */
+    data class Refused(val reason: String) : PauseResult
+
+    data object NotAllowed : PauseResult
 }
 
 sealed interface VouchResult {
@@ -278,6 +315,10 @@ data class HomeData(
     val hasRecoveryCode: Boolean = false,
     /** Recovery shares of the circle key (ADR 0048); only meaningful for a steward. */
     val recoveryShares: RecoverySharesSummary = RecoverySharesSummary(),
+    /** Pauses and proposals I may see (ADR 0050), and whether I may propose one and about whom. */
+    val pauses: List<PauseSummary> = emptyList(),
+    val canProposePause: Boolean = false,
+    val pauseCandidates: List<MemberId> = emptyList(),
     val stewardList: List<StewardInfo> = emptyList(),
     val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
     val proposals: List<ProposalSummary> = emptyList(),
@@ -633,6 +674,79 @@ class CircleApp(
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- pauses (ADR 0050) ----
+
+    private fun pausesFor(view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseSummary> {
+        val cfg = StandingRules.defaultConfig(circles.policy.CircleId(""))
+        val mayReview = myTier.rank >= cfg.pauseReviewerMinTier.rank
+        return view.market.pauses.mapNotNull { pause ->
+            val status = pause.statusOn(now)
+            if (status != circles.event.PauseStatus.PROPOSED && status != circles.event.PauseStatus.LIVE) return@mapNotNull null
+            val isSubject = pause.subject == me
+            if (!isSubject && !mayReview) return@mapNotNull null
+            val answer = pause.reviews[me]
+            val isSteward = me in view.stewards
+            PauseSummary(
+                pause = pause.pause, role = if (isSubject) PauseRole.SUBJECT else PauseRole.REVIEWER, subject = pause.subject,
+                reason = pause.reason, days = pause.days, status = status, agreeing = pause.agreeing.size, needed = pause.needed,
+                iAgree = answer, untilDay = pause.untilDay, appeal = pause.appealNote, proposedByMe = pause.proposer == me,
+                reviewers = if (isSubject) pause.agreeing.toList() else emptyList(),
+                canReview = !isSubject && status == circles.event.PauseStatus.PROPOSED && answer != true,
+                canStepBack = !isSubject && status == circles.event.PauseStatus.LIVE && answer == true,
+                canAppeal = isSubject && pause.appealNote == null,
+                canLift = !isSubject && ((answer == true && pause.appealNote != null) || (isSteward && pause.proposer != me) || (pause.proposer == me && status == circles.event.PauseStatus.PROPOSED)),
+            )
+        }
+    }
+
+    /** Sends a pause event if the circle's rules would accept it; otherwise takes it back out of the outbox and says why. */
+    private suspend fun sendPause(s: Session, event: circles.event.Envelope): PauseResult {
+        val id = event.eventId(crypto)
+        s.engine.enqueue(s.circle, event)
+        val refused = replica.fold(s.circle, crypto, cipher, s.identity).rejected.firstOrNull { it.id == id }
+        if (refused != null) {
+            replica.dropFromOutbox(s.circle, setOf(id))
+            return PauseResult.Refused(refused.reason)
+        }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return PauseResult.Sent
+    }
+
+    private suspend fun pauseSession(): Pair<Session, circles.event.CircleView>? {
+        val s = session ?: return null
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return null
+        s.author.keyRing = view.keys
+        return s to view
+    }
+
+    /** Proposes pausing [subject]'s access to anything but essentials for [days] days (ADR 0050). The proposer counts as the first reviewer. */
+    suspend fun proposePause(subject: MemberId, reason: String, days: Int): PauseResult {
+        val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
+        if (reason.isBlank() || reason.trim().length > circles.event.MAX_PAUSE_REASON_CHARS) return PauseResult.Refused("give a reason of 1 to ${circles.event.MAX_PAUSE_REASON_CHARS} characters")
+        if (days !in circles.event.MIN_PAUSE_DAYS..circles.event.MAX_PAUSE_DAYS) return PauseResult.Refused("choose from ${circles.event.MIN_PAUSE_DAYS} to ${circles.event.MAX_PAUSE_DAYS} days")
+        return sendPause(s, s.author.pausePropose(s.circle, today(), circles.event.newPauseId(crypto), subject, reason.trim(), days))
+    }
+
+    /** A reviewer agrees ([agree] true), or says they do not, or steps back from a pause already in force. */
+    suspend fun reviewPause(pause: circles.event.PauseId, agree: Boolean): PauseResult {
+        val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
+        return sendPause(s, s.author.pauseReview(s.circle, today(), pause, agree))
+    }
+
+    /** The subject's one note to the reviewers. */
+    suspend fun appealPause(pause: circles.event.PauseId, note: String): PauseResult {
+        val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
+        if (note.isBlank() || note.trim().length > circles.event.MAX_PAUSE_APPEAL_CHARS) return PauseResult.Refused("write a note of 1 to ${circles.event.MAX_PAUSE_APPEAL_CHARS} characters")
+        return sendPause(s, s.author.pauseAppeal(s.circle, today(), pause, note.trim()))
+    }
+
+    suspend fun liftPause(pause: circles.event.PauseId): PauseResult {
+        val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
+        return sendPause(s, s.author.pauseLift(s.circle, today(), pause))
     }
 
     // ---- export (ADR 0030) ----
@@ -1075,8 +1189,9 @@ class CircleApp(
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
         val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member && it.owner !in view.market.departed } ?: return LoanResult.NotAllowed
         // The same rule every client applies when folding (ADR 0042); asking first spares the member a request that would be ignored.
-        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today())
+        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today(), view.market.livePausesOn(s.circle, today()))
         if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
+        if (decision is AccessDecision.Paused) return LoanResult.Paused(decision.reasons)
         if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
         s.author.keyRing = view.keys
         val loan = newLoanId(crypto)
@@ -1261,6 +1376,11 @@ class CircleApp(
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 recoveryShares = recoverySharesOf(view, s.identity.member),
+                pauses = pausesFor(view, me, myStanding.tier, now),
+                canProposePause = myStanding.tier.rank >= cfg.pauseReviewerMinTier.rank,
+                pauseCandidates = if (myStanding.tier.rank < cfg.pauseReviewerMinTier.rank) emptyList() else view.devices.values.filter { !it.revoked }
+                    .map { it.registration.member }.distinct()
+                    .filter { it != me && it !in view.stewards && view.market.pauses.none { p -> p.subject == it && p.statusOn(now).let { st -> st == circles.event.PauseStatus.PROPOSED || st == circles.event.PauseStatus.LIVE } } },
                 hasRecoveryCode = view.devices.values.any { !it.revoked && it.registration.member == me && deviceNames(view)[it.registration.device] == RECOVERY_DEVICE_NAME },
                 myDevices = view.devices.values.filter { !it.revoked && it.registration.member == me }.map { state ->
                     DeviceSummary(state.registration.device, state.registration.device == s.identity.device, deviceNames(view)[state.registration.device])
@@ -1333,7 +1453,7 @@ class CircleApp(
                         owner = state.owner,
                         ownedByMe = state.owner == s.identity.member,
                         description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
-                        access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now)) {
+                        access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now, view.market.livePausesOn(s.circle, now))) {
                             is AccessDecision.Eligible -> AccessSummary(true, emptyList(), emptyList())
                             is AccessDecision.NotYet -> AccessSummary(false, decision.reasons, decision.howToUnlock)
                             is AccessDecision.Paused -> AccessSummary(false, decision.reasons, emptyList())

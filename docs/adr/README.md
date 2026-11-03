@@ -53,7 +53,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0047](0047-recovery-code.md) | The recovery code | Accepted |
 | [0048](0048-recovery-shares-in-the-app.md) | Recovery shares in the app | Accepted |
 | [0049](0049-item-keys-after-a-removal.md) | Item detail keys after a removal | Accepted |
-| [0050](0050-pauses.md) | Pauses | Proposed |
+| [0050](0050-pauses.md) | Pauses | Accepted |
 
 ## Open decisions still to record
 

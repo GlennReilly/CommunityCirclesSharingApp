@@ -152,6 +152,18 @@ class EventAuthor(
     fun vouch(circle: CircleId, day: Int, vouchee: MemberId, expiresDay: Int): Envelope =
         build(circle, EventType.VOUCH, day, CborMap.EMPTY, MarketPayloads.vouch(VouchTerms(vouchee, expiresDay)))
 
+    fun pausePropose(circle: CircleId, day: Int, pause: PauseId, subject: MemberId, reason: String, days: Int): Envelope =
+        build(circle, EventType.PAUSE_PROPOSE, day, CborMap.EMPTY, MarketPayloads.pausePropose(PauseProposal(pause, subject, reason, days)))
+
+    fun pauseReview(circle: CircleId, day: Int, pause: PauseId, agree: Boolean): Envelope =
+        build(circle, EventType.PAUSE_REVIEW, day, CborMap.EMPTY, MarketPayloads.pauseReview(PauseReview(pause, agree)))
+
+    fun pauseAppeal(circle: CircleId, day: Int, pause: PauseId, note: String): Envelope =
+        build(circle, EventType.PAUSE_APPEAL, day, CborMap.EMPTY, MarketPayloads.pauseAppeal(PauseAppeal(pause, note)))
+
+    fun pauseLift(circle: CircleId, day: Int, pause: PauseId): Envelope =
+        build(circle, EventType.PAUSE_LIFT, day, CborMap.EMPTY, MarketPayloads.pauseLift(PauseLift(pause)))
+
     /** The owner says the item came back as reported; the return then counts at once (ADR 0043). */
     fun confirmReturn(circle: CircleId, day: Int, loan: LoanId): Envelope =
         build(circle, EventType.STANDING_CONFIRM, day, CborMap.EMPTY, MarketPayloads.confirmReturn(ReturnConfirmation(loan)))

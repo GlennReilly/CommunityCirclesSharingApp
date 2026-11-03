@@ -32,5 +32,7 @@ fun newItemId(crypto: Crypto): circles.policy.ItemId = circles.policy.ItemId(cry
 
 fun newLoanId(crypto: Crypto): LoanId = LoanId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())
 
+fun newPauseId(crypto: Crypto): PauseId = PauseId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())
+
 /** Names one version of an item's detail key (ADR 0025). */
 fun newDetailKeyId(crypto: Crypto): String = crypto.randomBytes(RANDOM_ID_BYTES).toHex()

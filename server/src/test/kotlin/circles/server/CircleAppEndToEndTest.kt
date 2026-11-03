@@ -31,6 +31,8 @@ import circles.event.DisputeOutcome
 import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
+import circles.app.PauseResult
+import circles.app.PauseRole
 import circles.event.LoanStatus
 import circles.event.MAX_LOAN_DAYS
 import circles.event.ReturnOutcome
@@ -1062,5 +1064,77 @@ class CircleAppEndToEndTest {
         sync()
         assertEquals(countBefore, alice.replica.entries(circle).size)
         listOf(alice, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun aPauseNeedsTwoTrustedReviewersTheSubjectIsToldMayAppealAndItIsLifted() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join(); val carol = join(); val dave = join()
+        fun sync() = runBlocking { repeat(3) { listOf(alice, bea, carol, dave).forEach { it.app.syncOnce() } } }
+        // Three stewards (stewards count as trusted); dave is an ordinary member.
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeStewardSettings(1, 60, 14))
+        sync()
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(carol.app).me))
+        val ladder = (alice.app.addItem("Ladder", ItemClass.VALUABLE, "") as ItemResult.Saved).item
+        val torch = (alice.app.addItem("Torch", ItemClass.ESSENTIAL, "") as ItemResult.Saved).item
+        sync()
+        val daveId = home(dave.app).me; val aliceId = home(alice.app).me
+
+        // Who may propose: trusted members only, and not a steward as the subject.
+        assertFalse(home(dave.app).canProposePause)
+        assertEquals(emptyList(), home(dave.app).pauseCandidates)
+        assertTrue(assertIs<PauseResult.Refused>(dave.app.proposePause(home(bea.app).me, "no", 5)).reason.contains("trusted"))
+        assertEquals(listOf(daveId), home(alice.app).pauseCandidates)
+        assertTrue(assertIs<PauseResult.Refused>(alice.app.proposePause(home(bea.app).me, "x", 5)).reason.contains("steward"))
+        assertEquals(PauseResult.Refused("give a reason of 1 to 280 characters"), alice.app.proposePause(daveId, " ", 5))
+        assertEquals(PauseResult.Refused("choose from 1 to 90 days"), alice.app.proposePause(daveId, "x", 91))
+
+        // Alice proposes; she is the first reviewer, so a second is needed. The subject and the other trusted members see it; nobody else does.
+        assertEquals(PauseResult.Sent, alice.app.proposePause(daveId, "keeps returning things damaged", 30))
+        sync()
+        val forDave = home(dave.app).pauses.single()
+        assertEquals(PauseRole.SUBJECT, forDave.role)
+        assertEquals("keeps returning things damaged", forDave.reason)
+        assertTrue(forDave.canAppeal && !forDave.canReview && !forDave.canLift)
+        assertEquals(listOf(aliceId), forDave.reviewers, "the subject sees who agreed")
+        val forBea = home(bea.app).pauses.single()
+        assertTrue(forBea.canReview && forBea.reviewers.isEmpty() && forBea.agreeing == 1 && forBea.needed == 2)
+        assertEquals(PauseResult.Refused("that member already has a pause or a proposal"), carol.app.proposePause(daveId, "again", 5))
+
+        // Not in force yet: dave can still ask. Bea agrees and it takes effect.
+        assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
+        assertEquals(PauseResult.Sent, bea.app.reviewPause(forBea.pause, true))
+        sync()
+        assertEquals(circles.event.PauseStatus.LIVE, home(dave.app).pauses.single().status)
+        assertEquals(TODAY + 30, home(dave.app).pauses.single().untilDay)
+        assertIs<LoanResult.Paused>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
+        assertTrue(home(dave.app).items.single { it.item == ladder }.access!!.reasons.any { it.contains("paused") })
+        assertIs<LoanResult.Done>(dave.app.requestLoan(torch, TODAY, TODAY + 1, ""), "essentials stay open")
+        assertEquals(PauseResult.Refused("the pause is already in force"), carol.app.reviewPause(forBea.pause, true))
+
+        // The subject appeals once; carol may then lift it (a steward who did not propose it).
+        assertEquals(PauseResult.Sent, dave.app.appealPause(forDave.pause, "I was away and a friend returned it"))
+        assertTrue(assertIs<PauseResult>(dave.app.appealPause(forDave.pause, "again")) is PauseResult.Refused)
+        sync()
+        assertEquals("I was away and a friend returned it", home(carol.app).pauses.single().appeal)
+        assertTrue(home(carol.app).pauses.single().canLift)
+        assertEquals(PauseResult.Sent, carol.app.liftPause(forDave.pause))
+        sync()
+        assertEquals(emptyList(), home(dave.app).pauses)
+        assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""), "no longer paused, though still a newcomer")
+        listOf(alice, bea, carol, dave).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }

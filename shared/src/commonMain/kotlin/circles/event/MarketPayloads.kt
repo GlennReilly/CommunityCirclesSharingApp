@@ -65,6 +65,26 @@ data class VouchTerms(val vouchee: MemberId, val expiresDay: Int)
 
 data class LoanReturn(val loan: LoanId, val outcome: ReturnOutcome)
 
+/** A pause's id: random 128-bit lowercase hex, made by the proposer (ADR 0050). */
+data class PauseId(val v: String)
+
+/** `pause.propose`: ask for [subject]'s access (other than essentials) to be paused for [days] days. */
+data class PauseProposal(val pause: PauseId, val subject: MemberId, val reason: String, val days: Int)
+
+/** `pause.review`: a reviewer's [agree] or, with false, a withdrawal of an earlier agreement. */
+data class PauseReview(val pause: PauseId, val agree: Boolean)
+
+/** `pause.appeal`: the subject's one note to the reviewers. */
+data class PauseAppeal(val pause: PauseId, val note: String)
+
+/** `pause.lift`: ends a pause or cancels a proposal. */
+data class PauseLift(val pause: PauseId)
+
+const val MAX_PAUSE_REASON_CHARS = 280
+const val MAX_PAUSE_APPEAL_CHARS = 500
+const val MIN_PAUSE_DAYS = 1
+const val MAX_PAUSE_DAYS = 90
+
 private const val K_ITEM = "item"
 private const val K_NAME = "name"
 private const val K_CLASS = "class"
@@ -81,6 +101,11 @@ private const val K_OUTCOME = "outcome"
 private const val K_CLAIM = "claim"
 private const val K_VOUCHEE = "vouchee"
 private const val K_EXPIRES = "expiresDay"
+private const val K_PAUSE = "pause"
+private const val K_SUBJECT = "subject"
+private const val K_REASON = "reason"
+private const val K_DAYS = "days"
+private const val K_AGREE = "agree"
 private const val K_DEVICE = "device"
 private const val K_WRAPPED = "wrapped"
 
@@ -96,6 +121,11 @@ object MarketPayloads {
             put(K_KEY_WRAPS, wraps(v.keyWraps))
         },
     )
+
+    fun pausePropose(v: PauseProposal): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_SUBJECT to CborText(v.subject.v), K_REASON to CborText(v.reason), K_DAYS to CborInt(v.days.toLong()))
+    fun pauseReview(v: PauseReview): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_AGREE to CborBool(v.agree))
+    fun pauseAppeal(v: PauseAppeal): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v), K_NOTE to CborText(v.note))
+    fun pauseLift(v: PauseLift): CborMap = CborMap.of(K_PAUSE to CborText(v.pause.v))
 
     fun itemRetire(v: ItemRetire): CborMap = CborMap.of(K_ITEM to CborText(v.item.v))
 
@@ -193,6 +223,34 @@ object MarketPayloads {
         val loan = randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters")
         val outcome = enumOf<DisputeOutcome>(map, K_OUTCOME) ?: return Parsed.Invalid("outcome is not a known outcome")
         return Parsed.Ok(LoanResolution(LoanId(loan), outcome))
+    }
+
+    fun parsePausePropose(map: CborMap): Parsed<PauseProposal> {
+        keys(map, required = setOf(K_PAUSE, K_SUBJECT, K_REASON, K_DAYS))?.let { return Parsed.Invalid(it) }
+        val pause = randomId(map, K_PAUSE) ?: return Parsed.Invalid("pause must be 32 lowercase hex characters")
+        val subject = randomId(map, K_SUBJECT) ?: return Parsed.Invalid("subject must be 32 lowercase hex characters")
+        val reason = text(map, K_REASON, MAX_PAUSE_REASON_CHARS)?.takeIf { it.isNotBlank() } ?: return Parsed.Invalid("reason must be 1 to $MAX_PAUSE_REASON_CHARS characters")
+        val days = (map[K_DAYS] as? CborInt)?.value?.takeIf { it in MIN_PAUSE_DAYS..MAX_PAUSE_DAYS } ?: return Parsed.Invalid("days must be $MIN_PAUSE_DAYS to $MAX_PAUSE_DAYS")
+        return Parsed.Ok(PauseProposal(PauseId(pause), MemberId(subject), reason, days.toInt()))
+    }
+
+    fun parsePauseReview(map: CborMap): Parsed<PauseReview> {
+        keys(map, required = setOf(K_PAUSE, K_AGREE))?.let { return Parsed.Invalid(it) }
+        val pause = randomId(map, K_PAUSE) ?: return Parsed.Invalid("pause must be 32 lowercase hex characters")
+        val agree = (map[K_AGREE] as? CborBool)?.value ?: return Parsed.Invalid("agree must be true or false")
+        return Parsed.Ok(PauseReview(PauseId(pause), agree))
+    }
+
+    fun parsePauseAppeal(map: CborMap): Parsed<PauseAppeal> {
+        keys(map, required = setOf(K_PAUSE, K_NOTE))?.let { return Parsed.Invalid(it) }
+        val pause = randomId(map, K_PAUSE) ?: return Parsed.Invalid("pause must be 32 lowercase hex characters")
+        val note = text(map, K_NOTE, MAX_PAUSE_APPEAL_CHARS)?.takeIf { it.isNotBlank() } ?: return Parsed.Invalid("note must be 1 to $MAX_PAUSE_APPEAL_CHARS characters")
+        return Parsed.Ok(PauseAppeal(PauseId(pause), note))
+    }
+
+    fun parsePauseLift(map: CborMap): Parsed<PauseLift> {
+        keys(map, required = setOf(K_PAUSE))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(PauseLift(PauseId(randomId(map, K_PAUSE) ?: return Parsed.Invalid("pause must be 32 lowercase hex characters"))))
     }
 
     fun parseVouch(map: CborMap): Parsed<VouchTerms> {
