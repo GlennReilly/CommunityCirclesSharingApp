@@ -45,7 +45,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0039](0039-device-key-storage-in-the-browser.md) | Device key storage in the browser | Accepted |
 | [0040](0040-invite-link-format.md) | Invite link format | Accepted |
 | [0041](0041-service-worker-and-updates.md) | Service worker: offline shell, no API caching, the member chooses when to update | Accepted |
-| [0042](0042-standing-vouches-and-the-access-check.md) | Standing from loans and vouches, and the access check (M4, first slice) | Proposed |
+| [0042](0042-standing-vouches-and-the-access-check.md) | Standing from loans and vouches, and the access check (M4, first slice) | Accepted |
 
 ## Open decisions still to record
 

@@ -4,6 +4,8 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
+import circles.app.StandingSummary
+import circles.policy.Tier
 import circles.app.ItemSummary
 import circles.app.LoanRole
 import circles.app.LoanSummary
@@ -77,6 +79,8 @@ const val FIELD_DETAILS = "details"
 const val ATTR_ITEM = "data-item"
 const val ATTR_MIN = "data-min"
 const val ATTR_LOAN = "data-loan"
+const val ATTR_MEMBER = "data-member"
+const val ACTION_VOUCH = "vouch"
 const val ACTION_BORROW_ITEM = "borrow-item"
 const val ACTION_APPROVE_LOAN = "approve-loan"
 const val ACTION_DECLINE_LOAN = "decline-loan"
@@ -168,6 +172,7 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home)
+                Screen.Standing -> standing(model.home.standing)
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
@@ -354,10 +359,23 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                     }.joinToString(", ")
                 }
                 p { +"Key fingerprint: ${person.fingerprint}" }
+                if (!person.isMe) {
+                    val vouchedUntil = person.vouchedByMeUntil
+                    if (vouchedUntil != null) {
+                        p { +"You vouch for them until ${CalendarDay.format(vouchedUntil)}." }
+                    } else if (home.canVouch) {
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_VOUCH
+                            attributes[ATTR_MEMBER] = person.member.v
+                            +"Vouch for this person"
+                        }
+                    }
+                }
             }
         }
     }
     p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
+    p { +"Vouching tells the circle you know this person. Two neighbours who vouch open neighbour access for a newcomer. Only vouch for people you know." }
     if (home.isSteward && home.waiting.isNotEmpty()) {
         section {
             h2 { +"Waiting to be let in" }
@@ -436,10 +454,23 @@ private fun FlowContent.items(home: HomeData) {
                 p { +(if (item.ownedByMe) "Yours" else "Shared by member ${item.owner.v.take(MEMBER_SHORT_CHARS)}") }
                 item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
                 if (!item.ownedByMe) {
-                    button(type = ButtonType.button) {
-                        attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
-                        attributes[ATTR_ITEM] = item.item.v
-                        +"Ask to borrow"
+                    val access = item.access
+                    if (access == null || access.canAsk) {
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
+                            attributes[ATTR_ITEM] = item.item.v
+                            +"Ask to borrow"
+                        }
+                    } else {
+                        p { +"Not yet. This is not open to you at the moment." }
+                        details {
+                            summary { +"Why, and how to unlock" }
+                            ul { for (reason in access.reasons) li { +reason } }
+                            if (access.howToUnlock.isNotEmpty()) {
+                                h3 { +"How to unlock" }
+                                ul { for (step in access.howToUnlock) li { +step } }
+                            }
+                        }
                     }
                 }
                 if (item.ownedByMe) {
@@ -748,5 +779,32 @@ private fun FlowContent.settings(home: HomeData) {
                 +"Forget this device"
             }
         }
+    }
+}
+
+private fun tierLabel(tier: Tier): String = when (tier) {
+    Tier.NEWCOMER -> "Newcomer"
+    Tier.NEIGHBOUR -> "Neighbour"
+    Tier.TRUSTED -> "Trusted"
+    Tier.STEWARD -> "Steward level"
+}
+
+/** Only your own standing, in plain words with the reasons; nobody else's tier or points are ever shown (spec 6). */
+private fun FlowContent.standing(standing: StandingSummary?) {
+    h1 { +Screen.Standing.title }
+    if (standing == null) {
+        p { +"Your standing appears once the circle has been read." }
+        return
+    }
+    p { +"Your tier: ${tierLabel(standing.tier)}" }
+    p { +"Standing points: ${standing.points}" }
+    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below newcomer, and nobody is ever banned for low standing." }
+    section {
+        h2 { +"Why" }
+        ul { for (reason in standing.reasons) li { +reason } }
+    }
+    section {
+        h2 { +"How to unlock more" }
+        ul { for (step in standing.howToUnlock) li { +step } }
     }
 }

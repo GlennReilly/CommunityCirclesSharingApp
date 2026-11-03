@@ -112,6 +112,20 @@ try {
   await alice.evaluate('(() => { const f = document.getElementById("autolock-form"); f.elements.namedItem("minutes").value = "5"; f.requestSubmit(); return true; })()');
   await until(alice, has(alice, 'Saved.'), 'lock saved'); await alice.evaluate('location.hash = "#/home"'); await alice.evaluate('location.hash = "#/settings"');
   await until(alice, 'document.getElementById("minutes") !== null && document.getElementById("minutes").value === "5"', 'lock choice remembered'); ok('idle lock choice saved (5 minutes)');
+  // Standing: a valuable item is not open to a newcomer; the steward counts as trusted.
+  await alice.evaluate('location.hash = "#/items/add"'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add page for the drill');
+  await setField(alice, 'item-add-form', 'name', 'Drill'); await alice.evaluate('document.getElementById("item-add-form").elements.namedItem("kind").value = "VALUABLE"');
+  await alice.evaluate('document.getElementById("item-add-form").requestSubmit()'); await until(alice, has(alice, 'Drill'), 'drill listed');
+  await until(bea, has(bea, 'Drill') + ' && ' + has(bea, 'Not yet.'), 'bea sees the drill as not yet open', 15000);
+  const drillButtons = await bea.evaluate('[...document.querySelectorAll("li")].filter(li => li.innerText.includes("Drill") && li.querySelector("[data-action=borrow-item]")).length');
+  if (drillButtons !== 0) throw new Error('bea is offered to borrow the drill'); ok('a newcomer sees the drill as "Not yet" with no borrow button');
+  const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("NEIGHBOUR")) || ""');
+  if (!why.includes('vouch')) throw new Error('no vouch route in: ' + why); ok('the reasons name the vouch route');
+  await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your tier: Newcomer'), 'bea standing');
+  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your tier: Trusted'), 'alice standing'); ok('standing pages: bea is a newcomer, alice (steward) counts as trusted');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
+  await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
+  if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a newcomer is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');

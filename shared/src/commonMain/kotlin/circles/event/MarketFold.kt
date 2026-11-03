@@ -39,6 +39,8 @@ data class LoanState(
     val ownerConfirmedHandover: Boolean,
     val borrowerConfirmedHandover: Boolean,
     val outcome: ReturnOutcome?,
+    /** The day of the borrower's `loan.return`, which starts the grace period before it counts. */
+    val returnedDay: Int? = null,
     /** The borrower's note on the request, if any. */
     val requestNote: String? = null,
 )
@@ -51,13 +53,15 @@ class MarketView(
     val itemKeys: Map<Pair<ItemId, String>, ByteString>,
     /** The current detail of each item this device can read, or why it cannot. Items without detail are absent. */
     val details: Map<ItemId, Parsed<CborMap>>,
+    /** Vouches that passed the rules (ADR 0042), in log order. */
+    val vouches: List<circles.policy.Vouch> = emptyList(),
 )
 
 internal class MarketResult(val view: MarketView, val rejected: Map<EventId, String>)
 
 private val MARKET_TYPES = setOf(
     EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
-    EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN,
+    EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.VOUCH,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -72,7 +76,11 @@ internal class MarketFold(
     private val circle: CircleId,
     private val devices: Map<DeviceId, DeviceState>,
     private val mayBorrow: (MemberId, ItemId) -> Boolean,
+    /** The stewards at the moment of each event (ADR 0042: the role floor uses the set as it was). */
+    private val stewardsAt: (EventId) -> Set<MemberId> = { emptySet() },
+    private val config: circles.policy.CircleConfig = StandingRules.defaultConfig(circle),
 ) {
+    private val vouches = mutableListOf<circles.policy.Vouch>()
     private val items = mutableMapOf<ItemId, ItemState>()
     private val loans = mutableMapOf<LoanId, LoanState>()
     private val rejected = mutableMapOf<EventId, String>()
@@ -81,21 +89,22 @@ internal class MarketFold(
         for (event in events) {
             if (!isMarketType(event.envelope.type)) continue
             val payload = (event.payload as? Parsed.Ok)?.value ?: continue // unreadable: no effect, no rejection
-            val problem = apply(event.envelope, payload)
+            val problem = apply(event.envelope, payload, event.id)
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys)), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList()), rejected.toMap())
     }
 
-    private fun apply(e: Envelope, payload: CborMap): String? = when (EventType.fromWire(e.type)) {
+    private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
         EventType.ITEM_UPSERT -> parse(MarketPayloads.parseItemUpsert(payload)) { upsert(e.author, it) }
         EventType.ITEM_RETIRE -> parse(MarketPayloads.parseItemRetire(payload)) { retire(e.author, it) }
         EventType.ITEM_DETAIL -> parse(MarketPayloads.parseItemDetail(payload)) { detail(e.author, it) }
-        EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it) }
+        EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it, e.day, id) }
+        EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
         EventType.LOAN_RESPOND -> parse(MarketPayloads.parseLoanRespond(payload)) { respond(e.author, it) }
         EventType.LOAN_HANDOVER -> parse(MarketPayloads.parseLoanHandover(payload)) { handover(e.author, it) }
-        EventType.LOAN_RETURN -> parse(MarketPayloads.parseLoanReturn(payload)) { giveBack(e.author, it) }
+        EventType.LOAN_RETURN -> parse(MarketPayloads.parseLoanReturn(payload)) { giveBack(e.author, it, e.day) }
         else -> null
     }
 
@@ -134,13 +143,23 @@ internal class MarketFold(
         return null
     }
 
-    private fun request(author: MemberId, v: LoanRequest): String? {
+    private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
+        if (v.vouchee == author) return "a member cannot vouch for themselves"
+        if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
+        if (!StandingRules.mayVouch(author, config, loans.values, vouches, stewardsAt(id), day)) return "only a neighbour or above may vouch"
+        vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
+        return null
+    }
+
+    private fun request(author: MemberId, v: LoanRequest, day: Int, id: EventId): String? {
         val item = items[v.item] ?: return "unknown item"
         if (item.retired) return "item is retired"
         if (item.owner == author) return "a member cannot borrow their own item"
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
-        loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, v.note)
+        val decision = StandingRules.decide(author, item, config, loans.values, vouches, stewardsAt(id), day)
+        if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
+        loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
         return null
     }
 
@@ -184,11 +203,11 @@ internal class MarketFold(
         return null
     }
 
-    private fun giveBack(author: MemberId, v: LoanReturn): String? {
+    private fun giveBack(author: MemberId, v: LoanReturn, day: Int): String? {
         val loan = loans[v.loan] ?: return "unknown loan"
         if (loan.borrower != author) return "only the borrower reports a return"
         if (loan.status != LoanStatus.ACTIVE) return "only an active loan can be returned"
-        loans[v.loan] = loan.copy(status = LoanStatus.RETURNED, outcome = v.outcome)
+        loans[v.loan] = loan.copy(status = LoanStatus.RETURNED, outcome = v.outcome, returnedDay = day)
         return null
     }
 

@@ -6,6 +6,8 @@ import circles.app.InviteLink
 import circles.app.CalendarDay
 import circles.app.ItemResult
 import circles.app.LoanResult
+import circles.app.VouchResult
+import circles.policy.MemberId
 import circles.event.LoanId
 import circles.event.ReturnOutcome
 import circles.policy.ItemClass
@@ -231,6 +233,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             }
             is LoanResult.BadDates -> dispatch(AppAction.Notice("Choose dates from today on, with the end not before the start and at most ${result.maximumDays} days."))
             is LoanResult.NoteTooLong -> dispatch(AppAction.Notice("Keep the note to ${result.maximum} characters or fewer."))
+            is LoanResult.NotYet -> dispatch(AppAction.Notice("Not yet: " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
             LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
             LoanResult.NotAllowed -> dispatch(AppAction.Notice("That cannot be done right now. Try syncing, then again."))
         }
@@ -253,6 +256,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()
+                ACTION_VOUCH -> target.getAttribute(ATTR_MEMBER)?.let { id ->
+                    dispatch(
+                        AppAction.Notice(
+                            when (circleApp?.vouchFor(MemberId(id))) {
+                                is VouchResult.Done -> "You vouched for them."
+                                VouchResult.NotLetInYet -> "A steward needs to let you in before you can vouch."
+                                else -> "You cannot vouch for them right now."
+                            },
+                        ),
+                    )
+                }
                 ACTION_BORROW_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.BorrowItem(ItemId(it)))
                     window.location.hash = Screen.RequestLoan.fragment

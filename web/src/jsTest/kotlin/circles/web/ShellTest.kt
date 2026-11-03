@@ -9,7 +9,10 @@ import circles.app.LoanSummary
 import circles.event.LoanId
 import circles.event.LoanStatus
 import circles.event.ReturnOutcome
+import circles.app.AccessSummary
 import circles.app.ItemSummary
+import circles.app.StandingSummary
+import circles.policy.Tier
 import circles.app.WaitingDevice
 import circles.encoding.ByteString
 import circles.event.DeviceId
@@ -45,7 +48,11 @@ private fun home(
 ) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759, people = people)
 
 private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVERYDAY, me, ownedByMe = true, description = "Garage at the back")
-private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null)
+private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null, access = AccessSummary(true, emptyList(), emptyList()))
+private val locked = drill.copy(
+    item = ItemId("3".repeat(32)), name = "Trailer", itemClass = ItemClass.HIGH_VALUE,
+    access = AccessSummary(false, listOf("Trailer needs TRUSTED; you are NEWCOMER."), listOf("Or get 2 neighbours to vouch for you.")),
+)
 
 private fun loan(
     id: String, role: LoanRole, status: LoanStatus, mine: Boolean = false, theirs: Boolean = false, outcome: ReturnOutcome? = null,
@@ -553,6 +560,44 @@ class ShellViewTest {
         assertTrue("Finished" in html)
         assertTrue("Declined." in html)
         assertTrue("damage reported" in html)
+    }
+
+    @Test fun anItemYouCannotAskForYetShowsWhyAndHowToUnlockInsteadOfAButton() {
+        val html = items(home(items = listOf(drill, locked)))
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_BORROW_ITEM"""").findAll(html).count(), "only the open item has the button")
+        assertTrue("""$ATTR_ITEM="${drill.item.v}"""" in html)
+        assertFalse("""$ATTR_ITEM="${locked.item.v}"""" in html)
+        assertTrue("Not yet." in html)
+        assertTrue("Trailer needs TRUSTED; you are NEWCOMER." in html)
+        assertTrue("Or get 2 neighbours to vouch for you." in html)
+        assertTrue("Why, and how to unlock" in html)
+    }
+
+    private val myStanding = StandingSummary(Tier.NEIGHBOUR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens trusted access."))
+
+    @Test fun theStandingPageShowsOnlyYourOwnTierPointsReasonsAndNextSteps() {
+        val html = render(open(home().copy(standing = myStanding)).copy(screen = Screen.Standing))
+        assertTrue("Your tier: Neighbour" in html && "Standing points: 3.5" in html)
+        assertTrue("Activity in this circle gives 3.5 standing points." in html)
+        assertTrue("About 6.5 more standing points opens trusted access." in html)
+        assertTrue("nobody is ever banned for low standing" in html)
+        assertFalse("This screen is not built yet." in html)
+    }
+
+    @Test fun theStandingPageBeforeTheCircleIsReadSaysSo() {
+        assertTrue("appears once the circle has been read" in render(open(home()).copy(screen = Screen.Standing)))
+    }
+
+    @Test fun membersWhoMayVouchSeeAButtonForPeopleTheyHaveNotVouchedFor() {
+        val mine = MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "aaaa aaaa aaaa aaaa aaaa")
+        val theirs = beaSummary
+        val html = members(home(people = listOf(mine, theirs)).copy(canVouch = true))
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_VOUCH"""").findAll(html).count(), "not for yourself")
+        assertTrue("""$ATTR_MEMBER="${bea.v}"""" in html)
+        val already = members(home(people = listOf(mine, theirs.copy(vouchedByMeUntil = 20_939))).copy(canVouch = true))
+        assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in already)
+        assertTrue("You vouch for them until 2027-05-01." in already)
+        assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in members(home(people = listOf(mine, theirs)).copy(canVouch = false)), "newcomers see no vouch button")
     }
 
     @Test fun statusLineIsALiveRegion() {

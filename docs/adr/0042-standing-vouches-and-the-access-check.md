@@ -1,6 +1,6 @@
 # 0042. Standing from loans and vouches, and the access check (M4, first slice)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 
 ## Context
@@ -31,16 +31,20 @@ Two facts shape the design. Every client folds the same log and must reach the s
    - *Members*: a "Vouch for this person" button shown only to members who may vouch, and who they already vouched for until when.
 7. **Time.** Standing shown on screen is computed at today's date; standing used by the fold is computed at the event's day. They agree whenever nothing is dated after the event.
 
-## Decisions for the owner (these change what the circle feels like)
+## Decisions for the owner (answered 2026-11-03: A1, B1, C1)
 
-**A. The bootstrap.** Options:
+**A. The bootstrap. Chosen: A1.** Options:
    - **A1 (recommended): stewards count as at least TRUSTED.** The role floor applies in the fold for tier decisions, so a founding steward can lend anything and vouch from day one, and a steward's vouch counts. Everyone else earns their tier. The cost is that stewards are trusted by role before they have a history; they are the people the circle already picked.
    - **A2: founding members start with starter points** (a one-time `STEWARD` grant at `circle.create`, decaying like any points). Fewer special cases, but points are meant to come from real activity and the grant is arbitrary.
    - **A3: no bootstrap.** Early on only essentials and everyday items can move, and tiers grow from those loans. Simple and strict, but VALUABLE and HIGH_VALUE items stay locked for weeks and nobody can vouch.
 
 **B. Enforcement.** Options: **B1 (recommended)**: the fold ignores requests that fail the check, as in point 4. **B2**: the screens warn but the fold accepts everything, so a modified client can borrow anything; the only protection is the owner's consent.
 
-**C. Reported damage or loss.** **C1 (recommended)**: nothing for either side, as in the table. **C2**: the owner still gets the small `LENT_ITEM_RETURNED_OK` credit because they lent in good faith. Either way the borrower is not penalised.
+**C. Reported damage or loss. Chosen: C1.** **C1 (recommended)**: nothing for either side, as in the table. **C2**: the owner still gets the small `LENT_ITEM_RETURNED_OK` credit because they lent in good faith. Either way the borrower is not penalised.
+
+## How the role floor is applied
+
+A steward's tier is at least TRUSTED for every decision (their own access, and whether their vouch counts), using the steward set as it was at the event being judged, not today's set. A steward who is removed keeps no floor for later events; events before their appointment are judged without it.
 
 ## Consequences
 

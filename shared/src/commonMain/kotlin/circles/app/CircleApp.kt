@@ -13,6 +13,7 @@ import circles.event.InviteKey
 import circles.event.ItemKeys
 import circles.event.MAX_ITEM_NAME_CHARS
 import circles.event.LoanId
+import circles.event.StandingRules
 import circles.event.LoanStatus
 import circles.event.MAX_LOAN_DAYS
 import circles.event.MAX_LOAN_NOTE_CHARS
@@ -22,7 +23,10 @@ import circles.event.newLoanId
 import circles.event.newItemId
 import circles.encoding.CborMap
 import circles.encoding.CborText
+import circles.policy.AccessDecision
 import circles.policy.ItemClass
+import circles.policy.Standing
+import circles.policy.Tier
 import circles.policy.ItemId
 import circles.event.KeyRing
 import circles.event.newCircleId
@@ -59,6 +63,9 @@ const val INVITE_USES = 1
 data class WaitingDevice(val device: DeviceId, val member: MemberId)
 
 const val MAX_ITEM_DESCRIPTION_CHARS = 500
+
+/** How long a vouch made here lasts; the circle's rules cap it too (ADR 0042). */
+const val VOUCH_DAYS = 180
 private const val FINGERPRINT_HEX_CHARS = 20
 private const val FINGERPRINT_GROUP = 4
 private const val DETAIL_DESCRIPTION = "description"
@@ -71,7 +78,21 @@ data class ItemSummary(
     val owner: MemberId,
     val ownedByMe: Boolean,
     val description: String?,
+    /** For items that are not mine: may I ask to borrow it? */
+    val access: AccessSummary? = null,
 )
+
+/** Your own standing in the circle (ADR 0042): never shown to anyone else. */
+data class StandingSummary(
+    val tier: Tier,
+    /** Points rounded to a tenth for display. */
+    val points: String,
+    val reasons: List<String>,
+    val howToUnlock: List<String>,
+)
+
+/** Whether this member may ask for an item, and if not why and how to change that. */
+data class AccessSummary(val canAsk: Boolean, val reasons: List<String>, val howToUnlock: List<String>)
 
 /** A person in the circle, as the Members screen shows them. */
 data class MemberSummary(
@@ -81,6 +102,8 @@ data class MemberSummary(
     val devices: Int,
     /** A short code from the first device's signing key, for comparing in person ("is this really you?"). */
     val fingerprint: String,
+    /** Until when my vouch for this person lasts, if I have a live one. */
+    val vouchedByMeUntil: Int? = null,
 )
 
 enum class LoanRole { BORROWER, OWNER }
@@ -114,8 +137,20 @@ sealed interface LoanResult {
 
     data object NotLetInYet : LoanResult
 
+    /** The circle's access rules say not yet; [reasons] and [howToUnlock] are for the member to read. */
+    data class NotYet(val reasons: List<String>, val howToUnlock: List<String>) : LoanResult
+
     /** Your own item, a retired item, someone else's loan, or a step the loan is not ready for. */
     data object NotAllowed : LoanResult
+}
+
+sealed interface VouchResult {
+    data class Done(val expiresDay: Int) : VouchResult
+
+    data object NotLetInYet : VouchResult
+
+    /** You may not vouch (below the needed tier), or the person is you, or not in the circle. */
+    data object NotAllowed : VouchResult
 }
 
 sealed interface ItemResult {
@@ -150,6 +185,10 @@ data class HomeData(
     val loans: List<LoanSummary> = emptyList(),
     /** Today as a day number, for date pickers. */
     val today: Int = 0,
+    /** My own standing; null until the circle has been read. */
+    val standing: StandingSummary? = null,
+    /** May I vouch for others right now? */
+    val canVouch: Boolean = false,
     /** Everyone in the circle, in the order they joined. */
     val people: List<MemberSummary> = emptyList(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
@@ -368,6 +407,23 @@ class CircleApp(
         return ItemResult.Saved(item)
     }
 
+    /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at Neighbour or above can. */
+    suspend fun vouchFor(member: MemberId): VouchResult {
+        val s = session ?: return VouchResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return VouchResult.NotLetInYet
+        val cfg = StandingRules.defaultConfig(s.circle)
+        val inCircle = view.devices.values.any { !it.revoked && it.registration.member == member }
+        if (member == s.identity.member || !inCircle) return VouchResult.NotAllowed
+        if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouches, view.stewards, today())) return VouchResult.NotAllowed
+        s.author.keyRing = view.keys
+        val expires = today() + VOUCH_DAYS
+        s.engine.enqueue(s.circle, s.author.vouch(s.circle, today(), member, expires))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return VouchResult.Done(expires)
+    }
+
     /** Asks to borrow someone else's item from [fromDay] to [toDay] (day numbers; see [CalendarDay]). */
     suspend fun requestLoan(item: ItemId, fromDay: Int, toDay: Int, note: String): LoanResult {
         val s = session ?: return LoanResult.NotAllowed
@@ -376,6 +432,10 @@ class CircleApp(
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
         val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member } ?: return LoanResult.NotAllowed
+        // The same rule every client applies when folding (ADR 0042); asking first spares the member a request that would be ignored.
+        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouches, view.stewards, today())
+        if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
+        if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
         s.author.keyRing = view.keys
         val loan = newLoanId(crypto)
         s.engine.enqueue(s.circle, s.author.loanRequest(s.circle, today(), loan, state.item, fromDay, toDay, note.trim().ifEmpty { null }))
@@ -468,6 +528,12 @@ class CircleApp(
         val waiting = if (view.currentEpoch < FIRST_EPOCH) emptyList() else view.devices.values
             .filter { !it.revoked && (it.registration.device to view.currentEpoch) !in wrapped }
             .map { WaitingDevice(it.registration.device, it.registration.member) }
+        val cfg = StandingRules.defaultConfig(s.circle)
+        val now = today()
+        val loansNow = view.market.loans.values
+        val vouchesNow = view.market.vouches
+        val me = s.identity.member
+        val myStanding = StandingRules.standingOf(me, cfg, loansNow, vouchesNow, view.stewards, now)
         mutableModel.value = AppModel.Open(
             HomeData(
                 circle = s.circle,
@@ -478,7 +544,14 @@ class CircleApp(
                 waiting = waiting,
                 changesWaiting = replica.outbox(s.circle).size,
                 refusedChanges = replica.refused(s.circle).size,
-                today = today(),
+                today = now,
+                standing = StandingSummary(
+                    tier = myStanding.tier,
+                    points = circles.policy.format1(myStanding.points),
+                    reasons = myStanding.reasons,
+                    howToUnlock = unlockHints(myStanding, cfg),
+                ),
+                canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 autoLockMinutes = vault.autoLockMinutes,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     MemberSummary(
@@ -487,6 +560,7 @@ class CircleApp(
                         isSteward = member in view.stewards,
                         devices = devices.size,
                         fingerprint = fingerprint(devices.first().registration.signPub),
+                        vouchedByMeUntil = vouchesNow.filter { it.voucher == me && it.vouchee == member && it.isLiveOn(now, cfg) }.maxOfOrNull { it.effectiveExpiry(cfg) },
                     )
                 },
                 loans = view.market.loans.values.filter { it.owner == s.identity.member || it.borrower == s.identity.member }.map { loan ->
@@ -516,10 +590,28 @@ class CircleApp(
                         owner = state.owner,
                         ownedByMe = state.owner == s.identity.member,
                         description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
+                        access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now)) {
+                            is AccessDecision.Eligible -> AccessSummary(true, emptyList(), emptyList())
+                            is AccessDecision.NotYet -> AccessSummary(false, decision.reasons, decision.howToUnlock)
+                            is AccessDecision.Paused -> AccessSummary(false, decision.reasons, emptyList())
+                            is AccessDecision.OwnItem -> null
+                        },
                     )
                 },
             ),
         )
+    }
+
+    /** Plain next steps for the standing page: what moves a member up (ADR 0042). */
+    private fun unlockHints(standing: Standing, cfg: circles.policy.CircleConfig): List<String> = buildList {
+        val next = Tier.entries.firstOrNull { it.rank > standing.tier.rank && it != Tier.STEWARD }
+        if (next == null) {
+            add("You have the highest tier that borrowing needs. Keep lending and returning well.")
+            return@buildList
+        }
+        val gap = ((cfg.thresholds[next] ?: 0.0) - standing.points).coerceAtLeast(0.0)
+        add("About ${circles.policy.format1(gap)} more standing points opens ${next.name.lowercase()} access: lend items and get them back, or borrow and return them on time.")
+        if (next.rank <= Tier.NEIGHBOUR.rank) add("Or get ${cfg.vouchesForNeighbour} neighbours to vouch for you (on the Members page).")
     }
 
     /** Twenty hex characters of the key's hash in groups of four, easy to read out loud. */

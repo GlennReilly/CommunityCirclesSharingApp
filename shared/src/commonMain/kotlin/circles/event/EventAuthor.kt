@@ -133,6 +133,10 @@ class EventAuthor(
     fun loanDecline(circle: CircleId, day: Int, loan: LoanId, fromDay: Int, toDay: Int, note: String? = null): Envelope =
         build(circle, EventType.LOAN_RESPOND, day, CborMap.EMPTY, MarketPayloads.loanRespond(LoanRespond(loan, false, fromDay, toDay, note, emptyList())))
 
+    /** Vouches for [vouchee] until [expiresDay] (the circle's rules cap how long a vouch lives). */
+    fun vouch(circle: CircleId, day: Int, vouchee: MemberId, expiresDay: Int): Envelope =
+        build(circle, EventType.VOUCH, day, CborMap.EMPTY, MarketPayloads.vouch(VouchTerms(vouchee, expiresDay)))
+
     fun loanHandover(circle: CircleId, day: Int, loan: LoanId): Envelope =
         build(circle, EventType.LOAN_HANDOVER, day, CborMap.EMPTY, MarketPayloads.loanHandover(LoanHandover(loan)))
 

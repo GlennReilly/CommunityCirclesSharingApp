@@ -106,4 +106,18 @@ class MarketPayloadsTest {
         val notAMap = CborMap(entries(odd) + ("keyWraps" to CborArray(listOf(CborBool(true)))))
         assertIs<Parsed.Invalid>(MarketPayloads.parseItemUpsert(notAMap))
     }
+
+    @Test
+    fun aVouchRoundTripsAndTheReaderIsStrict() {
+        val vouchee = circles.policy.MemberId("34".repeat(16))
+        val terms = VouchTerms(vouchee, 20_500)
+        assertEquals(terms, ok(MarketPayloads.parseVouch(MarketPayloads.vouch(terms))))
+        val good = MarketPayloads.vouch(terms).entries
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("extra" to CborInt(1)))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good - "expiresDay")))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("vouchee" to CborText("not-an-id")))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("expiresDay" to CborInt(-1)))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("expiresDay" to CborText("soon")))))
+        assertIs<Parsed.Invalid>(MarketPayloads.parseVouch(CborMap(good + ("expiresDay" to CborInt(5_000_000)))))
+    }
 }

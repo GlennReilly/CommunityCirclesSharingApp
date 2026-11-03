@@ -11,6 +11,7 @@ import circles.encoding.CborValue
 import circles.encoding.Parsed
 import circles.policy.ItemClass
 import circles.policy.ItemId
+import circles.policy.MemberId
 import circles.policy.Tier
 
 /** Limits of ADR 0025. */
@@ -19,6 +20,7 @@ const val MAX_LOAN_NOTE_CHARS = 256
 const val MAX_LOAN_DAYS = 90
 const val MAX_KEY_WRAPS = 16
 const val MAX_ITEM_DETAIL_BYTES = 16 * 1024
+private const val MAX_DAY = 1_000_000L
 
 /** A loan's id: random 128-bit lowercase hex, made by the borrower. */
 data class LoanId(val v: String)
@@ -47,6 +49,9 @@ data class LoanRespond(val loan: LoanId, val approve: Boolean, val fromDay: Int,
 
 data class LoanHandover(val loan: LoanId)
 
+/** A member vouches for another until [expiresDay] (the policy caps it; ADR 0042). */
+data class VouchTerms(val vouchee: MemberId, val expiresDay: Int)
+
 data class LoanReturn(val loan: LoanId, val outcome: ReturnOutcome)
 
 private const val K_ITEM = "item"
@@ -62,6 +67,8 @@ private const val K_TO = "toDay"
 private const val K_NOTE = "note"
 private const val K_APPROVE = "approve"
 private const val K_OUTCOME = "outcome"
+private const val K_VOUCHEE = "vouchee"
+private const val K_EXPIRES = "expiresDay"
 private const val K_DEVICE = "device"
 private const val K_WRAPPED = "wrapped"
 
@@ -104,6 +111,8 @@ object MarketPayloads {
         },
     )
 
+    fun vouch(v: VouchTerms): CborMap = CborMap.of(K_VOUCHEE to CborText(v.vouchee.v), K_EXPIRES to CborInt(v.expiresDay.toLong()))
+
     fun loanHandover(v: LoanHandover): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v))
 
     fun loanReturn(v: LoanReturn): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v), K_OUTCOME to CborText(v.outcome.name))
@@ -140,6 +149,13 @@ object MarketPayloads {
         val (from, to) = window(map) ?: return Parsed.Invalid("the window must be 0 to $MAX_LOAN_DAYS days with fromDay not after toDay")
         val note = optionalNote(map) ?: return Parsed.Invalid("note must be at most $MAX_LOAN_NOTE_CHARS characters")
         return Parsed.Ok(LoanRequest(LoanId(loan), ItemId(item), from, to, note.value))
+    }
+
+    fun parseVouch(map: CborMap): Parsed<VouchTerms> {
+        keys(map, required = setOf(K_VOUCHEE, K_EXPIRES))?.let { return Parsed.Invalid(it) }
+        val vouchee = randomId(map, K_VOUCHEE) ?: return Parsed.Invalid("vouchee must be 32 lowercase hex characters")
+        val expires = (map[K_EXPIRES] as? CborInt)?.value?.takeIf { it in 0..MAX_DAY } ?: return Parsed.Invalid("expiresDay must be a day number")
+        return Parsed.Ok(VouchTerms(MemberId(vouchee), expires.toInt()))
     }
 
     fun parseLoanRespond(map: CborMap): Parsed<LoanRespond> {

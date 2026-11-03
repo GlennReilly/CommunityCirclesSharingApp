@@ -48,8 +48,8 @@ abstract class MarketContract {
         fun reasons(extra: List<Envelope>, who: EventAuthor = founder): List<String> = foldAs(who, log + extra).rejected.map { it.reason }
 
         /** Founder creates the circle; bea and carol join; everyone is wrapped the circle key. */
-        fun start() {
-            log += founder.circleCreate(circle, DAY)
+        fun start(settings: StewardSettings? = null) {
+            log += founder.circleCreate(circle, DAY, settings)
             log += founder.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, DAY)
             listOf(bea, carol).forEach { joiner ->
                 val invite = InviteKey(crypto.generateSigningKeyPair())
@@ -75,6 +75,26 @@ abstract class MarketContract {
     }
 
     private suspend fun world() = World(newCrypto(), newCipher()).also { it.start() }
+
+    /** Shares a new item of [itemClass] owned by [owner]; returns its id and key. */
+    private fun World.share(owner: EventAuthor, itemClass: ItemClass): Pair<ItemId, ByteString> {
+        val id = newItemId(crypto)
+        val key = ItemKeys.newKey(crypto)
+        log += owner.itemUpsert(circle, DAY, id, "Thing", itemClass, newDetailKeyId(crypto), key, listOf(owner.identity.registration))
+        return id to key
+    }
+
+    private fun World.requestOf(by: EventAuthor, item: ItemId, day: Int = DAY) = by.loanRequest(circle, day, newLoanId(crypto), item, day + 1, day + 3)
+
+    /** A whole good loan from [owner] to [borrower], returned OK on [returnDay]. */
+    private fun World.goodLoan(owner: EventAuthor, borrower: EventAuthor, item: ItemId, key: ByteString, day: Int, returnDay: Int) {
+        val loan = newLoanId(crypto)
+        log += borrower.loanRequest(circle, day, loan, item, day, day + 2)
+        log += owner.loanApprove(circle, day, loan, item, day, day + 2, key, listOf(borrower.identity.registration))
+        log += owner.loanHandover(circle, day, loan)
+        log += borrower.loanHandover(circle, day, loan)
+        log += borrower.loanReturn(circle, returnDay, loan, ReturnOutcome.OK)
+    }
 
     @Test
     fun aLoanGoesFromRequestToReturnAndOnlyTheApprovedBorrowerReadsTheDetail() = runTest {
@@ -309,5 +329,124 @@ abstract class MarketContract {
         val reasons = w.reasons(listOf(tooLong))
         assertEquals(1, reasons.size)
         assertTrue(reasons.single().startsWith("the window must be"), reasons.toString())
+    }
+
+    @Test
+    fun aNewcomerMayAskForEssentialsAndEverydayItemsButNotValuableOnes() = runTest {
+        val w = world()
+        val (essential, _) = w.share(w.founder, ItemClass.ESSENTIAL)
+        val (everyday, _) = w.share(w.founder, ItemClass.EVERYDAY)
+        val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
+        val (highValue, _) = w.share(w.founder, ItemClass.HIGH_VALUE)
+        assertEquals(emptyList(), w.reasons(listOf(w.requestOf(w.bea, essential), w.requestOf(w.bea, everyday))))
+        val refused = w.reasons(listOf(w.requestOf(w.bea, valuable), w.requestOf(w.bea, highValue)))
+        assertEquals(2, refused.size)
+        assertTrue(refused.all { it.startsWith("access check: ") }, refused.toString())
+        assertTrue(refused[0].contains("needs NEIGHBOUR") && refused[1].contains("needs TRUSTED"), refused.toString())
+        assertTrue(refused[0].contains("vouch"), "a newcomer is told the vouch route")
+    }
+
+    @Test
+    fun aStewardCountsAsTrustedForTheirOwnRequestsButNotTheirOwnItems() = runTest {
+        val w = world()
+        val (heavy, _) = w.share(w.bea, ItemClass.HIGH_VALUE)
+        assertEquals(emptyList(), w.reasons(listOf(w.requestOf(w.founder, heavy))), "the steward floor opens high-value items")
+        assertEquals(1, w.reasons(listOf(w.requestOf(w.carol, heavy))).size, "an ordinary member is still held back")
+        val (own, _) = w.share(w.founder, ItemClass.ESSENTIAL)
+        assertTrue(w.reasons(listOf(w.requestOf(w.founder, own))).single().contains("own item"))
+    }
+
+    @Test
+    fun theStewardFloorUsesTheStewardsOfThatMomentNotOfToday() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        val (heavy, _) = w.share(w.carol, ItemClass.HIGH_VALUE)
+        val before = w.requestOf(w.bea, heavy, DAY)
+        w.log += before
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)
+        val after = w.requestOf(w.bea, heavy, DAY + 2)
+        w.log += after
+        val view = w.foldAs(w.founder)
+        val rejected = view.rejected.map { it.id }
+        assertTrue(before.eventId(w.crypto) in rejected, "before bea was a steward the request fails")
+        assertFalse(after.eventId(w.crypto) in rejected, "after, the floor applies")
+    }
+
+    @Test
+    fun vouchesFollowTheRulesOfAdr0042() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        val founderVouch = w.founder.vouch(w.circle, DAY, w.carol.identity.member, DAY + 100)
+        val byNewcomer = w.bea.vouch(w.circle, DAY, w.carol.identity.member, DAY + 100)
+        val ofSelf = w.founder.vouch(w.circle, DAY, w.founder.identity.member, DAY + 100)
+        val ofStranger = w.founder.vouch(w.circle, DAY, newMemberId(w.crypto), DAY + 100)
+        w.log += listOf(founderVouch, byNewcomer, ofSelf, ofStranger)
+        val view = w.foldAs(w.founder)
+        assertEquals(listOf(w.founder.identity.member to w.carol.identity.member), view.market.vouches.map { it.voucher to it.vouchee })
+        val reasons = view.rejected.associate { it.id to it.reason }
+        assertTrue(reasons.getValue(byNewcomer.eventId(w.crypto)).contains("neighbour or above"))
+        assertTrue(reasons.getValue(ofSelf.eventId(w.crypto)).contains("themselves"))
+        assertTrue(reasons.getValue(ofStranger.eventId(w.crypto)).contains("not in the circle"))
+        assertFalse(founderVouch.eventId(w.crypto) in reasons)
+    }
+
+    @Test
+    fun twoVouchesFromQualifiedMembersOpenNeighbourAccessUntilTheyExpire() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
+        val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
+        w.log += w.founder.vouch(w.circle, DAY + 1, w.carol.identity.member, DAY + 400)
+        val oneVouch = w.requestOf(w.carol, valuable, DAY + 2)
+        w.log += oneVouch
+        w.log += w.bea.vouch(w.circle, DAY + 3, w.carol.identity.member, DAY + 400)
+        val twoVouches = w.requestOf(w.carol, valuable, DAY + 4)
+        w.log += twoVouches
+        // A vouch lives at most 180 days whatever the author wrote: by day + 190 both have lapsed.
+        val lapsed = w.requestOf(w.carol, valuable, DAY + 190)
+        w.log += lapsed
+        val rejected = w.foldAs(w.founder).rejected.map { it.id }
+        assertTrue(oneVouch.eventId(w.crypto) in rejected, "one vouch is not enough")
+        assertFalse(twoVouches.eventId(w.crypto) in rejected, "two stewards' vouches open Neighbour access")
+        assertTrue(lapsed.eventId(w.crypto) in rejected, "expired vouches no longer count")
+    }
+
+    @Test
+    fun lendingAndGettingItBackEarnsAccessOnlyAfterTheGracePeriod() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        val (lent, lentKey) = w.share(w.bea, ItemClass.EVERYDAY)
+        val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
+        // Bea lends the item four times, twice to carol and twice to the founder, all returned on the same day; each good
+        // return earns 1.0 (up to three per counterpart), so she has 4.0 points once the grace period is over.
+        listOf(w.carol, w.carol, w.founder, w.founder).forEach { w.goodLoan(w.bea, it, lent, lentKey, DAY, DAY + 2) }
+        val lastReturn = DAY + 2
+        val tooSoon = w.requestOf(w.bea, valuable, lastReturn + RETURN_GRACE_DAYS - 1)
+        val afterGrace = w.requestOf(w.bea, valuable, lastReturn + RETURN_GRACE_DAYS)
+        w.log += listOf(tooSoon, afterGrace)
+        val view = w.foldAs(w.founder)
+        val rejected = view.rejected.map { it.id }
+        assertTrue(tooSoon.eventId(w.crypto) in rejected, "before the grace period the returns do not count")
+        assertFalse(afterGrace.eventId(w.crypto) in rejected, "four good loans reach Neighbour")
+        assertEquals(4, view.market.loans.values.count { it.status == LoanStatus.RETURNED && it.returnedDay == DAY + 2 })
+    }
+
+    @Test
+    fun reportedDamageEarnsNothingAndAnLateOkCountsAgainstTheBorrower() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        val (item, key) = w.share(w.bea, ItemClass.EVERYDAY)
+        val damaged = newLoanId(w.crypto)
+        w.log += w.carol.loanRequest(w.circle, DAY, damaged, item, DAY, DAY + 2)
+        w.log += w.bea.loanApprove(w.circle, DAY, damaged, item, DAY, DAY + 2, key, listOf(w.carol.identity.registration))
+        w.log += w.bea.loanHandover(w.circle, DAY, damaged)
+        w.log += w.carol.loanHandover(w.circle, DAY, damaged)
+        w.log += w.carol.loanReturn(w.circle, DAY + 2, damaged, ReturnOutcome.DAMAGED_REPORTED)
+        val loans = w.foldAs(w.founder).market.loans.values
+        assertEquals(emptyList(), StandingRules.eventsFrom(loans, w.circle, DAY + 100))
+        val late = loans.first().copy(outcome = ReturnOutcome.OK, returnedDay = DAY + 5)
+        val kinds = StandingRules.eventsFrom(listOf(late), w.circle, DAY + 100).associate { it.member to it.kind }
+        assertEquals(circles.policy.EventKind.LENT_ITEM_RETURNED_OK, kinds[late.owner])
+        assertEquals(circles.policy.EventKind.RETURNED_LATE, kinds[late.borrower])
     }
 }

@@ -6,6 +6,8 @@ import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.ItemResult
 import circles.app.LoanResult
+import circles.app.VouchResult
+import circles.policy.Tier
 import circles.app.LoanRole
 import circles.event.LoanStatus
 import circles.event.MAX_LOAN_DAYS
@@ -52,11 +54,11 @@ class CircleAppEndToEndTest {
 
     private class Browser(val app: CircleApp, val store: KeyStore, val replica: InMemoryReplica)
 
-    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null): Browser {
+    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null, today: () -> Int = { TODAY }): Browser {
         val hasher = JvmPasswordHasher()
         val vault = KeyVault(deadScope, crypto, testCipher, hasher, store, AutoLock.UntilTabCloses, FAST)
         val local = replica ?: InMemoryReplica { it.eventId(crypto) }
-        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, { TODAY })
+        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today)
         return Browser(app, store, local)
     }
 
@@ -318,5 +320,76 @@ class CircleAppEndToEndTest {
         // The server never saw the dates, notes or outcomes in the clear.
         val dump = server.rows("SELECT public, encrypted FROM events").joinToString { row -> row.joinToString { (it as? ByteArray)?.decodeToString().orEmpty() } }
         assertFalse("fence" in dump || "away that week" in dump || "DAMAGED" in dump)
+    }
+
+    @Test
+    fun lendingEarnsAccessAndVouchingFollowsTheRules() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        var day = TODAY
+        val alice = browser(transport, crypto, today = { day })
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto, today = { day })
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+
+        val drill = (alice.app.addItem("Drill", ItemClass.VALUABLE, "") as ItemResult.Saved).item
+        val ladder = (bea.app.addItem("Ladder", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+
+        // The founder is a steward, so counts as trusted; Bea starts as a newcomer and is told why and how to change that.
+        assertEquals(Tier.TRUSTED, home(alice.app).standing!!.tier)
+        assertTrue(home(alice.app).canVouch)
+        val before = home(bea.app)
+        assertEquals(Tier.NEWCOMER, before.standing!!.tier)
+        assertFalse(before.canVouch)
+        val drillAccess = before.items.single { it.item == drill }.access!!
+        assertFalse(drillAccess.canAsk)
+        assertTrue(drillAccess.reasons.any { it.contains("needs NEIGHBOUR") })
+        assertTrue(drillAccess.howToUnlock.any { it.contains("vouch") })
+        assertNull(before.items.single { it.item == ladder }.access, "no access line on your own item")
+        assertTrue(before.standing!!.howToUnlock.isNotEmpty())
+        val refused = assertIs<LoanResult.NotYet>(bea.app.requestLoan(drill, day + 1, day + 2, ""))
+        assertTrue(refused.reasons.any { it.contains("needs NEIGHBOUR") })
+        assertEquals(0, home(bea.app).changesWaiting, "a request that would be ignored is not even queued")
+        assertEquals(VouchResult.NotAllowed, bea.app.vouchFor(home(bea.app).people.single { !it.isMe }.member), "a newcomer cannot vouch")
+        assertEquals(VouchResult.NotAllowed, alice.app.vouchFor(home(alice.app).me), "nobody vouches for themselves")
+
+        // Alice borrows Bea's ladder three times and returns it each time; Bea, as the lender, earns 1.0 per good return.
+        repeat(3) {
+            val loan = (alice.app.requestLoan(ladder, day, day + 2, "") as LoanResult.Done).loan
+            alice.app.syncOnce(); bea.app.syncOnce()
+            assertIs<LoanResult.Done>(bea.app.respondToLoan(loan, approve = true, note = ""))
+            bea.app.syncOnce(); alice.app.syncOnce()
+            assertIs<LoanResult.Done>(bea.app.confirmHandover(loan)); assertIs<LoanResult.Done>(alice.app.confirmHandover(loan))
+            bea.app.syncOnce(); alice.app.syncOnce()
+            assertIs<LoanResult.Done>(alice.app.returnLoan(loan, ReturnOutcome.OK))
+            alice.app.syncOnce(); bea.app.syncOnce()
+        }
+        assertEquals(0, home(alice.app).refusedChanges)
+        assertEquals(Tier.NEWCOMER, home(bea.app).standing!!.tier, "returns count only after the grace period")
+
+        day += 7
+        server.clock.advanceSeconds(7L * 24 * 60 * 60) // the server refuses events dated in its future
+        bea.app.syncOnce(); alice.app.syncOnce()
+        val after = home(bea.app)
+        assertEquals(Tier.NEIGHBOUR, after.standing!!.tier)
+        assertEquals("3.0", after.standing!!.points)
+        assertTrue(after.canVouch)
+        assertTrue(after.items.single { it.item == drill }.access!!.canAsk)
+        assertIs<LoanResult.Done>(bea.app.requestLoan(drill, day + 1, day + 2, "at last"))
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+
+        // Vouching: Alice (steward) vouches for Bea; the Members page shows it until the expiry; Bea (now a neighbour) may too.
+        val vouched = assertIs<VouchResult.Done>(alice.app.vouchFor(home(bea.app).me))
+        assertEquals(day + 180, vouched.expiresDay)
+        assertEquals(day + 180, home(alice.app).people.single { !it.isMe }.vouchedByMeUntil)
+        assertNull(home(alice.app).people.single { it.isMe }.vouchedByMeUntil)
+        assertIs<VouchResult.Done>(bea.app.vouchFor(home(alice.app).me))
+        assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
     }
 }

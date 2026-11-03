@@ -61,14 +61,23 @@ class CircleFold(
     fun fold(circle: CircleId, log: List<Envelope>): CircleView {
         val state = State(circle)
         val accepted = mutableListOf<Pair<EventId, Envelope>>()
+        // The steward set as it stood after each accepted event, so the standing floor can use "stewards then" (ADR 0042).
+        val stewardsAfter = mutableMapOf<EventId, Set<MemberId>>()
+        var currentStewards: Set<MemberId> = emptySet()
         for ((index, envelope) in log.withIndex()) {
             val id = envelope.eventId(crypto)
             val problem = if (envelope.circle != circle) "event belongs to another circle" else state.apply(envelope, id, index.toLong())
             if (problem == null) state.noteActivity(envelope.author, envelope.day, index.toLong())
-            if (problem == null) accepted += id to envelope else state.rejected += RejectedEvent(id, envelope.type, problem)
+            if (problem == null) {
+                accepted += id to envelope
+                if (state.stewards.keys != currentStewards) currentStewards = state.stewards.keys.toSet()
+                stewardsAfter[id] = currentStewards
+            } else {
+                state.rejected += RejectedEvent(id, envelope.type, problem)
+            }
         }
         val opened = accepted.map { (id, envelope) -> OpenedEvent(id, envelope, PayloadSealing.open(cipher, state.keys, envelope)) }
-        val market = MarketFold(cipher, me, circle, state.devices, mayBorrow).fold(opened)
+        val market = MarketFold(cipher, me, circle, state.devices, mayBorrow, { stewardsAfter[it].orEmpty() }).fold(opened)
         val refused = opened.filter { it.id in market.rejected }.map { RejectedEvent(it.id, it.envelope.type, market.rejected.getValue(it.id)) }
         return CircleView(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
