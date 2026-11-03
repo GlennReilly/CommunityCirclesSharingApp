@@ -6,7 +6,13 @@ import kotlinx.serialization.Serializable
 
 /** What a browser keeps about its own identity: public ids plus the wrapped seed. Nothing here lets anyone act as the member. */
 @Serializable
-data class StoredIdentity(val member: String, val device: String, val wrapped: WrappedSeed) {
+data class StoredIdentity(
+    val member: String,
+    val device: String,
+    val wrapped: WrappedSeed,
+    /** The circle this browser is part of (v1 shows one circle); null until the device starts or joins one. */
+    val circle: String? = null,
+) {
     val memberId: MemberId get() = MemberId(member)
     val deviceId: DeviceId get() = DeviceId(device)
 }

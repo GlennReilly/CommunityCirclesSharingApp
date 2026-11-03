@@ -20,3 +20,9 @@ class JsKeyVaultTest : KeyVaultContract() {
     override suspend fun newCipher(): Cipher = JsCipher()
     override fun newHasher(): PasswordHasher = JsPasswordHasher()
 }
+
+class JsCircleAppTest : circles.app.CircleAppContract() {
+    override suspend fun newCrypto(): Crypto = JsCrypto()
+    override suspend fun newCipher(): Cipher = JsCipher()
+    override fun newHasher(): PasswordHasher = JsPasswordHasher()
+}

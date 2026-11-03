@@ -23,4 +23,4 @@ The server serves the bundle at `/` (ADR 0037): `./gradlew :server:shadowJar`, t
 
 The sync engine, `IndexedDbReplica` and `FetchTransport` live in `shared` (ADR 0038) and are tested there; the shell shows the engine's `SyncState`.
 
-Not built yet: service worker, sign-in and key storage, wiring the engine into the page, the screens, an axe check in CI.
+Sign-in, joining by invite link, unlock/lock and the Home screen work end to end (see `tools/browser-e2e`). Not built yet: service worker, the other eight screens, passkey wrapping, the recovery code, the event-stream reader, an axe check in CI.

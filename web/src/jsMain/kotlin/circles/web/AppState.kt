@@ -1,28 +1,54 @@
 package circles.web
 
+import circles.app.AppModel
+import circles.app.InviteLink
 import circles.sync.SyncState
 
 data class AppState(
     val screen: Screen = Screen.SignIn,
-    val signedIn: Boolean = false,
+    /** What the client knows: loading, no identity, locked, or open with the home data (from `CircleApp`). */
+    val model: AppModel = AppModel.Loading,
     val sync: SyncState = SyncState.Offline(changesWaiting = 0),
     val updateAvailable: Boolean = false,
-)
+    /** An invite link found in the address when the page opened; offered to the join form. */
+    val pendingInvite: InviteLink? = null,
+    /** A message for the user (an error, or a plain "done"), shown in a live region until dismissed. */
+    val notice: String? = null,
+    /** The invite link just made, shown once so it can be copied. */
+    val newInvite: String? = null,
+) {
+    val signedIn: Boolean get() = model is AppModel.Open
+}
 
 sealed interface AppAction {
     data class Navigate(val screen: Screen) : AppAction
-    data class SignedIn(val value: Boolean) : AppAction
+    data class ModelChanged(val model: AppModel) : AppAction
     data class SyncChanged(val state: SyncState) : AppAction
+    data class InviteSeen(val link: InviteLink?) : AppAction
+    data class Notice(val text: String?) : AppAction
+    data class InviteMade(val link: String?) : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
 }
 
-/** Pure state transition. Signed-out users can only see the sign-in screen; signed-in users never land on it. */
+/** Pure state transition. Signed-out users never leave the sign-in pages; signed-in users never land on them. */
 fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     is AppAction.Navigate -> state.copy(screen = allowed(state.signedIn, action.screen))
-    is AppAction.SignedIn ->
-        state.copy(signedIn = action.value, screen = allowed(action.value, if (action.value) Screen.Home else Screen.SignIn))
+    is AppAction.ModelChanged -> {
+        val open = action.model is AppModel.Open
+        state.copy(
+            model = action.model,
+            screen = if (open) allowed(true, state.screen) else Screen.SignIn,
+            // Leaving the open state forgets anything that was only meant for the open screens.
+            newInvite = if (open) state.newInvite else null,
+            // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
+            pendingInvite = if (action.model is AppModel.Locked || action.model is AppModel.Open) null else state.pendingInvite,
+        )
+    }
     is AppAction.SyncChanged -> state.copy(sync = action.state)
+    is AppAction.InviteSeen -> state.copy(pendingInvite = action.link)
+    is AppAction.Notice -> state.copy(notice = action.text)
+    is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)
     AppAction.UpdateAccepted -> state.copy(updateAvailable = false)
 }

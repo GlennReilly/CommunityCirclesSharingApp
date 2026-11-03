@@ -20,3 +20,9 @@ class KeyVaultTest : KeyVaultContract() {
     override suspend fun newCipher(): Cipher = LibsodiumCipher()
     override fun newHasher(): PasswordHasher = JvmPasswordHasher()
 }
+
+class CircleAppTest : circles.app.CircleAppContract() {
+    override suspend fun newCrypto(): Crypto = JvmCrypto()
+    override suspend fun newCipher(): Cipher = LibsodiumCipher()
+    override fun newHasher(): PasswordHasher = JvmPasswordHasher()
+}
