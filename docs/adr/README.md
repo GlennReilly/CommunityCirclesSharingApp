@@ -40,6 +40,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0034](0034-operator-import-token-for-new-circles.md) | An operator-issued import token for new circles (amends 0033) | Accepted |
 | [0035](0035-browser-crypto-with-noble.md) | Browser cryptography with the noble libraries (amends 0018) | Accepted |
 | [0036](0036-browser-local-storage-with-indexeddb.md) | Browser local storage with IndexedDB, and verify once | Accepted |
+| [0037](0037-serve-the-web-client-from-the-server.md) | Serve the web client from the server, same origin | Accepted |
 
 ## Open decisions still to record
 

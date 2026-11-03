@@ -136,7 +136,8 @@ class BlobApiTest {
         LiveServer(TestServer()).use { live ->
             val m = live.member()
             assertEquals(404, live.request("GET", blobPath(m.circle, "ab".repeat(32)), m.token).status)
-            assertEquals(404, live.request("GET", blobPath(m.circle, "../../etc/passwd"), m.token).status)
+            // A path with `..` is refused outright (400) before it can reach any file.
+            assertEquals(400, live.request("GET", blobPath(m.circle, "../../etc/passwd"), m.token).status)
         }
     }
 

@@ -58,6 +58,7 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.plugins.origin
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -106,6 +107,8 @@ fun Application.module(services: Services) {
     install(RequestLogging) { log = services.log }
     install(StatusPages) {
         exception<CancellationException> { _, cause -> throw cause }
+        // Ktor raises this for requests it cannot route safely, such as a path with `..` reaching the static client.
+        exception<BadRequestException> { call, _ -> call.respondProblem(HttpStatusCode.BadRequest, "Bad request") }
         exception<Throwable> { call, cause ->
             // Class and first frames only: the message may carry data (ADR 0016).
             services.log.error(
@@ -128,6 +131,7 @@ fun Application.module(services: Services) {
             circleRoutes(services)
             adminRoutes(services)
         }
+        webApp()
     }
 }
 

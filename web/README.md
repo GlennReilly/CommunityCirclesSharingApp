@@ -19,4 +19,6 @@ Rules: logic never depends on the DOM (it is tested in Node with `:web:jsNodeTes
 
 The budget check measures what is actually bundled. `shared` is a dependency but unused so far, so the number (about 19 KB gzipped) will grow as the client starts using the fold, the crypto and the sync code; ADR 0009 expects roughly 100 KB for the Kotlin side and 22 KB for noble.
 
-Not built yet: service worker, sign-in, IndexedDB layer, sync engine, the screens, serving the bundle from the server, an axe check in CI.
+The server serves the bundle at `/` (ADR 0037): `./gradlew :server:shadowJar`, then `java -jar server/build/libs/circles-server.jar serve` and open http://localhost:8080 (`:server:run` also works).
+
+Not built yet: service worker, sign-in, IndexedDB layer, sync engine, the screens, an axe check in CI.

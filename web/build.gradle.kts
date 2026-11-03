@@ -55,3 +55,12 @@ val checkBundleBudget = tasks.register<BundleBudgetTask>("checkBundleBudget") {
 }
 
 tasks.named("check") { dependsOn(checkBundleBudget) }
+
+// The deployable client: the bundle plus the static files, in one folder that the server packs (ADR 0037).
+val webDist = tasks.register<Sync>("webDist") {
+    from(tasks.named("jsBrowserProductionWebpack").map { (it as org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpack).outputDirectory }) {
+        include("circles.js")
+    }
+    from(layout.projectDirectory.dir("src/jsMain/resources")) { include("index.html", "styles.css") }
+    into(layout.buildDirectory.dir("dist/web"))
+}

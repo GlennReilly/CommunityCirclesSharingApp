@@ -52,12 +52,22 @@ tasks.register<Test>("loadTest") {
     maxHeapSize = "2g"
 }
 
+// The web client (ADR 0037) is packed under web/ in the jar, and added to the classpath of `run`.
+val webDistParent = project(":web").layout.buildDirectory.dir("dist")
+
+tasks.run {
+    dependsOn(":web:webDist")
+    classpath(webDistParent)
+}
+
 // One runnable jar with everything inside (ADR 0017): java -jar server/build/libs/circles-server.jar serve
 tasks.shadowJar {
     archiveBaseName = "circles-server"
     archiveClassifier = ""
     archiveVersion = ""
     mergeServiceFiles()
+    dependsOn(":web:webDist")
+    from(webDistParent)
     // BouncyCastle ships signature files that are invalid once its classes are repackaged.
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
     // Netty ships HTTP/3 (QUIC) natives for five platforms; the server speaks HTTP over TCP only.
