@@ -14,6 +14,7 @@ import circles.app.StartResult
 import circles.crypto.JsCipher
 import circles.crypto.JsCrypto
 import circles.event.DeviceId
+import circles.keys.ChangePassphraseResult
 import circles.keys.JsPasswordHasher
 import circles.keys.KeyVault
 import circles.keys.UnlockResult
@@ -158,6 +159,20 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val item = state.borrowing
                     if (from == null || to == null || item == null) dispatch(AppAction.Notice("Choose both dates."))
                     else reportLoan(circleApp.requestLoan(item, from, to, field(FIELD_NOTE)), "Request sent.", Screen.Borrow)
+                }
+                FORM_CHANGE_PASSPHRASE -> dispatch(
+                    AppAction.Notice(
+                        when (val result = circleApp.changePassphrase(field(FIELD_CURRENT), field(FIELD_NEW))) {
+                            ChangePassphraseResult.Changed -> "Passphrase changed. Use the new one next time you unlock."
+                            ChangePassphraseResult.WrongPassphrase -> "The current passphrase was not right."
+                            is ChangePassphraseResult.TooShort -> "The new passphrase must be at least ${result.minimum} characters."
+                            ChangePassphraseResult.NotUnlocked -> "Unlock first."
+                        },
+                    ),
+                )
+                FORM_AUTOLOCK -> field(FIELD_MINUTES).toIntOrNull()?.let {
+                    circleApp.setAutoLockMinutes(it)
+                    dispatch(AppAction.Notice("Saved."))
                 }
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))

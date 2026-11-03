@@ -1,5 +1,6 @@
 import { startServer, startChrome, sleep } from './lib.mjs';
 const PASS = 'correct horse battery staple';
+const PASS_NEW = 'second passphrase for alice';
 const server = await startServer(); const alice = await startChrome(9333); const bea = await startChrome(9334);
 const text = c => c.evaluate('document.getElementById("app").innerText');
 async function until(c, expr, what, ms = 20000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await sleep(250); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
@@ -100,10 +101,22 @@ try {
   await setField(alice, 'item-add-form', 'name', 'Rake'); await alice.evaluate('document.getElementById("item-add-form").requestSubmit()');
   await until(alice, has(alice, 'Rake'), 'rake listed', 10000);
   const t0 = Date.now(); await until(bea, has(bea, 'Rake'), 'bea sees the rake without syncing', 15000); ok('bea saw the new item by itself after ' + (Date.now() - t0) + ' ms (event stream, no sync click)');
+  // Settings: wrong current passphrase, a good change, and the idle lock choice.
+  await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.getElementById("change-passphrase-form") !== null', 'settings page');
+  if (!(await buttonHidden(alice, 'change-passphrase-form'))) throw new Error('change button visible with empty fields');
+  await setField(alice, 'change-passphrase-form', 'current', 'x'); if (!(await buttonHidden(alice, 'change-passphrase-form'))) throw new Error('change button visible with one field');
+  await setField(alice, 'change-passphrase-form', 'new', PASS_NEW); if (await buttonHidden(alice, 'change-passphrase-form')) throw new Error('change button hidden with both fields');
+  await alice.evaluate('document.getElementById("change-passphrase-form").requestSubmit()'); await until(alice, has(alice, 'The current passphrase was not right'), 'wrong current'); ok('changing the passphrase needs the right current one');
+  await setField(alice, 'change-passphrase-form', 'current', PASS); await setField(alice, 'change-passphrase-form', 'new', PASS_NEW);
+  await alice.evaluate('document.getElementById("change-passphrase-form").requestSubmit()'); await until(alice, has(alice, 'Passphrase changed'), 'changed'); ok('passphrase changed');
+  await alice.evaluate('(() => { const f = document.getElementById("autolock-form"); f.elements.namedItem("minutes").value = "5"; f.requestSubmit(); return true; })()');
+  await until(alice, has(alice, 'Saved.'), 'lock saved'); await alice.evaluate('location.hash = "#/home"'); await alice.evaluate('location.hash = "#/settings"');
+  await until(alice, 'document.getElementById("minutes") !== null && document.getElementById("minutes").value === "5"', 'lock choice remembered'); ok('idle lock choice saved (5 minutes)');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
-  await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked, circle intact with 2 members');
+  await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'That passphrase did not work'), 'old passphrase refused'); ok('the old passphrase no longer works');
+  await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked with the new passphrase, circle intact with 2 members');
   const stored = await alice.evaluate(`new Promise(r => { const q = indexedDB.open('circles'); q.onsuccess = () => { const tx = q.result.transaction(['keys'], 'readonly'); const g = tx.objectStore('keys').get('identity'); g.onsuccess = () => r(JSON.stringify(g.result)); }; })`);
   if (/seed/i.test(stored.replace(/"(sealed|salt)"/g, ''))) console.log('note: stored text mentions seed', stored.slice(0, 200));
   ok('stored identity is only the wrapped blob: ' + stored.slice(0, 120) + '...');

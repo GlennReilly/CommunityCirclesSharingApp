@@ -14,7 +14,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-const val DEFAULT_IDLE_LOCK_MILLIS = 15L * 60 * 1000
+const val DEFAULT_IDLE_LOCK_MINUTES = 15
+const val MILLIS_PER_MINUTE = 60_000L
+const val DEFAULT_IDLE_LOCK_MILLIS = DEFAULT_IDLE_LOCK_MINUTES * MILLIS_PER_MINUTE
+
+/** The choices the settings page offers, in minutes; 0 means only when the tab closes. */
+val AUTO_LOCK_CHOICES_MINUTES: List<Int> = listOf(5, DEFAULT_IDLE_LOCK_MINUTES, 60, 0)
 
 /** When unlocked keys are dropped from memory (ADR 0039). Keys are never written anywhere in the clear either way. */
 sealed interface AutoLock {
@@ -39,6 +44,13 @@ sealed interface CreateResult {
     class Created(val identity: DeviceIdentity) : CreateResult
     data class PassphraseTooShort(val minimum: Int) : CreateResult
     data object AlreadyHasIdentity : CreateResult
+}
+
+sealed interface ChangePassphraseResult {
+    data object Changed : ChangePassphraseResult
+    data object WrongPassphrase : ChangePassphraseResult
+    data class TooShort(val minimum: Int) : ChangePassphraseResult
+    data object NotUnlocked : ChangePassphraseResult
 }
 
 sealed interface UnlockResult {
@@ -68,8 +80,36 @@ class KeyVault(
 
     /** Reads the store at start-up: [VaultState.Locked] if an identity is saved, otherwise [VaultState.Empty]. */
     suspend fun open() {
-        mutableState.value = store.load()?.let { VaultState.Locked(it.memberId, it.deviceId) } ?: VaultState.Empty
+        val stored = store.load()
+        stored?.autoLockMinutes?.let { autoLock = ruleOf(it) }
+        mutableState.value = stored?.let { VaultState.Locked(it.memberId, it.deviceId) } ?: VaultState.Empty
     }
+
+    /** The idle time in force, in minutes (0: only when the tab closes). */
+    val autoLockMinutes: Int get() = (autoLock as? AutoLock.AfterIdle)?.let { (it.millis / MILLIS_PER_MINUTE).toInt() } ?: 0
+
+    /** Changes and remembers the idle time (minutes; 0 means only when the tab closes), and restarts the timer. */
+    suspend fun setAutoLockMinutes(minutes: Int) {
+        autoLock = ruleOf(minutes)
+        store.load()?.let { store.save(it.copy(autoLockMinutes = minutes)) }
+        touch()
+    }
+
+    /**
+     * Re-wraps the device seed under a new passphrase. Needs the vault unlocked and the old passphrase typed again,
+     * so a borrowed unlocked browser cannot lock its owner out.
+     */
+    suspend fun changePassphrase(old: String, new: String): ChangePassphraseResult {
+        val current = (mutableState.value as? VaultState.Unlocked)?.identity ?: return ChangePassphraseResult.NotUnlocked
+        val stored = store.load() ?: return ChangePassphraseResult.NotUnlocked
+        (SeedWrapping.checkPassphrase(new) as? PassphraseCheck.TooShort)?.let { return ChangePassphraseResult.TooShort(it.minimum) }
+        if (SeedWrapping.unwrapWithPassphrase(cipher, hasher, stored.wrapped, stored.deviceId, old) !is UnwrapResult.Opened) return ChangePassphraseResult.WrongPassphrase
+        val seed = current.seed ?: return ChangePassphraseResult.NotUnlocked
+        store.save(stored.copy(wrapped = SeedWrapping.wrapWithPassphrase(crypto, cipher, hasher, seed, stored.deviceId, new, params)))
+        return ChangePassphraseResult.Changed
+    }
+
+    private fun ruleOf(minutes: Int): AutoLock = if (minutes <= 0) AutoLock.UntilTabCloses else AutoLock.AfterIdle(minutes * MILLIS_PER_MINUTE)
 
     /** Makes a new identity (new member, or [member] for another device of an existing one), saves it wrapped and unlocks. */
     suspend fun create(passphrase: String, member: MemberId = newMemberId(crypto)): CreateResult {

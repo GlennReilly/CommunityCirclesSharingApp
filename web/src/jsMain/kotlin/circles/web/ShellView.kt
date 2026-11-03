@@ -13,6 +13,7 @@ import circles.event.ReturnOutcome
 import circles.app.MAX_ITEM_DESCRIPTION_CHARS
 import circles.event.MAX_ITEM_NAME_CHARS
 import circles.policy.ItemClass
+import circles.keys.AUTO_LOCK_CHOICES_MINUTES
 import circles.keys.MIN_PASSPHRASE_CHARS
 import kotlinx.html.ButtonType
 import kotlinx.html.FlowContent
@@ -51,6 +52,11 @@ const val FORM_JOIN = "join-form"
 const val FORM_LINK = "link-form"
 const val FORM_UNLOCK = "unlock-form"
 const val FIELD_PASSPHRASE = "passphrase"
+const val FORM_CHANGE_PASSPHRASE = "change-passphrase-form"
+const val FORM_AUTOLOCK = "autolock-form"
+const val FIELD_CURRENT = "current"
+const val FIELD_NEW = "new"
+const val FIELD_MINUTES = "minutes"
 const val FIELD_LINK = "invite-link"
 const val SUBMIT_ID = "submit"
 const val ACTION_INVITE = "invite"
@@ -159,6 +165,7 @@ fun FlowContent.shell(state: AppState) {
             is AppModel.Open -> when (state.screen) {
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
+                Screen.Settings -> settings(model.home)
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
@@ -672,4 +679,72 @@ private fun FlowContent.requestForm(item: ItemSummary?, home: HomeData) {
         formSubmit("Send request")
     }
     p { a(href = Screen.Items.fragment) { +"Back to items" } }
+}
+
+private fun lockChoiceLabel(minutes: Int): String = when (minutes) {
+    0 -> "Only when I close the tab"
+    1 -> "After 1 minute without use"
+    else -> "After $minutes minutes without use"
+}
+
+private fun FlowContent.passwordInput(field: String, label: String, autocomplete: String, min: Int) {
+    label {
+        attributes["for"] = field
+        +label
+    }
+    input(type = InputType.password, name = field) {
+        id = field
+        required = true
+        attributes[ATTR_MIN] = min.toString()
+        attributes["autocomplete"] = autocomplete
+    }
+}
+
+/** This browser's own settings: passphrase, locking, and forgetting the device. */
+private fun FlowContent.settings(home: HomeData) {
+    h1 { +Screen.Settings.title }
+    section {
+        h2 { +"Passphrase" }
+        p { +"Your passphrase protects your keys on this device. Changing it does not change your identity in the circle." }
+        form {
+            id = FORM_CHANGE_PASSPHRASE
+            passwordInput(FIELD_CURRENT, "Current passphrase: ", "current-password", min = 1)
+            passwordInput(FIELD_NEW, "New passphrase: ", "new-password", min = MIN_PASSPHRASE_CHARS)
+            formSubmit("Change passphrase")
+        }
+    }
+    section {
+        h2 { +"Locking" }
+        form {
+            id = FORM_AUTOLOCK
+            label {
+                attributes["for"] = FIELD_MINUTES
+                +"Lock this device: "
+            }
+            select {
+                id = FIELD_MINUTES
+                name = FIELD_MINUTES
+                for (minutes in AUTO_LOCK_CHOICES_MINUTES) {
+                    option {
+                        value = minutes.toString()
+                        selected = minutes == home.autoLockMinutes
+                        +lockChoiceLabel(minutes)
+                    }
+                }
+            }
+            formSubmit("Save", ready = true)
+        }
+        p { +"Locking drops your keys from memory; you type your passphrase to continue." }
+    }
+    section {
+        h2 { +"Forget this device" }
+        details {
+            summary { +"Forget this device" }
+            p { +"This removes your keys and the local copy of the circle from this browser. Others in the circle keep what they have. You can join again with a new invite." }
+            button(type = ButtonType.button) {
+                attributes[ATTR_ACTION] = ACTION_ERASE
+                +"Forget this device"
+            }
+        }
+    }
 }

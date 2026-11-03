@@ -26,6 +26,7 @@ import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.event.KeyRing
 import circles.event.newCircleId
+import circles.keys.ChangePassphraseResult
 import circles.keys.CreateResult
 import circles.keys.KeyStore
 import circles.keys.KeyVault
@@ -151,6 +152,8 @@ data class HomeData(
     val today: Int = 0,
     /** Everyone in the circle, in the order they joined. */
     val people: List<MemberSummary> = emptyList(),
+    /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
+    val autoLockMinutes: Int = circles.keys.DEFAULT_IDLE_LOCK_MINUTES,
 )
 
 sealed interface AppModel {
@@ -276,6 +279,15 @@ class CircleApp(
             refresh()
         }
         return result
+    }
+
+    /** Changes this browser's passphrase; the old one must be typed again. */
+    suspend fun changePassphrase(old: String, new: String): ChangePassphraseResult = vault.changePassphrase(old, new)
+
+    /** How long this browser may sit idle before it locks (minutes; 0: only when the tab closes). */
+    suspend fun setAutoLockMinutes(minutes: Int) {
+        vault.setAutoLockMinutes(minutes)
+        refresh()
     }
 
     /** Drops the keys from memory and stops syncing; the saved identity stays. */
@@ -467,6 +479,7 @@ class CircleApp(
                 changesWaiting = replica.outbox(s.circle).size,
                 refusedChanges = replica.refused(s.circle).size,
                 today = today(),
+                autoLockMinutes = vault.autoLockMinutes,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     MemberSummary(
                         member = member,

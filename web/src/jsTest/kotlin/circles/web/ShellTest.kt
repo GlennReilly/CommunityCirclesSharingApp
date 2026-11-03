@@ -231,6 +231,7 @@ class ShellViewTest {
             render(open().copy(screen = Screen.Members, newInvite = "https://x")),
             render(open().copy(screen = Screen.AddItem)),
             render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item)),
+            settings(),
             borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
         )
         var labels = 0
@@ -240,7 +241,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1, labels)
+        assertEquals(8 + 3 + 1 + 3, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -361,6 +362,34 @@ class ShellViewTest {
     @Test fun refusedChangesAreReported() {
         assertTrue("2 of your changes could not be sent" in render(open(home(refused = 2))))
         assertFalse("could not be sent" in render(open(home(refused = 0))))
+    }
+
+    private fun settings(autoLock: Int = 15) = render(open(home().copy(autoLockMinutes = autoLock)).copy(screen = Screen.Settings))
+
+    @Test fun theSettingsPageHasPassphraseLockingAndForgetting() {
+        val html = settings()
+        assertTrue("""id="$FORM_CHANGE_PASSPHRASE"""" in html && """id="$FORM_AUTOLOCK"""" in html)
+        assertTrue("Current passphrase: " in html && "New passphrase: " in html && "Lock this device: " in html)
+        assertTrue("""autocomplete="current-password"""" in html && """autocomplete="new-password"""" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_ERASE"""" in html)
+        assertTrue(html.indexOf("<details") < html.indexOf(ACTION_ERASE), "forgetting needs a second click")
+    }
+
+    @Test fun theChangePassphraseButtonWaitsForBothFields() {
+        val html = settings()
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_CHANGE_PASSPHRASE))?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("""$ATTR_MIN="1"""" in html && """$ATTR_MIN="12"""" in html)
+    }
+
+    @Test fun theLockingChoicesIncludeTheCurrentOneAsSelected() {
+        for (minutes in listOf(5, 15, 60, 0)) {
+            val html = settings(minutes)
+            assertTrue(Regex("""<option[^>]*value="$minutes"[^>]*selected""").containsMatchIn(html), "$minutes")
+            assertEquals(1, Regex("<option[^>]*selected").findAll(html.substringAfter(FORM_AUTOLOCK)).count(), "only one is selected")
+        }
+        assertTrue("Only when I close the tab" in settings())
+        assertTrue("After 15 minutes without use" in settings())
     }
 
     @Test fun syncNowAndLockNowAreInTheHeaderOfEverySignedInPageAndNowhereElse() {

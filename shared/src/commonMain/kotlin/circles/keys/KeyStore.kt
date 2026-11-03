@@ -12,6 +12,8 @@ data class StoredIdentity(
     val wrapped: WrappedSeed,
     /** The circle this browser is part of (v1 shows one circle); null until the device starts or joins one. */
     val circle: String? = null,
+    /** Minutes of inactivity before locking; 0 means only when the tab closes; null means the default. */
+    val autoLockMinutes: Int? = null,
 ) {
     val memberId: MemberId get() = MemberId(member)
     val deviceId: DeviceId get() = DeviceId(device)

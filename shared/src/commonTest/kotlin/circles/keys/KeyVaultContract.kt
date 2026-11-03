@@ -127,4 +127,54 @@ abstract class KeyVaultContract {
         advanceTimeBy(10 * IDLE)
         assertEquals(VaultState.Empty, vault.state.value)
     }
+
+    @Test fun changingThePassphraseNeedsTheOldOneAndTheNewOneWorksAfterwards() = runTest {
+        val store = InMemoryKeyStore()
+        // No idle timer here: on JS the hashing is real asynchronous work, during which virtual time would jump ahead and lock the vault.
+        val vault = vault(store, autoLock = AutoLock.UntilTabCloses)
+        val created = assertIs<CreateResult.Created>(vault.create(PASSPHRASE))
+        assertEquals(ChangePassphraseResult.WrongPassphrase, vault.changePassphrase("not the old one", "a brand new passphrase"))
+        assertEquals(ChangePassphraseResult.TooShort(MIN_PASSPHRASE_CHARS), vault.changePassphrase(PASSPHRASE, "short"))
+        assertEquals(ChangePassphraseResult.Changed, vault.changePassphrase(PASSPHRASE, "a brand new passphrase"))
+        vault.lock()
+        assertEquals(UnlockResult.WrongPassphrase, vault.unlock(PASSPHRASE), "the old passphrase no longer works")
+        assertEquals(UnlockResult.Unlocked, vault.unlock("a brand new passphrase"))
+        val back = assertIs<VaultState.Unlocked>(vault.state.value).identity
+        assertEquals(created.identity.signing.publicKey, back.signing.publicKey, "same identity, new protection")
+    }
+
+    @Test fun thePassphraseCannotBeChangedWhileLockedOrWithNothingSaved() = runTest {
+        val vault = vault()
+        assertEquals(ChangePassphraseResult.NotUnlocked, vault.changePassphrase(PASSPHRASE, "a brand new passphrase"))
+        vault.create(PASSPHRASE)
+        vault.lock()
+        assertEquals(ChangePassphraseResult.NotUnlocked, vault.changePassphrase(PASSPHRASE, "a brand new passphrase"))
+    }
+
+    @Test fun theChosenIdleTimeIsRememberedAndUsed() = runTest {
+        val store = InMemoryKeyStore()
+        val first = vault(store)
+        first.create(PASSPHRASE)
+        assertEquals(1, first.autoLockMinutes, "the test vault was built with a one minute rule")
+        first.setAutoLockMinutes(5)
+        assertEquals(5, first.autoLockMinutes)
+        advanceTimeBy(4 * 60_000L)
+        assertIs<VaultState.Unlocked>(first.state.value)
+        advanceTimeBy(61_000L)
+        assertIs<VaultState.Locked>(first.state.value)
+        // A new session in the same browser picks the saved choice up.
+        val second = vault(store)
+        assertEquals(5, second.autoLockMinutes)
+        second.setAutoLockMinutes(0)
+        assertEquals(0, second.autoLockMinutes)
+        assertEquals(0, vault(store).autoLockMinutes)
+    }
+
+    @Test fun zeroMinutesMeansUntilTheTabCloses() = runTest {
+        val vault = vault()
+        vault.create(PASSPHRASE)
+        vault.setAutoLockMinutes(0)
+        advanceTimeBy(100 * IDLE)
+        assertIs<VaultState.Unlocked>(vault.state.value)
+    }
 }
