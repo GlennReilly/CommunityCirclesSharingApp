@@ -190,8 +190,9 @@ class SealedFlowTest {
         startKeys()
         assertRejected(RejectionCode.MALFORMED, push(founder.author.keyRotate(circle, 3, TODAY)).single())
         assertRejected(RejectionCode.MALFORMED, push(founder.author.keyRotate(circle, 1, TODAY)).single())
-        accepted(push(founder.author.keyRotate(circle, 2, TODAY)).single())
+        assertRejected(RejectionCode.INVALID_PUBLIC, push(founder.author.keyRotate(circle, 2, TODAY)).single()) // no key commitment
         val second = KeyRing.newCircleKey(crypto)
+        accepted(push(founder.author.keyRotate(circle, 2, TODAY, CircleKeys.commitment(crypto, circle, 2, second))).single())
         accepted(push(founder.author.keyWrap(circle, founder.identity.registration, 2, second, TODAY)).single())
         accepted(push(founder.author.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY)).single())
         assertRejected(RejectionCode.MALFORMED, push(founder.author.keyWrap(circle, founder.identity.registration, 3, second, TODAY)).single())
@@ -206,5 +207,19 @@ class SealedFlowTest {
         val wrap = founder.author.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY)
         val skewed = wrap.copy(epoch = 2)
         assertRejected(RejectionCode.INVALID_PUBLIC, push(resign(skewed, founder)).single())
+    }
+
+    @Test
+    fun theFirstKeyAndRotationsNeedACommitmentAndRecoverySharesMustNotHaveOne() {
+        create()
+        val bare = founder.author.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY, commit = false)
+        assertRejected(RejectionCode.INVALID_PUBLIC, push(bare).single())
+        startKeys()
+        // A later wrap of the epoch needs none, and may repeat it.
+        accepted(push(founder.author.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY, commit = false)).single())
+        accepted(push(founder.author.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY, commit = true)).single())
+        // A commitment of the wrong length is not even read.
+        val short = founder.author.keyRotate(circle, 2, TODAY, circles.encoding.ByteString.of(ByteArray(31)))
+        assertRejected(RejectionCode.INVALID_PUBLIC, push(short).single())
     }
 }

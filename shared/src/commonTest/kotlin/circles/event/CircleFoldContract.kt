@@ -2,6 +2,7 @@ package circles.event
 
 import circles.crypto.Cipher
 import circles.crypto.Crypto
+import circles.encoding.ByteString
 import circles.encoding.CborMap
 import circles.encoding.CborText
 import circles.encoding.Parsed
@@ -324,12 +325,72 @@ abstract class CircleFoldContract {
             .let { forged ->
                 // wrap sealed for another circle but posted to this one
                 val terms = (CircleKeys.keyWrap(forged.public) as Parsed.Ok).value
-                forged.copy(circle = w.circle, public = KeyWrapTerms(terms.device, terms.epoch, terms.wrapped).toPublic())
+                forged.copy(circle = w.circle, public = KeyWrapTerms(terms.device, terms.epoch, terms.wrapped, terms.keyHash).toPublic())
                     .signedBy(w.crypto, w.founder.identity.signing.secretSeed)
             }
         w.log += wrongKeyFor
         val view = w.fold(w.founder)
         assertEquals(0, view.keys.latestEpoch)
         assertTrue(view.rejected.single().reason.startsWith("the key wrapped to this device is not usable"))
+    }
+
+    // ---- key commitments (ADR 0045) ----
+
+    private fun hex(text: String) = ByteString.of(ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() })
+
+    // From tools/vectors/key_commitment_vectors.py (hashlib BLAKE2b), independent of the code under test.
+    @Test
+    fun theCommitmentMatchesTheIndependentPythonVectors() = runTest {
+        val crypto = newCrypto()
+        val circle = circles.policy.CircleId("0123456789abcdef0123456789abcdef")
+        val key = ByteString.of(ByteArray(32) { it.toByte() })
+        assertEquals(hex("f841b22309433a2e16296dd53e02298fd0383a609520ecbf43197ba830f1adf2"), CircleKeys.commitment(crypto, circle, 1, key))
+        assertEquals(hex("5570af22020dd5f12a7d723288d99099dd931a4e0b40d85b9f903407ccbe48c6"), CircleKeys.commitment(crypto, circle, 2, key))
+        assertEquals(hex("dde2ae718fcf1775eda143cde8cb3493f765471c4dac83dc44dff4a0bbe44dc0"), CircleKeys.commitment(crypto, circle, 258, key))
+    }
+
+    @Test
+    fun theFirstKeyAndEveryRotationMustCarryACommitment() = runTest {
+        val w = world()
+        w.log += w.founder.circleCreate(w.circle, day)
+        val bare = w.founder.keyWrap(w.circle, w.founder.identity.registration, FIRST_EPOCH, w.key1, day, commit = false)
+        assertTrue(w.fold(w.founder, w.log + bare).rejected.single().reason.contains("must carry a key commitment"))
+        w.log += w.founder.keyWrap(w.circle, w.founder.identity.registration, FIRST_EPOCH, w.key1, day)
+        val noHash = w.founder.keyRotate(w.circle, 2, day)
+        assertTrue(w.fold(w.founder, w.log + noHash).rejected.single().reason.contains("must carry a key commitment"))
+        val view = w.fold(w.founder, w.log + w.founder.rotateKeys(w.circle, 2, listOf(w.founder.identity.registration), day))
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(2, view.currentEpoch)
+    }
+
+    @Test
+    fun aWrapOfAnotherKeyIsIgnoredAndTheHonestWrapStillWorks() = runTest {
+        val w = world()
+        w.start()
+        w.joinCarol()
+        val hostileKey = KeyRing.newCircleKey(w.crypto)
+        val carol = w.carol
+        // Bea, a plain member who holds the key, wraps a different key to carol before the steward does.
+        val bad = w.bea.keyWrap(w.circle, carol.identity.registration, FIRST_EPOCH, hostileKey, day)
+        val view1 = w.fold(carol, w.log + bad)
+        assertEquals(null, view1.keys[FIRST_EPOCH], "carol does not take a key that fails the commitment")
+        assertTrue(view1.rejected.single().reason.contains("does not match the epoch's commitment"))
+        val good = w.founder.keyWrap(w.circle, carol.identity.registration, FIRST_EPOCH, w.key1, day)
+        val view2 = w.fold(carol, w.log + bad + good)
+        assertEquals(w.key1, view2.keys[FIRST_EPOCH], "the honest wrap after it works")
+        // And in the other order the bad one cannot replace a good key either.
+        val view3 = w.fold(carol, w.log + good + bad)
+        assertEquals(w.key1, view3.keys[FIRST_EPOCH])
+    }
+
+    @Test
+    fun aLaterWrapMayRepeatTheCommitmentButNotChangeIt() = runTest {
+        val w = world()
+        w.start()
+        w.joinCarol()
+        val same = w.founder.keyWrap(w.circle, w.carol.identity.registration, FIRST_EPOCH, w.key1, day, commit = true)
+        assertEquals(emptyList(), w.fold(w.carol, w.log + same).rejected)
+        val other = w.founder.keyWrap(w.circle, w.carol.identity.registration, FIRST_EPOCH, KeyRing.newCircleKey(w.crypto), day, commit = true)
+        assertTrue(w.fold(w.carol, w.log + other).rejected.single().reason.contains("not the epoch's commitment"))
     }
 }

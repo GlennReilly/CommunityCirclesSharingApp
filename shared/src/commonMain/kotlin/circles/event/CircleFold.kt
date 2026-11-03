@@ -2,6 +2,7 @@ package circles.event
 
 import circles.crypto.Cipher
 import circles.crypto.Crypto
+import circles.encoding.ByteString
 import circles.encoding.CborMap
 import circles.encoding.Parsed
 import circles.policy.CircleId
@@ -127,6 +128,8 @@ class CircleFold(
 
         val invites = mutableMapOf<EventId, Pair<InviteTerms, Int>>()
         var keys: KeyRing = KeyRing.EMPTY
+        /** The public commitment to each epoch's key, from the event that started it (ADR 0045). */
+        private val commitments = mutableMapOf<Int, ByteString>()
         var epoch = 0
         var created = false
 
@@ -258,13 +261,20 @@ class CircleFold(
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (epoch == 0) {
                 if (terms.epoch != FIRST_EPOCH || sender.member !in stewards) return "the first key must be epoch $FIRST_EPOCH from a steward"
+                val hash = terms.keyHash ?: return "the first key must carry a key commitment"
+                commitments[FIRST_EPOCH] = hash
                 epoch = FIRST_EPOCH
             } else if (terms.epoch !in FIRST_EPOCH..epoch) {
                 return "epoch ${terms.epoch} has not been started"
+            } else if (terms.keyHash != null && commitments[terms.epoch] != null && terms.keyHash != commitments[terms.epoch]) {
+                return "the wrap's commitment is not the epoch's commitment"
             }
             val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys ?: return null
             return when (val key = CircleKeys.unwrap(cipher, mine, circle, terms.epoch, terms.wrapped)) {
                 is Parsed.Ok -> {
+                    // A wrapped key that does not match the epoch's public commitment is ignored (ADR 0045).
+                    val expected = commitments[terms.epoch]
+                    if (expected != null && CircleKeys.commitment(crypto, circle, terms.epoch, key.value) != expected) return "wrapped key does not match the epoch's commitment"
                     keys = keys.with(terms.epoch, key.value)
                     null
                 }
@@ -274,8 +284,10 @@ class CircleFold(
 
         private fun rotate(e: Envelope, sender: DeviceRegistration, position: Long): String? {
             if (sender.member !in stewards) return "only a steward may rotate the circle key"
-            val next = (CircleKeys.keyRotate(e.public) as? Parsed.Ok)?.value ?: return "bad key.rotate"
+            val terms = (CircleKeys.keyRotateTerms(e.public) as? Parsed.Ok)?.value ?: return "bad key.rotate"
+            val next = terms.epoch
             if (next != e.epoch || epoch == 0 || next != epoch + 1) return "the new epoch must be the current epoch plus one"
+            commitments[next] = terms.keyHash ?: return "key.rotate must carry a key commitment"
             epoch = next
             lastRotatePosition = position
             return null

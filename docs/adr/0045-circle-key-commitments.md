@@ -1,6 +1,6 @@
 # 0045. Circle key commitments
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 
 ## Context
@@ -16,9 +16,15 @@ ADR 0021 lets any member who holds the circle key wrap it to another registered 
 5. **Builders.** `EventAuthor` gains `firstKeyWrap` (epoch 1, with the hash) and `rotateKeys` puts the hash in the `key.rotate`. The app uses them when it starts a circle and when it removes a member or rotates.
 6. **Recovery shares** reuse the wrap shape for Shamir shares of the circle key; they carry no commitment and are not affected.
 
-## Decision for the owner
+## Decision for the owner (answered 2026-11-03: A1)
 
-**A. Is the commitment required or optional?** **A1 (recommended): required from now on.** The server refuses an epoch start without it, and a client treats a `key.rotate` or first wrap without one as invalid. No pilot circle exists yet, so the only cost is that circles made in earlier development builds stop working and must be recreated. It also stops a careless or hostile steward from starting an epoch without protection. **A2: optional.** An epoch without a commitment behaves as today. Old circles keep working, but anyone able to start an epoch (any steward) can leave it unprotected, and the protection depends on every client always including it.
+**A. Is the commitment required or optional? Chosen: A1.** **A1 (recommended): required from now on.** The server refuses an epoch start without it, and a client treats a `key.rotate` or first wrap without one as invalid. No pilot circle exists yet, so the only cost is that circles made in earlier development builds stop working and must be recreated. It also stops a careless or hostile steward from starting an epoch without protection. **A2: optional.** An epoch without a commitment behaves as today. Old circles keep working, but anyone able to start an epoch (any steward) can leave it unprotected, and the protection depends on every client always including it.
+
+## Details settled while building
+
+- `EventAuthor.keyWrap` adds the commitment by default when it wraps the first key to the author's own device, which is how every circle begins; `commit` can force it either way, and `rotateKeys` always puts it in the `key.rotate` and none in its wraps.
+- A later wrap that carries a commitment must repeat the epoch's commitment; one that differs is rejected, as is a wrapped key whose hash differs. The unwrapped key is checked only when the device opens the wrap, so the check costs one BLAKE2b hash per wrap addressed to it.
+- A `recovery.share` with a `keyHash` is refused by the server.
 
 ## Consequences
 

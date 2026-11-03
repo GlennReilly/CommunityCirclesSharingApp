@@ -23,6 +23,12 @@ private const val KEY_EPOCH = "epoch"
 private const val KEY_KEY = "key"
 private const val KEY_DEVICE = "device"
 private const val KEY_WRAPPED = "wrapped"
+private const val KEY_HASH = "keyHash"
+
+/** Domain of the key commitment (ADR 0045). */
+const val KEY_COMMITMENT_DOMAIN = "circles/key-commitment/v1"
+const val KEY_COMMITMENT_BYTES = 32
+private const val EPOCH_BYTES = 4
 private const val MAX_WRAPPED_BYTES = 1024
 
 /** The circle keys a device holds, by epoch. Immutable: [with] returns a new ring. */
@@ -44,29 +50,68 @@ class KeyRing private constructor(private val keys: Map<Int, ByteString>) {
     }
 }
 
-/** `public` of `key.wrap`: whom the key is for, the epoch, and the sealed key. */
-data class KeyWrapTerms(val device: DeviceId, val epoch: Int, val wrapped: ByteString) {
-    fun toPublic(): CborMap =
-        CborMap.of(KEY_DEVICE to CborText(device.v), KEY_EPOCH to CborInt(epoch.toLong()), KEY_WRAPPED to CborBytes(wrapped))
+/**
+ * `public` of `key.wrap`: whom the key is for, the epoch, and the sealed key. The wrap that starts epoch 1 also carries
+ * the [keyHash] commitment to that epoch's key (ADR 0045); later wraps of the epoch may omit it.
+ */
+data class KeyWrapTerms(val device: DeviceId, val epoch: Int, val wrapped: ByteString, val keyHash: ByteString? = null) {
+    fun toPublic(): CborMap = CborMap(
+        buildMap {
+            put(KEY_DEVICE, CborText(device.v))
+            put(KEY_EPOCH, CborInt(epoch.toLong()))
+            put(KEY_WRAPPED, CborBytes(wrapped))
+            keyHash?.let { put(KEY_HASH, CborBytes(it)) }
+        },
+    )
 }
+
+/** `public` of `key.rotate`: the new epoch and the commitment to its key (ADR 0045). */
+data class KeyRotateTerms(val epoch: Int, val keyHash: ByteString?)
 
 /** Strict readers and the wrapping format for circle keys (ADR 0021). */
 object CircleKeys {
+    /** The commitment to [key] as the key of [epoch] of [circle] (ADR 0045): public, and says nothing about the key. */
+    fun commitment(crypto: Crypto, circle: CircleId, epoch: Int, key: ByteString): ByteString {
+        val epochBytes = ByteArray(EPOCH_BYTES) { index -> (epoch shr (8 * (EPOCH_BYTES - 1 - index))).toByte() }
+        return crypto.hash256(KEY_COMMITMENT_DOMAIN.encodeToByteArray() + circle.v.encodeToByteArray() + epochBytes + key.toByteArray())
+    }
+
+    private fun hashOf(map: CborMap): Parsed<ByteString?> {
+        val raw = map[KEY_HASH] ?: return Parsed.Ok(null)
+        return (raw as? CborBytes)?.value?.takeIf { it.size == KEY_COMMITMENT_BYTES }?.let { Parsed.Ok(it) } ?: Parsed.Invalid("keyHash must be $KEY_COMMITMENT_BYTES bytes")
+    }
+
     fun keyWrap(map: CborMap): Parsed<KeyWrapTerms> {
-        if (map.entries.keys != setOf(KEY_DEVICE, KEY_EPOCH, KEY_WRAPPED)) return Parsed.Invalid("expected exactly the keys [device, epoch, wrapped]")
+        val required = setOf(KEY_DEVICE, KEY_EPOCH, KEY_WRAPPED)
+        if (map.entries.keys != required && map.entries.keys != required + KEY_HASH) return Parsed.Invalid("expected the keys [device, epoch, wrapped] and optionally keyHash")
         val device = (map[KEY_DEVICE] as? CborText)?.value?.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("device must be 32 lowercase hex characters")
         val epoch = epochOf(map) ?: return Parsed.Invalid("epoch must be at least $FIRST_EPOCH")
         val wrapped = (map[KEY_WRAPPED] as? CborBytes)?.value?.takeIf { it.size in 1..MAX_WRAPPED_BYTES } ?: return Parsed.Invalid("wrapped must be 1 to $MAX_WRAPPED_BYTES bytes")
-        return Parsed.Ok(KeyWrapTerms(DeviceId(device), epoch, wrapped))
+        val hash = when (val h = hashOf(map)) {
+            is Parsed.Ok -> h.value
+            is Parsed.Invalid -> return h
+        }
+        return Parsed.Ok(KeyWrapTerms(DeviceId(device), epoch, wrapped, hash))
     }
 
-    /** `public` of `key.rotate` is just the new epoch. */
-    fun keyRotate(map: CborMap): Parsed<Int> {
-        if (map.entries.keys != setOf(KEY_EPOCH)) return Parsed.Invalid("expected exactly the key [epoch]")
-        return epochOf(map)?.let { Parsed.Ok(it) } ?: Parsed.Invalid("epoch must be at least $FIRST_EPOCH")
+    /** `public` of `key.rotate`: the new epoch, and its key commitment (ADR 0045). */
+    fun keyRotateTerms(map: CborMap): Parsed<KeyRotateTerms> {
+        if (map.entries.keys != setOf(KEY_EPOCH) && map.entries.keys != setOf(KEY_EPOCH, KEY_HASH)) return Parsed.Invalid("expected the key [epoch] and optionally keyHash")
+        val epoch = epochOf(map) ?: return Parsed.Invalid("epoch must be at least $FIRST_EPOCH")
+        return when (val hash = hashOf(map)) {
+            is Parsed.Ok -> Parsed.Ok(KeyRotateTerms(epoch, hash.value))
+            is Parsed.Invalid -> hash
+        }
     }
 
-    fun rotatePublic(epoch: Int): CborMap = CborMap.of(KEY_EPOCH to CborInt(epoch.toLong()))
+    /** The new epoch alone, for callers that do not care about the commitment. */
+    fun keyRotate(map: CborMap): Parsed<Int> = when (val terms = keyRotateTerms(map)) {
+        is Parsed.Ok -> Parsed.Ok(terms.value.epoch)
+        is Parsed.Invalid -> terms
+    }
+
+    fun rotatePublic(epoch: Int, keyHash: ByteString? = null): CborMap =
+        CborMap(buildMap { put(KEY_EPOCH, CborInt(epoch.toLong())); keyHash?.let { put(KEY_HASH, CborBytes(it)) } })
 
     /** Seals [key] to a device's box key, bound to the circle and epoch so a wrap cannot be replayed as another epoch's. */
     fun wrap(cipher: Cipher, recipientBoxPub: ByteString, circle: CircleId, epoch: Int, key: ByteString): ByteString {

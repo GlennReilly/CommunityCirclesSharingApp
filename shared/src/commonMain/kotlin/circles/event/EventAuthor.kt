@@ -176,20 +176,32 @@ class EventAuthor(
      */
     fun rotateKeys(circle: CircleId, epoch: Int, devices: List<DeviceRegistration>, day: Int): List<Envelope> {
         val key = KeyRing.newCircleKey(crypto)
-        val events = listOf(keyRotate(circle, epoch, day)) + devices.map { keyWrap(circle, it, epoch, key, day) }
+        val events = listOf(keyRotate(circle, epoch, day, CircleKeys.commitment(crypto, circle, epoch, key))) + devices.map { keyWrap(circle, it, epoch, key, day, commit = false) }
         keyRing = keyRing.with(epoch, key)
         return events
     }
 
     /** Wraps the circle key of [epoch] to [target]'s box key. The author must be able to send it (steward rules are the server's). */
-    fun keyWrap(circle: CircleId, target: DeviceRegistration, epoch: Int, key: ByteString, day: Int): Envelope {
+    fun keyWrap(
+        circle: CircleId,
+        target: DeviceRegistration,
+        epoch: Int,
+        key: ByteString,
+        day: Int,
+        /**
+         * Whether this wrap starts the epoch and so carries the commitment to its key (ADR 0045). By default only the wrap of
+         * the first key to your own device does, which is how every circle begins; later wraps of an epoch carry none.
+         */
+        commit: Boolean = epoch == FIRST_EPOCH && target.device == identity.device,
+    ): Envelope {
         val wrapped = CircleKeys.wrap(cipher, target.boxPub, circle, epoch, key)
-        return build(circle, EventType.KEY_WRAP, day, KeyWrapTerms(target.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
+        val hash = if (commit) CircleKeys.commitment(crypto, circle, epoch, key) else null
+        return build(circle, EventType.KEY_WRAP, day, KeyWrapTerms(target.device, epoch, wrapped, hash).toPublic(), CborMap.EMPTY, epoch)
     }
 
     /** Starts [epoch] (the current epoch plus one); the caller then wraps the new key to each current device. */
-    fun keyRotate(circle: CircleId, epoch: Int, day: Int): Envelope =
-        build(circle, EventType.KEY_ROTATE, day, CircleKeys.rotatePublic(epoch), CborMap.EMPTY, epoch)
+    fun keyRotate(circle: CircleId, epoch: Int, day: Int, keyHash: ByteString? = null): Envelope =
+        build(circle, EventType.KEY_ROTATE, day, CircleKeys.rotatePublic(epoch, keyHash), CborMap.EMPTY, epoch)
 
     private fun textPayload(name: String, text: String?): CborMap = if (text == null) CborMap.EMPTY else CborMap.of(name to CborText(text))
 

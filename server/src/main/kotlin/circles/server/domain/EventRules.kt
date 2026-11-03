@@ -119,6 +119,7 @@ class EventRules(
             current == 0 -> {
                 if (terms.epoch != FIRST_EPOCH) return reject(RejectionCode.MALFORMED, "the first key of a circle is epoch $FIRST_EPOCH")
                 if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may start the first key epoch")
+                if (terms.keyHash == null) return reject(RejectionCode.INVALID_PUBLIC, "the first key.wrap must carry a keyHash (ADR 0045)")
                 Decision.Accept(listOf(Effect.SetEpoch(envelope.circle, FIRST_EPOCH)))
             }
             terms.epoch in FIRST_EPOCH..current -> Decision.Accept(emptyList())
@@ -208,6 +209,7 @@ class EventRules(
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
         if (terms.epoch != envelope.epoch) return reject(RejectionCode.INVALID_PUBLIC, "public epoch must equal the envelope epoch")
+        if (terms.keyHash != null) return reject(RejectionCode.INVALID_PUBLIC, "a recovery share carries no key commitment")
         val target = directory.device(terms.device)
         if (target == null || target.circle != envelope.circle) return reject(RejectionCode.UNKNOWN_DEVICE, "the target device is not in this circle")
         if (target.isRevoked) return reject(RejectionCode.DEVICE_REVOKED, "the target device has been revoked")
@@ -239,13 +241,15 @@ class EventRules(
         val sender = sender(envelope, directory).deviceOrReject { return it }
         if (!payloadEmpty) return reject(RejectionCode.INVALID_PAYLOAD, "key.rotate has no secret part")
         if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may rotate the circle key")
-        val epoch = when (val parsed = CircleKeys.keyRotate(envelope.public)) {
+        val terms = when (val parsed = CircleKeys.keyRotateTerms(envelope.public)) {
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
+        val epoch = terms.epoch
         if (epoch != envelope.epoch) return reject(RejectionCode.INVALID_PUBLIC, "public epoch must equal the envelope epoch")
         val current = directory.currentEpoch(envelope.circle)
         if (current == 0 || epoch != current + 1) return reject(RejectionCode.MALFORMED, "the new epoch must be the current epoch ($current) plus one, after a first key")
+        if (terms.keyHash == null) return reject(RejectionCode.INVALID_PUBLIC, "key.rotate must carry a keyHash (ADR 0045)")
         return Decision.Accept(listOf(Effect.SetEpoch(envelope.circle, epoch)))
     }
 
