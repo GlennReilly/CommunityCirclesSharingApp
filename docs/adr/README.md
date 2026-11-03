@@ -33,6 +33,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0027](0027-steward-quorum-setting-and-inactivity-fallback.md) | Steward governance settings and the inactivity fallback (supersedes 0023) | Accepted (minimum silent days changed by 0029) |
 | [0028](0028-client-image-policy.md) | Client image policy: resize, re-encode, strip metadata | Accepted |
 | [0029](0029-lower-the-minimum-silent-days.md) | Lower the minimum silent days of the steward fallback to 7 (amends 0027) | Accepted |
+| [0030](0030-circle-export-import-and-verify.md) | Circle export, import and verify (`circles-export/1`) | Accepted |
 
 ## Open decisions still to record
 

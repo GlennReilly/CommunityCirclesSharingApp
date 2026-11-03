@@ -164,6 +164,11 @@ class SqliteStore(private val connection: Connection) : Store {
         override fun blobBytesUsed(circle: CircleId): Long =
             query("SELECT COALESCE(SUM(size), 0) FROM blobs WHERE circle_id = ?", { it.setString(1, circle.v) }) { rows -> if (rows.next()) rows.getLong(1) else 0L }
 
+        override fun blobList(circle: CircleId): List<Pair<String, Long>> =
+            query("SELECT hash, size FROM blobs WHERE circle_id = ? ORDER BY hash", { it.setString(1, circle.v) }) { rows ->
+                buildList { while (rows.next()) add(rows.getString(1) to rows.getLong(2)) }
+            }
+
         override fun insertBlob(circle: CircleId, hash: String, size: Long, createdAtMillis: Long) {
             update("INSERT INTO blobs (circle_id, hash, size, created_at) VALUES (?, ?, ?, ?)") {
                 it.setString(1, circle.v)

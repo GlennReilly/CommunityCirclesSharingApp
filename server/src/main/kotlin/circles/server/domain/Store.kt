@@ -47,6 +47,9 @@ interface Directory {
     /** Total bytes of blobs stored for the circle. */
     fun blobBytesUsed(circle: CircleId): Long
 
+    /** Every blob stored for the circle with its size, by hash. */
+    fun blobList(circle: CircleId): List<Pair<String, Long>>
+
     fun insertBlob(circle: CircleId, hash: String, size: Long, createdAtMillis: Long)
 
     /** The newest circle key epoch announced by a `key.wrap` or `key.rotate`; 0 before the first key. */

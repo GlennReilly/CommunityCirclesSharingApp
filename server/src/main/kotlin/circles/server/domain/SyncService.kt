@@ -44,10 +44,10 @@ class SyncService(
     val isCreationAllowed: Boolean get() = creationAllowed
 
     /** Judges each event on its own, in order, in one transaction; a refused event writes nothing. */
-    fun submit(events: List<EnvelopeDto>, entrance: Entrance): List<PushResult> {
+    fun submit(events: List<EnvelopeDto>, entrance: Entrance, allowCreate: Boolean = creationAllowed): List<PushResult> {
         val now = clock.millis()
         val today = Math.floorDiv(now, MILLIS_PER_DAY).toInt()
-        val results = store.transaction { tx -> events.map { submitOne(it, entrance, now, today, tx) } }
+        val results = store.transaction { tx -> events.map { submitOne(it, entrance, now, today, tx, allowCreate) } }
         publishHints(entrance, events, results)
         logSummary(entrance, results)
         return results
@@ -76,7 +76,7 @@ class SyncService(
         return PullResponse(events = page, next = page.lastOrNull()?.serverSeq ?: after, hasMore = rows.size > pageSize)
     }
 
-    private fun submitOne(dto: EnvelopeDto, entrance: Entrance, now: Long, today: Int, tx: StoreTransaction): PushResult {
+    private fun submitOne(dto: EnvelopeDto, entrance: Entrance, now: Long, today: Int, tx: StoreTransaction, allowCreate: Boolean): PushResult {
         val envelope = when (val parsed = dto.toEnvelope()) {
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return refused(null, Rejection(RejectionCode.MALFORMED, parsed.reason))
@@ -85,7 +85,7 @@ class SyncService(
         EnvelopeChecks.check(envelope)?.let { return refused(id, it) }
         wrongDoor(envelope.circle, envelope.type, entrance)?.let { return refused(id, it) }
         tx.findEventSeq(envelope.circle, id)?.let { return PushResult(id.v, PushStatus.DUPLICATE, serverSeq = it) }
-        return when (val decision = rules.decide(envelope, id, today, tx, creationAllowed)) {
+        return when (val decision = rules.decide(envelope, id, today, tx, allowCreate)) {
             is Decision.Reject -> refused(id, decision.rejection)
             is Decision.Accept -> {
                 val seq = tx.appendEvent(id, envelope, now)
