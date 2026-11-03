@@ -89,6 +89,18 @@ class EventAuthor(
         }
     }
 
+    /**
+     * `recovery.share` for ADR 0048: one share per steward, sealed to each of that steward's devices ([stewards] lists the
+     * live devices of each steward). Null if the parameters are invalid.
+     */
+    fun recoverySharesPerSteward(circle: CircleId, epoch: Int, stewards: List<List<DeviceRegistration>>, threshold: Int, day: Int): List<Envelope>? {
+        val key = checkNotNull(keyRing[epoch]) { "no circle key for epoch $epoch" }
+        val sealed = RecoveryShares.splitPerSteward(crypto, cipher, circle, epoch, key, stewards, threshold) ?: return null
+        return sealed.map { (device, wrapped) ->
+            build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
+        }
+    }
+
     /** Creates or changes an item. [itemKey] is wrapped to [ownerDevices] so every device of the owner can read the detail. */
     fun itemUpsert(
         circle: CircleId,

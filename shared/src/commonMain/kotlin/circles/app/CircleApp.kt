@@ -275,6 +275,8 @@ data class HomeData(
     val myDevices: List<DeviceSummary> = emptyList(),
     /** Whether this member has a recovery code registered (ADR 0047). */
     val hasRecoveryCode: Boolean = false,
+    /** Recovery shares of the circle key (ADR 0048); only meaningful for a steward. */
+    val recoveryShares: RecoverySharesSummary = RecoverySharesSummary(),
     val stewardList: List<StewardInfo> = emptyList(),
     val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
     val proposals: List<ProposalSummary> = emptyList(),
@@ -283,6 +285,42 @@ data class HomeData(
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
     val autoLockMinutes: Int = circles.keys.DEFAULT_IDLE_LOCK_MINUTES,
 )
+
+/**
+ * What a steward needs to see about recovery shares (ADR 0048): the epochs this device holds a share for, whether the
+ * shares of the current epoch went to every current steward, whether this device may make them, and the epochs whose key
+ * this device does not have (which a set of share codes could rebuild).
+ */
+data class RecoverySharesSummary(
+    val heldEpochs: List<Int> = emptyList(),
+    val currentEpoch: Int = 0,
+    val currentSetSent: Boolean = false,
+    val mayMake: Boolean = false,
+    val missingKeyEpochs: List<Int> = emptyList(),
+    val minThreshold: Int = MIN_RECOVERY_THRESHOLD,
+    val maxThreshold: Int = MIN_RECOVERY_THRESHOLD,
+)
+
+/** The smallest number of stewards that must come together (a single steward needs no sharing). */
+const val MIN_RECOVERY_THRESHOLD = 2
+
+sealed interface ShareMakingResult {
+    data class Sent(val stewards: Int, val threshold: Int) : ShareMakingResult
+    data object NotAllowed : ShareMakingResult
+    data object NoKey : ShareMakingResult
+    data class BadThreshold(val min: Int, val max: Int) : ShareMakingResult
+}
+
+sealed interface RebuildResult {
+    data class Rebuilt(val epoch: Int) : RebuildResult
+    data object NotAllowed : RebuildResult
+    data object NoCodes : RebuildResult
+    /** Code number [position] (from 1) is not a share code, or was mistyped when [mistyped] is true. */
+    data class BadCode(val position: Int, val mistyped: Boolean) : RebuildResult
+    data object DifferentEpochs : RebuildResult
+    data object AlreadyHaveKey : RebuildResult
+    data class Wrong(val reason: String) : RebuildResult
+}
 
 /** One of this member's devices, as Settings lists it. [name] is what was typed when it was added, if anything. */
 data class DeviceSummary(val device: DeviceId, val isThisOne: Boolean, val name: String?)
@@ -577,6 +615,81 @@ class CircleApp(
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- recovery shares (ADR 0048) ----
+
+    private fun recoverySharesOf(view: circles.event.CircleView, me: MemberId): RecoverySharesSummary {
+        val current = view.currentEpoch
+        val isSteward = me in view.stewards
+        return RecoverySharesSummary(
+            heldEpochs = view.heldShares.keys.sorted(),
+            currentEpoch = current,
+            currentSetSent = current >= FIRST_EPOCH && view.stewards.all { it in view.shareHolders[current].orEmpty() },
+            mayMake = isSteward && current >= FIRST_EPOCH && view.keys[current] != null && view.stewards.size >= MIN_RECOVERY_THRESHOLD,
+            missingKeyEpochs = if (isSteward) (FIRST_EPOCH..current).filter { view.keys[it] == null && view.commitments[it] != null } else emptyList(),
+            maxThreshold = maxOf(view.stewards.size, MIN_RECOVERY_THRESHOLD),
+        )
+    }
+
+    /**
+     * Splits the current circle key so that any [threshold] stewards can rebuild it, and sends one share to each steward,
+     * sealed to each of their devices (ADR 0048).
+     */
+    suspend fun makeRecoveryShares(threshold: Int): ShareMakingResult {
+        val s = session ?: return ShareMakingResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (s.identity.member !in view.stewards) return ShareMakingResult.NotAllowed
+        val epoch = view.currentEpoch
+        if (epoch < FIRST_EPOCH || view.keys[epoch] == null) return ShareMakingResult.NoKey
+        val perSteward = view.stewards.map { steward -> view.devices.values.filter { !it.revoked && it.registration.member == steward }.map { it.registration } }
+        if (threshold !in MIN_RECOVERY_THRESHOLD..perSteward.size) return ShareMakingResult.BadThreshold(MIN_RECOVERY_THRESHOLD, perSteward.size)
+        s.author.keyRing = view.keys
+        val events = s.author.recoverySharesPerSteward(s.circle, epoch, perSteward, threshold, today()) ?: return ShareMakingResult.NotAllowed
+        events.forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return ShareMakingResult.Sent(perSteward.size, threshold)
+    }
+
+    /** The text code of the share this device holds for [epoch], to read out to the steward who is rebuilding the key. */
+    suspend fun shareCode(epoch: Int): String? {
+        val s = session ?: return null
+        val held = replica.fold(s.circle, crypto, cipher, s.identity).heldShares[epoch] ?: return null
+        return circles.event.ShareCode.format(crypto, epoch, held.share)
+    }
+
+    /**
+     * Combines share codes from enough stewards, checks the result against the epoch's public commitment, and wraps the
+     * key to this device (ADR 0048). Nothing is sent unless the key is right.
+     */
+    suspend fun rebuildKey(codes: List<String>): RebuildResult {
+        val s = session ?: return RebuildResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val me = s.identity.member
+        if (me !in view.stewards) return RebuildResult.NotAllowed
+        val typed = codes.filter { it.isNotBlank() }
+        if (typed.isEmpty()) return RebuildResult.NoCodes
+        val contents = typed.mapIndexed { index, text ->
+            when (val parsed = circles.event.ShareCode.parse(crypto, text)) {
+                is circles.event.ShareCodeResult.Valid -> parsed.content
+                is circles.event.ShareCodeResult.Mistyped -> return RebuildResult.BadCode(index + 1, mistyped = true)
+                is circles.event.ShareCodeResult.NotACode -> return RebuildResult.BadCode(index + 1, mistyped = false)
+            }
+        }
+        val epoch = contents.first().epoch
+        if (contents.any { it.epoch != epoch }) return RebuildResult.DifferentEpochs
+        if (view.keys[epoch] != null) return RebuildResult.AlreadyHaveKey
+        val commitment = view.commitments[epoch] ?: return RebuildResult.Wrong("This circle has no key for epoch $epoch.")
+        val me0 = view.devices[s.identity.device]?.takeIf { !it.revoked }?.registration ?: return RebuildResult.NotAllowed
+        val key = when (val rebuilt = circles.event.RecoveryShares.rebuild(crypto, s.circle, epoch, commitment, contents.map { it.share })) {
+            is Parsed.Ok<circles.encoding.ByteString> -> rebuilt.value
+            is Parsed.Invalid -> return RebuildResult.Wrong(rebuilt.reason)
+        }
+        s.engine.enqueue(s.circle, s.author.keyWrap(s.circle, me0, epoch, key, today(), commit = false))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return RebuildResult.Rebuilt(epoch)
     }
 
     // ---- recovery code (ADR 0047) ----
@@ -1048,6 +1161,7 @@ class CircleApp(
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
+                recoveryShares = recoverySharesOf(view, s.identity.member),
                 hasRecoveryCode = view.devices.values.any { !it.revoked && it.registration.member == me && deviceNames(view)[it.registration.device] == RECOVERY_DEVICE_NAME },
                 myDevices = view.devices.values.filter { !it.revoked && it.registration.member == me }.map { state ->
                     DeviceSummary(state.registration.device, state.registration.device == s.identity.device, deviceNames(view)[state.registration.device])

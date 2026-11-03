@@ -19,7 +19,9 @@ import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.LeaveResult
 import circles.app.MAX_DEVICE_NAME_CHARS
+import circles.app.RebuildResult
 import circles.app.RecoveryCodeResult
+import circles.app.ShareMakingResult
 import circles.app.RemoveResult
 import circles.app.RestoreLink
 import circles.app.RestoreResult
@@ -262,6 +264,33 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (quorum == null || inactive == null || fallback == null) dispatch(AppAction.Notice("Fill in all three numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback))
                 }
+                FORM_MAKE_SHARES -> {
+                    val threshold = field(FIELD_THRESHOLD).toIntOrNull()
+                    dispatch(
+                        AppAction.Notice(
+                            when (val result = if (threshold == null) null else circleApp.makeRecoveryShares(threshold)) {
+                                null -> "Enter a whole number."
+                                is ShareMakingResult.Sent -> "Sent. Each of the ${result.stewards} stewards now has a share; any ${result.threshold} can rebuild the key."
+                                is ShareMakingResult.BadThreshold -> "Choose a number from ${result.min} to ${result.max}."
+                                ShareMakingResult.NoKey -> "This device does not have the current key."
+                                ShareMakingResult.NotAllowed -> "Only a steward can make shares."
+                            },
+                        ),
+                    )
+                }
+                FORM_REBUILD_KEY -> dispatch(
+                    AppAction.Notice(
+                        when (val result = circleApp.rebuildKey(field(FIELD_SHARE_CODES).lines())) {
+                            is RebuildResult.Rebuilt -> "The key is rebuilt and this device can read the circle again (key number ${result.epoch})."
+                            RebuildResult.NoCodes -> "Paste at least one share code."
+                            is RebuildResult.BadCode -> if (result.mistyped) "Code ${result.position} has a mistake in it. Check it with the steward who read it out." else "Code ${result.position} is not a share code."
+                            RebuildResult.DifferentEpochs -> "These codes are for different keys. Use codes for the same key number."
+                            RebuildResult.AlreadyHaveKey -> "This device already has that key."
+                            is RebuildResult.Wrong -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                            RebuildResult.NotAllowed -> "Only a steward can rebuild the key."
+                        },
+                    ),
+                )
                 FORM_PAIR -> state.pendingDevice?.let { report(circleApp.startOnNewDevice(it, field(FIELD_PASSPHRASE))) }
                 FORM_ADD_DEVICE -> dispatch(
                     AppAction.Notice(
@@ -414,6 +443,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_REMOVE_DEVICE -> target.getAttribute(ATTR_DEVICE_ID)?.let { id ->
                     dispatch(AppAction.Notice(if (circleApp?.removeDevice(DeviceId(id)) == DeviceRemoval.Removed) "Removed. The circle's key is being changed." else "That device cannot be removed."))
                 }
+                ACTION_SHARE_SHOW -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { epoch ->
+                    dispatch(AppAction.ShareCodeShown(epoch, circleApp?.shareCode(epoch)))
+                }
+                ACTION_SHARE_HIDE -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { dispatch(AppAction.ShareCodeShown(it, null)) }
                 ACTION_CHECK_NOW -> circleApp?.syncNow(SyncTrigger.MANUAL)
                 ACTION_COPY_FIELD -> target.getAttribute(ATTR_FROM)?.let { id ->
                     (document.getElementById(id) as? HTMLInputElement)?.let {

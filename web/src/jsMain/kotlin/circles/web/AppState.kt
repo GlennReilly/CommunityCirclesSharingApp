@@ -32,6 +32,8 @@ data class AppState(
     val pendingRestore: RestoreLink? = null,
     /** The recovery code being made: shown once, kept only in memory. */
     val recoveryDraft: RecoveryDraft? = null,
+    /** Share codes this steward chose to show, by epoch: secrets, kept only in memory and only while signed in (ADR 0048). */
+    val shareCodes: Map<Int, String> = emptyMap(),
 ) {
     val signedIn: Boolean get() = model is AppModel.Open
 }
@@ -45,6 +47,7 @@ sealed interface AppAction {
     data class OriginKnown(val origin: String) : AppAction
     data class RestoreLinkSeen(val link: RestoreLink?) : AppAction
     data class RecoveryDraftReady(val draft: RecoveryDraft?) : AppAction
+    data class ShareCodeShown(val epoch: Int, val code: String?) : AppAction
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
@@ -77,6 +80,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             pendingDevice = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingDevice,
             pendingRestore = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingRestore,
             recoveryDraft = if (open) state.recoveryDraft else null,
+            shareCodes = if (open) state.shareCodes else emptyMap(),
         )
     }
     is AppAction.SyncChanged -> state.copy(sync = action.state)
@@ -95,6 +99,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.Restore else state.screen,
     )
     is AppAction.RecoveryDraftReady -> state.copy(recoveryDraft = action.draft, screen = if (action.draft != null && state.signedIn) Screen.RecoveryCode else state.screen)
+    is AppAction.ShareCodeShown -> state.copy(shareCodes = if (action.code == null) state.shareCodes - action.epoch else state.shareCodes + (action.epoch to action.code))
     is AppAction.Notice -> state.copy(notice = action.text)
     is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)

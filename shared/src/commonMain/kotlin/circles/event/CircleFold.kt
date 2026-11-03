@@ -35,7 +35,16 @@ class CircleView(
     val pendingStewardVotes: List<PendingStewardVote> = emptyList(),
     /** Members with a revoked device that still holds the current epoch's key, so a rotation is due (ADR 0044, 0046). */
     val unrotatedRemovals: Set<MemberId> = emptySet(),
+    /** The recovery share this device holds for each epoch (the newest one sent to it; ADR 0048). */
+    val heldShares: Map<Int, HeldShare> = emptyMap(),
+    /** The stewards who were sent a share of each epoch's key, with the log position of the newest set (ADR 0048). */
+    val shareHolders: Map<Int, Set<MemberId>> = emptyMap(),
+    /** The public commitment to each epoch's key (ADR 0045), which a rebuilt key is checked against. */
+    val commitments: Map<Int, ByteString> = emptyMap(),
 )
+
+/** One recovery share opened by this device: [share] for [epoch], sent by [from]. */
+class HeldShare(val epoch: Int, val share: ByteString, val from: MemberId)
 
 /** One steward's vote on a change that is still waiting: [subject] is the member id, or the settings for [StewardChange.POLICY]. */
 data class PendingStewardVote(val change: StewardChange, val subject: String, val vote: StewardVote)
@@ -93,7 +102,7 @@ class CircleFold(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
             opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
             state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
-            state.unrotatedRemovals(),
+            state.unrotatedRemovals(), state.heldShares.toMap(), state.shareHolders.mapValues { it.value.toSet() }, state.commitmentsSnapshot(),
         )
     }
 
@@ -135,6 +144,9 @@ class CircleFold(
         private val commitments = mutableMapOf<Int, ByteString>()
         var epoch = 0
         var created = false
+        val heldShares = mutableMapOf<Int, HeldShare>()
+        val shareHolders = mutableMapOf<Int, MutableSet<MemberId>>()
+        fun commitmentsSnapshot(): Map<Int, ByteString> = commitments.toMap()
 
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
         fun apply(e: Envelope, id: EventId, position: Long): String? {
@@ -154,6 +166,7 @@ class CircleFold(
                 EventType.STEWARD_POLICY -> stewardPolicyChange(e, sender, position)
                 EventType.KEY_WRAP -> wrap(e, sender)
                 EventType.KEY_ROTATE -> rotate(e, sender)
+                EventType.RECOVERY_SHARE -> recoveryShare(e, sender)
                 else -> null
             }
         }
@@ -282,6 +295,25 @@ class CircleFold(
                     null
                 }
                 is Parsed.Invalid -> "the key wrapped to this device is not usable: ${key.reason}"
+            }
+        }
+
+        /** A share of an epoch's key sent to a steward's device (ADR 0048): only a steward may send, and only to a steward. */
+        private fun recoveryShare(e: Envelope, sender: DeviceRegistration): String? {
+            if (sender.member !in stewards) return "only a steward may send recovery shares"
+            val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad recovery.share"
+            if (terms.epoch != e.epoch || terms.keyHash != null) return "bad recovery.share"
+            val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
+            if (target.registration.member !in stewards) return "a recovery share may only go to a steward"
+            if (terms.epoch !in FIRST_EPOCH..epoch) return "epoch ${terms.epoch} has not been started"
+            shareHolders.getOrPut(terms.epoch) { mutableSetOf() } += target.registration.member
+            val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys ?: return null
+            return when (val share = RecoveryShares.open(cipher, mine, circle, terms.epoch, terms.wrapped)) {
+                is Parsed.Ok -> {
+                    heldShares[terms.epoch] = HeldShare(terms.epoch, share.value.share, sender.member)
+                    null
+                }
+                is Parsed.Invalid -> "the share sent to this device is not usable: ${share.reason}"
             }
         }
 

@@ -955,4 +955,55 @@ class ShellViewTest {
         val html = newcomer(Screen.JoinCircle, link)
         assertFalse(link.secretSeed.toBase64Url() in html)
     }
+
+    // ---- recovery shares (ADR 0048) ----
+
+    private fun sharesPage(summary: circles.app.RecoverySharesSummary, steward: Boolean = true, shown: Map<Int, String> = emptyMap(), stewardCount: Int = 3) =
+        render(open(home(steward = steward).copy(recoveryShares = summary, stewardCount = stewardCount)).copy(screen = Screen.RecoveryShares, shareCodes = shown))
+
+    @Test fun theStewardsPageLinksToRecoverySharesOnlyForStewardsWhenThereIsMoreThanOne() {
+        assertTrue(Screen.RecoveryShares.fragment in stewards(true, listOf(meSteward, beaSteward)))
+        assertFalse(Screen.RecoveryShares.fragment in stewards(true, listOf(meSteward)))
+        assertFalse(Screen.RecoveryShares.fragment in stewards(false, listOf(meSteward, beaSteward)))
+        assertFalse(Screen.RecoveryShares in Screen.navigation)
+    }
+
+    @Test fun theSharesPageOffersMakingSharesWithTheRightRangeAndHidesTheButtonUntilFilled() {
+        val html = sharesPage(circles.app.RecoverySharesSummary(currentEpoch = 1, mayMake = true, minThreshold = 2, maxThreshold = 3))
+        assertTrue("""id="$FORM_MAKE_SHARES"""" in html)
+        assertTrue("""min="2"""" in html && """max="3"""" in html)
+        assertTrue("""$ATTR_MIN="1"""" in html, "the button waits for the number")
+        assertTrue("Not every steward has a share of the current key yet." in html)
+        assertFalse(FORM_REBUILD_KEY in html)
+        assertFalse("Your share" in html)
+        assertTrue("Every steward has a share of the current key." in sharesPage(circles.app.RecoverySharesSummary(currentEpoch = 1, currentSetSent = true, mayMake = true)))
+    }
+
+    @Test fun aShareCodeIsHiddenUntilAskedForAndLostOnLock() {
+        val summary = circles.app.RecoverySharesSummary(heldEpochs = listOf(1), currentEpoch = 1)
+        val hidden = sharesPage(summary)
+        assertTrue("""$ATTR_ACTION="$ACTION_SHARE_SHOW"""" in hidden)
+        assertFalse("rs1 " in hidden)
+        val shown = sharesPage(summary, shown = mapOf(1 to "rs1 0000 0001"))
+        assertTrue("rs1 0000 0001" in shown)
+        assertTrue("""$ATTR_ACTION="$ACTION_SHARE_HIDE"""" in shown)
+        val state = reduce(open().copy(screen = Screen.RecoveryShares), AppAction.ShareCodeShown(1, "rs1 abcd"))
+        assertEquals(mapOf(1 to "rs1 abcd"), state.shareCodes)
+        assertEquals(emptyMap(), reduce(state, AppAction.ShareCodeShown(1, null)).shareCodes)
+        assertEquals(emptyMap(), reduce(state, AppAction.ModelChanged(AppModel.Locked(circle))).shareCodes, "locking forgets the codes")
+    }
+
+    @Test fun theRebuildFormAppearsOnlyWhenTheKeyIsMissing() {
+        val missing = sharesPage(circles.app.RecoverySharesSummary(currentEpoch = 2, missingKeyEpochs = listOf(2)))
+        assertTrue("""id="$FORM_REBUILD_KEY"""" in missing)
+        assertTrue("key number 2" in missing)
+        assertTrue("""$ATTR_MIN="1"""" in missing)
+        assertFalse(FORM_REBUILD_KEY in sharesPage(circles.app.RecoverySharesSummary(currentEpoch = 2)))
+    }
+
+    @Test fun aMemberWhoIsNotAStewardSeesNoSharesControls() {
+        val html = sharesPage(circles.app.RecoverySharesSummary(heldEpochs = listOf(1), mayMake = true), steward = false)
+        assertTrue("Only stewards hold recovery shares." in html)
+        assertFalse(FORM_MAKE_SHARES in html)
+    }
 }

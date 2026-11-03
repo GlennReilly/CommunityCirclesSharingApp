@@ -54,6 +54,50 @@ object RecoveryShares {
         }
     }
 
+    /**
+     * Splits [key] into one share per steward and seals each steward's share to every one of that steward's devices
+     * (ADR 0048, A1), so a steward with two devices counts once. [stewards] lists each steward's live devices; a steward
+     * with no device is not allowed. Null if the parameters are invalid.
+     */
+    fun splitPerSteward(
+        crypto: Crypto,
+        cipher: Cipher,
+        circle: CircleId,
+        epoch: Int,
+        key: ByteString,
+        stewards: List<List<DeviceRegistration>>,
+        threshold: Int,
+    ): List<Pair<DeviceRegistration, ByteString>>? {
+        if (stewards.any { it.isEmpty() }) return null
+        val split = Shamir.split(key, threshold, stewards.size, crypto::randomBytes) as? SplitResult.Success ?: return null
+        val check = crypto.hash256(key.toByteArray())
+        return stewards.zip(split.shares).flatMap { (devices, share) ->
+            val content = CborMap.of(
+                KEY_CIRCLE to CborText(circle.v),
+                KEY_EPOCH to CborInt(epoch.toLong()),
+                KEY_SHARE to CborBytes(share),
+                KEY_CHECK to CborBytes(check),
+            )
+            val plain = CborEncoder.encode(content)
+            devices.map { device -> device to cipher.sealBox(device.boxPub, plain) }
+        }
+    }
+
+    /**
+     * Rebuilds the key of [epoch] from share [codes] and checks it against the epoch's public [commitment] (ADR 0045), so a
+     * wrong set can never give a key that is used. Returns the key or a plain-words reason.
+     */
+    fun rebuild(crypto: Crypto, circle: CircleId, epoch: Int, commitment: ByteString, codes: List<ByteString>): Parsed<ByteString> {
+        if (codes.isEmpty()) return Parsed.Invalid("no shares were given")
+        val distinct = codes.distinct()
+        return when (val result = Shamir.combine(distinct)) {
+            is CombineResult.Failure -> Parsed.Invalid("cannot rebuild the key: ${result.reason}")
+            is CombineResult.Success ->
+                if (CircleKeys.commitment(crypto, circle, epoch, result.secret) == commitment) Parsed.Ok(result.secret)
+                else Parsed.Invalid("these shares do not make this circle's key for epoch $epoch: too few, or from another set")
+        }
+    }
+
     /** Opens a share sealed to this device; invalid if it is for another circle or epoch than the event names. */
     fun open(cipher: Cipher, box: BoxKeyPair, circle: CircleId, epoch: Int, wrapped: ByteString): Parsed<RecoveryShare> {
         val plain = (cipher.openSealedBox(box, wrapped) as? DecryptResult.Success)?.plaintext ?: return Parsed.Invalid("share cannot be opened by this device")

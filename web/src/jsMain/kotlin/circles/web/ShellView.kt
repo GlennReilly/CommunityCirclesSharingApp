@@ -2,6 +2,7 @@ package circles.web
 
 import circles.app.AppModel
 import circles.app.HomeData
+import circles.app.MIN_RECOVERY_THRESHOLD
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
 import circles.app.DeviceLink
@@ -104,6 +105,13 @@ const val FIELD_QUORUM = "quorum"
 const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val ACTION_VOUCH = "vouch"
+const val FORM_MAKE_SHARES = "make-shares-form"
+const val FORM_REBUILD_KEY = "rebuild-key-form"
+const val FIELD_THRESHOLD = "share-threshold"
+const val FIELD_SHARE_CODES = "share-codes"
+const val ACTION_SHARE_SHOW = "share-show"
+const val ACTION_SHARE_HIDE = "share-hide"
+const val ATTR_EPOCH = "data-epoch"
 const val ACTION_RECOVERY_START = "recovery-start"
 const val ACTION_RECOVERY_CANCEL = "recovery-cancel"
 const val FORM_RECOVERY_CHECK = "recovery-check-form"
@@ -226,6 +234,7 @@ fun FlowContent.shell(state: AppState) {
                 Screen.RecoveryCode -> recoveryCodePage(state)
                 Screen.Standing -> standing(model.home.standing)
                 Screen.Stewards -> stewards(model.home)
+                Screen.RecoveryShares -> recoverySharesPage(model.home, state)
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
@@ -1081,6 +1090,12 @@ private fun FlowContent.stewards(home: HomeData) {
             }
         }
     }
+    if (home.isSteward && home.stewardCount >= MIN_RECOVERY_THRESHOLD) {
+        section {
+            h2 { +"Recovery shares" }
+            p { a(href = Screen.RecoveryShares.fragment) { +"Share the circle key between stewards, in case every device is lost" } }
+        }
+    }
     section {
         h2 { +"Rules for stewards" }
         ul {
@@ -1332,4 +1347,106 @@ private fun FlowContent.restorePage(state: AppState) {
         }
     }
     backToWelcome()
+}
+
+/** Splitting the circle key between stewards, showing this steward's share, and rebuilding the key from shares (ADR 0048). */
+private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
+    val shares = home.recoveryShares
+    h1 { +Screen.RecoveryShares.title }
+    if (!home.isSteward) {
+        p { +"Only stewards hold recovery shares." }
+        a(href = Screen.Stewards.fragment) { +"Back to stewards" }
+        return
+    }
+    p { +"The circle key can be split so that no steward holds it alone, and any number of stewards you choose can rebuild it together. Use this only if every device that held the key is lost." }
+    section {
+        h2 { +"Make the shares" }
+        p {
+            role = "status"
+            +(if (shares.currentSetSent) "Every steward has a share of the current key." else "Not every steward has a share of the current key yet.")
+        }
+        if (shares.mayMake) {
+            p { +"Choose how many stewards must come together to rebuild the key (${shares.minThreshold} to ${shares.maxThreshold}). Each steward is sent one share, for all of their devices." }
+            form {
+                id = FORM_MAKE_SHARES
+                label {
+                    attributes["for"] = FIELD_THRESHOLD
+                    +"Stewards needed: "
+                }
+                input(type = InputType.number, name = FIELD_THRESHOLD) {
+                    id = FIELD_THRESHOLD
+                    required = true
+                    attributes["min"] = shares.minThreshold.toString()
+                    attributes["max"] = shares.maxThreshold.toString()
+                    attributes[ATTR_MIN] = "1"
+                }
+                formSubmit("Make and send the shares")
+            }
+        } else {
+            p { +"This device cannot make shares now: it needs the current key and at least two stewards." }
+        }
+    }
+    if (shares.heldEpochs.isNotEmpty()) {
+        section {
+            h2 { +"Your share" }
+            p { +"Give your share code to the steward who is rebuilding the key, in person or by a call. Anyone who gathers enough share codes holds the circle key, so never post one." }
+            for (epoch in shares.heldEpochs) {
+                val code = state.shareCodes[epoch]
+                p { +"Key number $epoch" }
+                if (code == null) {
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_SHARE_SHOW
+                        attributes[ATTR_EPOCH] = epoch.toString()
+                        +"Show my share code"
+                    }
+                } else {
+                    val fieldId = "share-code-$epoch"
+                    label {
+                        attributes["for"] = fieldId
+                        +"Share code: "
+                    }
+                    input(type = InputType.text) {
+                        id = fieldId
+                        value = code
+                        readonly = true
+                    }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+                        attributes[ATTR_FROM] = fieldId
+                        +"Copy"
+                    }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_SHARE_HIDE
+                        attributes[ATTR_EPOCH] = epoch.toString()
+                        +"Hide"
+                    }
+                }
+            }
+        }
+    }
+    if (shares.missingKeyEpochs.isNotEmpty()) {
+        section {
+            h2 { +"Rebuild the key" }
+            p { +"This device does not have the key for ${shares.missingKeyEpochs.joinToString(", ") { "key number $it" }}. Type or paste share codes from enough stewards, one on each line (yours too). Nothing is changed unless they make the right key." }
+            form {
+                id = FORM_REBUILD_KEY
+                label {
+                    attributes["for"] = FIELD_SHARE_CODES
+                    +"Share codes: "
+                }
+                textArea {
+                    id = FIELD_SHARE_CODES
+                    name = FIELD_SHARE_CODES
+                    required = true
+                    attributes[ATTR_MIN] = "1"
+                    attributes["autocomplete"] = "off"
+                    attributes["autocapitalize"] = "off"
+                    attributes["spellcheck"] = "false"
+                    attributes["rows"] = "5"
+                }
+                formSubmit("Rebuild the key")
+            }
+        }
+    }
+    a(href = Screen.Stewards.fragment) { +"Back to stewards" }
 }

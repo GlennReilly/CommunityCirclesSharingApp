@@ -243,6 +243,23 @@ try {
   await until(restorer, has(restorer, 'Circle home'), 'restored', 40000); ok('the 12 words restored alice in a clean browser');
   await restorer.evaluate('location.hash = "#/items"'); await until(restorer, has(restorer, 'Drill') + ' && ' + has(restorer, 'Yours'), 'restored browser sees her items'); ok('the restored browser sees her own items');
   await restorer.evaluate('location.hash = "#/settings"'); await until(restorer, has(restorer, 'No recovery code yet') + ' && ' + has(restorer, '(this device)'), 'recovery code used up'); ok('the used recovery code is gone; settings suggests making a new one');
+  // Recovery shares (ADR 0048): two stewards, so alice splits the key 2 of 2; each steward can show a share code; no rebuild form while the key is held.
+  await alice.evaluate('location.hash = "#/stewards/recovery-shares"'); await until(alice, has(alice, 'Make the shares'), 'shares page');
+  await checkAccessibility(alice, 'recovery shares');
+  if (!(await buttonHidden(alice, 'make-shares-form'))) throw new Error('make-shares button visible while empty');
+  await setField(alice, 'make-shares-form', 'share-threshold', '2');
+  if (await buttonHidden(alice, 'make-shares-form')) throw new Error('make-shares button hidden with a number');
+  await alice.evaluate('document.getElementById("make-shares-form").requestSubmit()'); await until(alice, has(alice, 'Sent. Each of the 2 stewards'), 'shares sent'); ok('alice split the key 2 of 2 between the stewards');
+  await sleep(1500); await click(alice, 'sync');
+  await syncUntil(bea, 'location.hash = "#/stewards/recovery-shares"; ' + has(bea, 'Show my share code'), 'bea has a share'); ok('bea, the other steward, was sent a share');
+  await click(bea, 'share-show'); await until(bea, 'document.querySelector("input[id^=share-code-]") !== null', 'bea code shown');
+  const beaCode = await bea.evaluate('document.querySelector("input[id^=share-code-]").value');
+  await syncUntil(alice, 'location.hash = "#/stewards/recovery-shares"; ' + has(alice, 'Show my share code'), 'alice has a share'); await click(alice, 'share-show'); await until(alice, 'document.querySelector("input[id^=share-code-]") !== null', 'alice code shown');
+  const aliceCode = await alice.evaluate('document.querySelector("input[id^=share-code-]").value');
+  if (!/^rs1 ([0-9a-f]{1,4} ?)+$/.test(beaCode) || beaCode === aliceCode) throw new Error('bad share codes: ' + beaCode + ' / ' + aliceCode); ok('each steward shows a different share code');
+  if (await alice.evaluate('document.getElementById("rebuild-key-form") !== null')) throw new Error('rebuild form shown while the key is held'); ok('no rebuild form while the key is held');
+  await checkAccessibility(alice, 'recovery shares with a code');
+  await click(alice, 'share-hide'); await until(alice, '!' + has(alice, 'rs1 '), 'code hidden'); ok('the share code can be hidden again');
   // Removal: Bea steps down as a steward, Alice removes her as a member; Bea can no longer sign in.
   await bea.evaluate('location.hash = "#/stewards"'); await until(bea, 'document.querySelector("[data-action=steward-remove]") !== null', 'bea step down button');
   await bea.evaluate('(() => { const mine = [...document.querySelectorAll("li")].find(li => li.textContent.includes("Step down as steward")); mine.querySelector("button").click(); return true; })()');

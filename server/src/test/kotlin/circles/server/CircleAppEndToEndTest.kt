@@ -814,4 +814,84 @@ class CircleAppEndToEndTest {
         assertEquals(RestoreResult.NotFound, oldTry.app.restoreFromCode(assertNotNull(RestoreLink.parse(first.restoreLink)), first.words.joinToString(" "), PASSPHRASE), "the replaced code no longer works")
         assertEquals(RestoreResult.Restored, oldTry.app.restoreFromCode(assertNotNull(RestoreLink.parse(second.restoreLink)), second.words.joinToString(" "), PASSPHRASE), "the newest does")
     }
+
+    /** A replica that hides some logged events, so a device can be in the log yet never have been sent the key. */
+    private class HidingReplica(private val inner: InMemoryReplica, private val hide: (circles.event.Envelope) -> Boolean) : circles.sync.Replica by inner {
+        override suspend fun entries(circle: circles.policy.CircleId, after: Long) = inner.entries(circle, after).filter { !hide(it.envelope) }
+    }
+
+    @Test
+    fun stewardsRebuildTheCircleKeyFromSharesAndAWrongSetIsRefused() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val aliceMember = home(alice.app).me
+        val aliceDevice = home(alice.app).myDevices.single().device
+        // Bea's replica never shows her the wraps Alice makes for her: she is a steward whose device has no key.
+        val hideWraps: (circles.event.Envelope) -> Boolean = { e ->
+            e.type == circles.event.EventType.KEY_WRAP.wire && e.author == aliceMember &&
+                (circles.event.CircleKeys.keyWrap(e.public) as? circles.encoding.Parsed.Ok)?.value?.device != aliceDevice
+        }
+        val beaReplica = InMemoryReplica { it.eventId(crypto) }
+        val beaHidden = HidingReplica(beaReplica, hideWraps)
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto, replica = null).let { plain ->
+            val hasher = JvmPasswordHasher()
+            val store = InMemoryKeyStore()
+            val vault = KeyVault(deadScope, crypto, testCipher, hasher, store, AutoLock.UntilTabCloses, FAST)
+            val app = CircleApp(deadScope, crypto, testCipher, vault, store, beaHidden, { identity -> HttpSyncApi(transport, crypto, identity) }, { TODAY }, wordlist = { WORDS })
+            Browser(app, store, beaReplica)
+        }
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertTrue(home(bea.app).isSteward)
+        assertFalse(home(bea.app).canRead, "Bea is in the log but was never sent the key")
+        assertEquals(emptyList(), home(bea.app).items)
+
+        // 1. Alice makes the shares: 2 of 2 stewards. A threshold out of range is explained; a non-steward cannot.
+        assertEquals(circles.app.ShareMakingResult.BadThreshold(2, 2), alice.app.makeRecoveryShares(3))
+        assertEquals(circles.app.ShareMakingResult.BadThreshold(2, 2), alice.app.makeRecoveryShares(1))
+        assertEquals(circles.app.ShareMakingResult.NoKey, bea.app.makeRecoveryShares(2))
+        assertEquals(circles.app.ShareMakingResult.Sent(stewards = 2, threshold = 2), alice.app.makeRecoveryShares(2))
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+        val aliceShares = home(alice.app).recoveryShares
+        assertEquals(listOf(1), aliceShares.heldEpochs)
+        assertTrue(aliceShares.currentSetSent && aliceShares.mayMake)
+        val beaShares = home(bea.app).recoveryShares
+        assertEquals(listOf(1), beaShares.heldEpochs)
+        assertEquals(listOf(1), beaShares.missingKeyEpochs)
+        assertFalse(beaShares.mayMake, "she cannot split a key she does not have")
+
+        // 2. The codes are text; the owner of each reads theirs out.
+        val aliceCode = assertNotNull(alice.app.shareCode(1))
+        val beaCode = assertNotNull(bea.app.shareCode(1))
+        assertTrue(aliceCode.startsWith("rs1 ") && aliceCode != beaCode)
+        assertNull(alice.app.shareCode(2))
+
+        // 3. Wrong sets send nothing: no code, a mistyped one, not a code, one share alone, the same share twice.
+        assertEquals(circles.app.RebuildResult.NoCodes, bea.app.rebuildKey(listOf("", "  ")))
+        assertEquals(circles.app.RebuildResult.BadCode(2, mistyped = false), bea.app.rebuildKey(listOf(beaCode, "hello")))
+        val typo = aliceCode.dropLast(1) + (if (aliceCode.last() == '0') '1' else '0')
+        assertEquals(circles.app.RebuildResult.BadCode(2, mistyped = true), bea.app.rebuildKey(listOf(beaCode, typo)))
+        assertIs<circles.app.RebuildResult.Wrong>(bea.app.rebuildKey(listOf(beaCode)))
+        assertIs<circles.app.RebuildResult.Wrong>(bea.app.rebuildKey(listOf(beaCode, beaCode)))
+        assertFalse(home(bea.app).canRead)
+
+        // 4. The right two rebuild the key; it is checked against the log's commitment, wrapped to Bea's device, and she reads.
+        assertEquals(circles.app.RebuildResult.Rebuilt(1), bea.app.rebuildKey(listOf(aliceCode.uppercase(), beaCode.replace(' ', '-'))))
+        assertTrue(home(bea.app).canRead, "her own change shows at once")
+        bea.app.syncOnce(); alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+        assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
+        assertTrue(home(bea.app).canRead)
+        assertEquals(ladder, home(bea.app).items.single().item)
+        assertEquals(emptyList(), home(bea.app).recoveryShares.missingKeyEpochs)
+        assertEquals(circles.app.RebuildResult.AlreadyHaveKey, bea.app.rebuildKey(listOf(aliceCode, beaCode)))
+    }
 }
