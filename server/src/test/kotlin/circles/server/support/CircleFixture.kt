@@ -80,3 +80,41 @@ class CircleFixture(val services: Services, val crypto: Crypto) {
         services.blobs!!.put(circle, hash(bytes), bytes)
     }
 }
+
+/**
+ * The circle of the spec's handover test 1 (section 8): three stewards and five members, created with a quorum of one
+ * so the founder can appoint the other stewards, with the circle key wrapped to every device and one blob.
+ */
+class HandoverFixture(val services: Services, val crypto: Crypto) {
+    val circle: CircleId = newCircleId(crypto)
+    private val circleKey = KeyRing.newCircleKey(crypto)
+    val members: List<EventAuthor> = List(5) {
+        EventAuthor(crypto, DeviceIdentity.generate(crypto, testCipher), testCipher).also { m -> m.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, circleKey) }
+    }
+    val founder get() = members.first()
+    val events = mutableListOf<Envelope>()
+    val blob = ByteArray(2_048) { (it * 5).toByte() }
+
+    private fun push(event: Envelope, entrance: Entrance = Entrance.Push(circle)) {
+        val result = services.sync.submit(listOf(event.toDto()), entrance).single()
+        assertEquals(PushStatus.ACCEPTED, result.status, "${event.type}: ${result.reason} ${result.detail}")
+        events += event
+    }
+
+    /** Returns the number of events pushed. */
+    fun build(): Int {
+        push(founder.circleCreate(circle, TODAY, circles.event.StewardSettings(quorum = 1)), Entrance.Create)
+        push(founder.keyWrap(circle, founder.identity.registration, FIRST_EPOCH, circleKey, TODAY))
+        members.drop(1).forEach { joiner ->
+            val invite = InviteKey(crypto.generateSigningKeyPair())
+            val inviteEvent = founder.invite(circle, invite, TODAY + 30, 1, TODAY)
+            push(inviteEvent)
+            push(joiner.join(circle, inviteEvent.eventId(crypto), invite, TODAY), Entrance.Join(circle))
+            push(founder.keyWrap(circle, joiner.identity.registration, FIRST_EPOCH, circleKey, TODAY))
+        }
+        push(founder.stewardAdd(circle, members[1].identity.member, TODAY))
+        push(founder.stewardAdd(circle, members[2].identity.member, TODAY))
+        services.blobs!!.put(circle, crypto.hash256(blob).toHex(), blob)
+        return events.size
+    }
+}

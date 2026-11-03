@@ -47,11 +47,13 @@ class TestServer(
     log: Log = NoLog,
     blobQuotaBytes: Long = 1024L * 1024,
     streamKeepAliveMillis: Long = 25_000,
+    /** Run over a real database file and blob folder in this directory instead of memory (backup and restore tests). */
+    private val dataDir: java.nio.file.Path? = null,
 ) : AutoCloseable {
     val crypto = JvmCrypto()
     val clock = MutableClock()
-    val connection: Connection = Database.openMemory().also { Migrator(it).migrate() }
-    val blobsDir: java.nio.file.Path = java.nio.file.Files.createTempDirectory("circles-blobs")
+    val connection: Connection = (if (dataDir == null) Database.openMemory() else Database.openFile(dataDir)).also { Migrator(it).migrate() }
+    val blobsDir: java.nio.file.Path = dataDir?.resolve("blobs") ?: java.nio.file.Files.createTempDirectory("circles-blobs")
     val services: Services = buildServices(connection, crypto, clock, allowCreate, log, rateLimit, trustProxy, blobsDir, blobQuotaBytes, streamKeepAliveMillis)
 
     /** Runs a query against the database for assertions. */
@@ -75,7 +77,7 @@ class TestServer(
 
     override fun close() {
         connection.close()
-        blobsDir.toFile().deleteRecursively()
+        if (dataDir == null) blobsDir.toFile().deleteRecursively()
     }
 }
 

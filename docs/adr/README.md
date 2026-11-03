@@ -34,6 +34,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0028](0028-client-image-policy.md) | Client image policy: resize, re-encode, strip metadata | Accepted |
 | [0029](0029-lower-the-minimum-silent-days.md) | Lower the minimum silent days of the steward fallback to 7 (amends 0027) | Accepted |
 | [0030](0030-circle-export-import-and-verify.md) | Circle export, import and verify (`circles-export/1`) | Accepted |
+| [0031](0031-server-backup-and-restore.md) | Server backup and restore (`circles-backup/1`) | Accepted |
 
 ## Open decisions still to record
 

@@ -10,7 +10,7 @@ Done: **M0** (skeleton, trust policy), **M1** (signed event log and sync), **M2*
 - **Encryption** ([ADR 0018](docs/adr/0018-m2-libsodium-bindings.md) to [0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md), [0024](docs/adr/0024-retire-the-plaintext-v0-format.md)): every private payload is sealed under a circle key (format `v = 1`, the only one); the server stores ciphertext and never holds a key. Circle keys are wrapped to devices, rotated, and split among stewards (Shamir).
 - **Governance** ([ADR 0027](docs/adr/0027-steward-quorum-setting-and-inactivity-fallback.md), [0029](docs/adr/0029-lower-the-minimum-silent-days.md)): stewards, a per-circle quorum, and an inactivity fallback with settings the stewards control.
 - **Items and loans** ([ADR 0025](docs/adr/0025-item-and-loan-event-payloads.md)) with per-item detail keys, and encrypted blobs for attachments.
-- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore`, signed admin endpoints, Docker and load numbers are still to do.
+- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed admin endpoints, Docker, the operator guides and load numbers are still to do.
 
 The API is in [docs/api.md](docs/api.md); the decisions are in [docs/adr/](docs/adr/README.md).
 
@@ -57,6 +57,17 @@ java -jar circles-server.jar import circle.zip              # re-checks every ev
 
 After an import, existing devices log in again with the key they already have and carry on from where they stopped.
 
+Back up and restore the whole server ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)):
+
+```bash
+java -jar circles-server.jar backup /safe/place              # database and blobs in one zip; safe while serving
+java -jar circles-server.jar verify /safe/place/circles-backup-<time>.zip
+java -jar circles-server.jar restore circles-backup-<time>.zip           # new host, server stopped
+java -jar circles-server.jar restore circles-backup-<time>.zip --force   # existing data is moved aside, never deleted
+```
+
+`migrate` takes a database-only backup first, so a failed or unwanted migration can be undone. Copy backups off the machine: the default folder is on the same disk.
+
 Settings (environment variables, all optional):
 
 | Variable | Default | Meaning |
@@ -67,6 +78,8 @@ Settings (environment variables, all optional):
 | `CIRCLES_RATE_LIMIT` | `true` | Per-address and per-device request limits ([ADR 0015](docs/adr/0015-rate-limiting-pulled-forward.md)) |
 | `CIRCLES_TRUST_PROXY` | `false` | Behind a reverse proxy, take the client address from the last `X-Forwarded-For` entry; otherwise every client looks like the proxy and shares one limit |
 | `CIRCLES_BLOB_QUOTA_MIB` | `256` | Blob storage allowed per circle, in MiB; uploads beyond it get `507` ([ADR 0026](docs/adr/0026-sse-hints-and-blob-storage.md)) |
+| `CIRCLES_BACKUP_INTERVAL_HOURS` | off | Write a full backup every this many hours while serving, into `<data dir>/backups/` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) |
+| `CIRCLES_BACKUP_KEEP` | `7` | How many scheduled backups to keep |
 | `CIRCLES_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
 Logs are one JSON object per line on stdout. They never contain bodies, headers, tokens, keys, client addresses or exception messages ([ADR 0016](docs/adr/0016-structured-json-logging.md)).
