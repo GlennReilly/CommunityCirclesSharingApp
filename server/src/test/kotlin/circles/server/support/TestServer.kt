@@ -72,7 +72,6 @@ class TestServer(
     fun exec(sql: String) {
         synchronized(connection) {
             connection.createStatement().use { it.executeUpdate(sql) }
-            connection.commit()
         }
     }
 

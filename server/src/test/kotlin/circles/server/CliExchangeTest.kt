@@ -194,4 +194,22 @@ class CliExchangeTest {
         assertEquals(EXIT_OK, run(dir, "migrate").code)
         return dir
     }
+
+    @Test
+    fun exportAndImportTokenWorkWhileAServerIsUsingTheSameDataDirectory() {
+        val dir = Files.createDirectories(base.resolve("live"))
+        val server = circles.server.support.TestServer(dataDir = dir)
+        try {
+            val fixture = CircleFixture(server.services, server.crypto)
+            fixture.build()
+            val file = base.resolve("live.zip")
+            val exported = run(dir, "export", fixture.circle.v, file.toString())
+            assertEquals(EXIT_OK, exported.code, exported.err)
+            assertEquals(EXIT_OK, run(dir, "import-token", fixture.circle.v).code)
+            // And the server is unharmed: it still accepts a push afterwards.
+            fixture.addMore(1)
+        } finally {
+            server.close()
+        }
+    }
 }

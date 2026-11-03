@@ -58,22 +58,29 @@ object Database {
     }
 }
 
-/** Hand-written SQL over one connection. All access goes through [transaction], which takes a lock. */
+/**
+ * Hand-written SQL over one connection. All access goes through [transaction], which takes a lock.
+ *
+ * The connection stays in auto-commit mode and each transaction is an explicit `BEGIN IMMEDIATE` ... `COMMIT`. With
+ * JDBC's auto-commit off, SQLite starts the next transaction the moment one ends, which would keep the write lock held
+ * for the life of the server and make every other process (`export`, `import-token`, `backup`) fail with SQLITE_BUSY.
+ */
 class SqliteStore(private val connection: Connection) : Store {
     private val lock = Any()
 
     init {
-        connection.autoCommit = false
+        connection.autoCommit = true
     }
 
     override fun <T> transaction(block: (StoreTransaction) -> T): T =
         synchronized(lock) {
+            connection.createStatement().use { it.execute("BEGIN IMMEDIATE") }
             try {
                 val result = block(Transaction(connection))
-                connection.commit()
+                connection.createStatement().use { it.execute("COMMIT") }
                 result
             } catch (e: Throwable) {
-                connection.rollback()
+                runCatching { connection.createStatement().use { it.execute("ROLLBACK") } }
                 throw e
             }
         }
