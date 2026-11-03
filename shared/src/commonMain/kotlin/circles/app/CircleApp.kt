@@ -58,6 +58,8 @@ const val INVITE_USES = 1
 data class WaitingDevice(val device: DeviceId, val member: MemberId)
 
 const val MAX_ITEM_DESCRIPTION_CHARS = 500
+private const val FINGERPRINT_HEX_CHARS = 20
+private const val FINGERPRINT_GROUP = 4
 private const val DETAIL_DESCRIPTION = "description"
 
 /** An item as the Items screen shows it. [description] is null unless this device holds the item's key (owner or approved borrower). */
@@ -68,6 +70,16 @@ data class ItemSummary(
     val owner: MemberId,
     val ownedByMe: Boolean,
     val description: String?,
+)
+
+/** A person in the circle, as the Members screen shows them. */
+data class MemberSummary(
+    val member: MemberId,
+    val isMe: Boolean,
+    val isSteward: Boolean,
+    val devices: Int,
+    /** A short code from the first device's signing key, for comparing in person ("is this really you?"). */
+    val fingerprint: String,
 )
 
 enum class LoanRole { BORROWER, OWNER }
@@ -137,6 +149,8 @@ data class HomeData(
     val loans: List<LoanSummary> = emptyList(),
     /** Today as a day number, for date pickers. */
     val today: Int = 0,
+    /** Everyone in the circle, in the order they joined. */
+    val people: List<MemberSummary> = emptyList(),
 )
 
 sealed interface AppModel {
@@ -453,6 +467,15 @@ class CircleApp(
                 changesWaiting = replica.outbox(s.circle).size,
                 refusedChanges = replica.refused(s.circle).size,
                 today = today(),
+                people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
+                    MemberSummary(
+                        member = member,
+                        isMe = member == s.identity.member,
+                        isSteward = member in view.stewards,
+                        devices = devices.size,
+                        fingerprint = fingerprint(devices.first().registration.signPub),
+                    )
+                },
                 loans = view.market.loans.values.filter { it.owner == s.identity.member || it.borrower == s.identity.member }.map { loan ->
                     val item = view.market.items[loan.item]
                     val iAmOwner = loan.owner == s.identity.member
@@ -485,6 +508,10 @@ class CircleApp(
             ),
         )
     }
+
+    /** Twenty hex characters of the key's hash in groups of four, easy to read out loud. */
+    private fun fingerprint(signPub: circles.encoding.ByteString): String =
+        crypto.hash256(signPub.toByteArray()).toHex().take(FINGERPRINT_HEX_CHARS).chunked(FINGERPRINT_GROUP).joinToString(" ")
 
     // ---- internals ----
 

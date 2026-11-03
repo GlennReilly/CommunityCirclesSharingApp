@@ -157,7 +157,8 @@ fun FlowContent.shell(state: AppState) {
             AppModel.NoIdentity -> newcomer(state)
             is AppModel.Locked -> signIn()
             is AppModel.Open -> when (state.screen) {
-                Screen.Home -> home(model.home, state)
+                Screen.Home -> home(model.home)
+                Screen.Members -> members(model.home, state)
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
@@ -296,7 +297,7 @@ private fun FlowContent.signIn() {
     }
 }
 
-private fun FlowContent.home(home: HomeData, state: AppState) {
+private fun FlowContent.home(home: HomeData) {
     h1 { +Screen.Home.title }
     if (!home.canRead) {
         p {
@@ -304,9 +305,66 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
             +"You are in the circle. A steward needs to let you in before you can see anything."
         }
     }
-    p { +(if (home.members == 1) "1 member" else "${home.members} members") }
+    ul {
+        li {
+            a(href = Screen.Members.fragment) { +(if (home.members == 1) "1 member" else "${home.members} members") }
+        }
+        if (home.canRead) {
+            li {
+                a(href = Screen.Items.fragment) { +(if (home.items.size == 1) "1 item shared" else "${home.items.size} items shared") }
+            }
+        }
+        val toAnswer = home.loans.count { it.role == LoanRole.OWNER && it.status == LoanStatus.REQUESTED }
+        if (toAnswer > 0) {
+            li {
+                a(href = Screen.Borrow.fragment) { +(if (toAnswer == 1) "1 request waiting for your answer" else "$toAnswer requests waiting for your answer") }
+            }
+        }
+        if (home.isSteward && home.waiting.isNotEmpty()) {
+            li {
+                a(href = Screen.Members.fragment) { +(if (home.waiting.size == 1) "1 person waiting to be let in" else "${home.waiting.size} people waiting to be let in") }
+            }
+        }
+    }
     if (home.refusedChanges > 0) {
         p { +"${home.refusedChanges} of your changes could not be sent: the server refused them." }
+    }
+}
+
+/** Who is in the circle, how to bring someone in, and (for stewards) who is waiting at the door. */
+private fun FlowContent.members(home: HomeData, state: AppState) {
+    h1 { +Screen.Members.title }
+    ul {
+        for (person in home.people) {
+            li {
+                h2 { +(if (person.isMe) "You" else "Member ${person.member.v.take(MEMBER_SHORT_CHARS)}") }
+                p {
+                    +buildList {
+                        if (person.isSteward) add("Steward")
+                        add(if (person.devices == 1) "1 device" else "${person.devices} devices")
+                    }.joinToString(", ")
+                }
+                p { +"Key fingerprint: ${person.fingerprint}" }
+            }
+        }
+    }
+    p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
+    if (home.isSteward && home.waiting.isNotEmpty()) {
+        section {
+            h2 { +"Waiting to be let in" }
+            ul {
+                for (waiting in home.waiting) {
+                    li {
+                        +"Member ${waiting.member.v.take(MEMBER_SHORT_CHARS)} "
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_ADMIT
+                            attributes[ATTR_DEVICE] = waiting.device.v
+                            +"Let in"
+                        }
+                    }
+                }
+            }
+        }
     }
     section {
         h2 { +"Invite someone" }
@@ -328,23 +386,6 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
             button(type = ButtonType.button) {
                 attributes[ATTR_ACTION] = ACTION_COPY
                 +"Copy"
-            }
-        }
-    }
-    if (home.isSteward && home.waiting.isNotEmpty()) {
-        section {
-            h2 { +"Waiting to be let in" }
-            ul {
-                for (waiting in home.waiting) {
-                    li {
-                        +"Member ${waiting.member.v.take(MEMBER_SHORT_CHARS)} "
-                        button(type = ButtonType.button) {
-                            attributes[ATTR_ACTION] = ACTION_ADMIT
-                            attributes[ATTR_DEVICE] = waiting.device.v
-                            +"Let in"
-                        }
-                    }
-                }
             }
         }
     }

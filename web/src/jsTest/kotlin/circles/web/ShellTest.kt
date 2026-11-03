@@ -4,6 +4,7 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.LoanRole
+import circles.app.MemberSummary
 import circles.app.LoanSummary
 import circles.event.LoanId
 import circles.event.LoanStatus
@@ -40,7 +41,8 @@ private fun home(
     refused: Int = 0,
     items: List<ItemSummary> = emptyList(),
     loans: List<LoanSummary> = emptyList(),
-) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759)
+    people: List<MemberSummary> = emptyList(),
+) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759, people = people)
 
 private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVERYDAY, me, ownedByMe = true, description = "Garage at the back")
 private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null)
@@ -226,7 +228,7 @@ class ShellViewTest {
         val pages = listOf(
             newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle), newcomer(Screen.JoinCircle, link),
             render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
-            render(open().copy(newInvite = "https://x")),
+            render(open().copy(screen = Screen.Members, newInvite = "https://x")),
             render(open().copy(screen = Screen.AddItem)),
             render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item)),
             borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
@@ -299,28 +301,61 @@ class ShellViewTest {
         assertFalse("A steward needs to let you in" in render(open(home(canRead = true))))
     }
 
-    @Test fun homeCountsMembers() {
-        assertTrue("2 members" in render(open(home(members = 2))))
-        assertTrue("1 member<" in render(open(home(members = 1))))
+    @Test fun homeSummarisesAndLinksToThePagesThatDoTheWork() {
+        val html = render(open(home(members = 2, items = listOf(ladder, drill), loans = listOf(loan("a", LoanRole.OWNER, LoanStatus.REQUESTED)), waiting = listOf(WaitingDevice(beaDevice, bea)))))
+        assertTrue(Regex("""<a href="#/members">2 members</a>""").containsMatchIn(html))
+        assertTrue(Regex("""<a href="#/items">2 items shared</a>""").containsMatchIn(html))
+        assertTrue(Regex("""<a href="#/borrow">1 request waiting for your answer</a>""").containsMatchIn(html))
+        assertTrue(Regex("""<a href="#/members">1 person waiting to be let in</a>""").containsMatchIn(html))
     }
 
-    @Test fun homeOffersAnInviteAndShowsTheMadeLinkReadOnly() {
-        val html = render(open().copy(newInvite = "https://circles.example/#/join/x"))
+    @Test fun homeCountsOneMemberInTheSingular() {
+        assertTrue(">1 member</a>" in render(open(home(members = 1))))
+    }
+
+    @Test fun homeHasNoActionsOfItsOwn() {
+        val html = render(open(home(waiting = listOf(WaitingDevice(beaDevice, bea)))).copy(newInvite = "https://x"))
+        for (action in listOf(ACTION_INVITE, ACTION_ADMIT, ACTION_COPY)) assertFalse("""$ATTR_ACTION="$action"""" in html, action)
+    }
+
+    @Test fun homeHidesTheWaitingLineFromPeopleWhoAreNotStewardsAndTheItemsLineBeforeTheyCanRead() {
+        val html = render(open(home(steward = false, canRead = false, waiting = listOf(WaitingDevice(beaDevice, bea)))))
+        assertFalse("waiting to be let in" in html)
+        assertFalse("items shared" in html)
+    }
+
+    private fun members(home: HomeData, newInvite: String? = null) = render(open(home).copy(screen = Screen.Members, newInvite = newInvite))
+
+    private val aliceSummary = MemberSummary(me, isMe = true, isSteward = true, devices = 2, fingerprint = "ab12 cd34 ef56 7890 1234")
+    private val beaSummary = MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "1111 2222 3333 4444 5555")
+
+    @Test fun theMembersPageListsEveryoneWithRoleDevicesAndFingerprint() {
+        val html = members(home(people = listOf(aliceSummary, beaSummary)))
+        assertTrue("You" in html && "Member bbbbbbbb" in html)
+        assertTrue("Steward, 2 devices" in html)
+        assertTrue("1 device<" in html)
+        assertTrue("Key fingerprint: ab12 cd34 ef56 7890 1234" in html)
+        assertTrue("Key fingerprint: 1111 2222 3333 4444 5555" in html)
+        assertTrue("read the fingerprints out to each other in person" in html)
+    }
+
+    @Test fun theMembersPageOffersAnInviteAndShowsTheMadeLinkReadOnly() {
+        val html = members(home(), newInvite = "https://circles.example/#/join/x")
         assertTrue("""$ATTR_ACTION="$ACTION_INVITE"""" in html)
         assertTrue("""value="https://circles.example/#/join/x"""" in html)
         assertTrue("readonly" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_COPY"""" in html)
-        assertFalse("""$ATTR_ACTION="$ACTION_COPY"""" in render(open()))
+        assertFalse("""$ATTR_ACTION="$ACTION_COPY"""" in members(home()))
     }
 
     @Test fun onlyStewardsSeeWhoIsWaitingAndCanLetThemIn() {
         val waiting = listOf(WaitingDevice(beaDevice, bea))
-        val steward = render(open(home(steward = true, waiting = waiting)))
+        val steward = members(home(steward = true, waiting = waiting))
         assertTrue("""$ATTR_ACTION="$ACTION_ADMIT"""" in steward)
         assertTrue("""$ATTR_DEVICE="${beaDevice.v}"""" in steward)
         assertTrue("Member bbbbbbbb" in steward)
-        assertFalse("""$ATTR_ACTION="$ACTION_ADMIT"""" in render(open(home(steward = false, waiting = waiting))))
-        assertFalse("Waiting to be let in" in render(open(home(steward = true))))
+        assertFalse("""$ATTR_ACTION="$ACTION_ADMIT"""" in members(home(steward = false, waiting = waiting)))
+        assertFalse("Waiting to be let in" in members(home(steward = true)))
     }
 
     @Test fun refusedChangesAreReported() {

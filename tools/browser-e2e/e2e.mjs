@@ -32,6 +32,8 @@ try {
   await submit(alice, 'start-form', { passphrase: PASS });
   await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '1 member'), 'alice home'); ok('alice started a circle');
   await until(alice, has(alice, 'Up to date'), 'alice synced'); ok('alice synced (status: Up to date)');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Key fingerprint: '), 'members page');
+  const fingerprint = await alice.evaluate('document.body.innerText.match(/Key fingerprint: ([0-9a-f ]+)/)[1].trim()'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(fingerprint)) throw new Error('fingerprint: ' + fingerprint); ok('members page shows alice with a fingerprint: ' + fingerprint);
   await click(alice, 'invite');
   await until(alice, 'document.getElementById("invite-output") !== null', 'invite shown');
   const link = await alice.evaluate('document.getElementById("invite-output").value'); ok('invite link made: ' + link.replace(/\/[A-Za-z0-9_-]{43}$/, '/<secret>'));
@@ -43,7 +45,8 @@ try {
   await submit(bea, 'join-form', { passphrase: PASS });
   await until(bea, has(bea, 'A steward needs to let you in'), 'bea waiting'); ok('bea joined and is waiting for a steward');
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
-  await click(alice, 'sync'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting');
+  await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting to be let in'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, '!' + has(bea, 'A steward needs to let you in'), 'bea can read'); ok('bea can now read the circle');
   // Items: add, privacy, change, remove.

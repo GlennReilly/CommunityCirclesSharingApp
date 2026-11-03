@@ -114,6 +114,17 @@ class CircleAppEndToEndTest {
         bea.app.syncOnce()
         assertTrue(home(bea.app).canRead)
 
+        // Both see the same two people; the steward is marked; each person's fingerprint is the same on both screens.
+        val seenByAlice = home(alice.app).people
+        val seenByBea = home(bea.app).people
+        assertEquals(2, seenByAlice.size)
+        assertEquals(listOf(true, false), seenByAlice.map { it.isMe })
+        assertEquals(listOf(false, true), seenByBea.map { it.isMe })
+        assertEquals(listOf(true, false), seenByAlice.map { it.isSteward })
+        assertEquals(seenByAlice.map { it.fingerprint }, seenByBea.map { it.fingerprint })
+        assertTrue(seenByAlice.all { Regex("[0-9a-f]{4}( [0-9a-f]{4}){4}").matches(it.fingerprint) })
+        assertEquals(2, seenByAlice.map { it.fingerprint }.toSet().size)
+
         // 6. An invite link works once: a second person using the same link is refused by the server and shows as a refused change.
         val carol = browser(transport, crypto)
         carol.app.open()
