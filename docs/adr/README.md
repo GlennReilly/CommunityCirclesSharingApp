@@ -41,6 +41,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0035](0035-browser-crypto-with-noble.md) | Browser cryptography with the noble libraries (amends 0018) | Accepted |
 | [0036](0036-browser-local-storage-with-indexeddb.md) | Browser local storage with IndexedDB, and verify once | Accepted |
 | [0037](0037-serve-the-web-client-from-the-server.md) | Serve the web client from the server, same origin | Accepted |
+| [0038](0038-client-sync-engine.md) | Client sync engine: shared code, verify once at ingest | Accepted |
 
 ## Open decisions still to record
 

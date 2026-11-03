@@ -52,6 +52,11 @@ class CircleFold(
      * (tier, pause, cooldown from `AccessPolicy.canBorrow`) arrives with standing in M4; until then everyone may.
      */
     private val mayBorrow: (MemberId, ItemId) -> Boolean = { _, _ -> true },
+    /**
+     * Signatures a client already checked when the events arrived (ADR 0036). An entry only counts when it names the same
+     * key the fold would verify with, so a stale or wrong entry falls back to a real check and never lets a forgery in.
+     */
+    private val signatures: VerifiedSignatures = VerifiedSignatures.NONE,
 ) {
     fun fold(circle: CircleId, log: List<Envelope>): CircleView {
         val state = State(circle)
@@ -99,12 +104,12 @@ class CircleFold(
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
         fun apply(e: Envelope, id: EventId, position: Long): String? {
             val type = EventType.fromWire(e.type)
-            if (!created) return if (type == EventType.CIRCLE_CREATE) create(e) else "the log must start with circle.create"
+            if (!created) return if (type == EventType.CIRCLE_CREATE) create(e, id) else "the log must start with circle.create"
             if (type == EventType.CIRCLE_CREATE) return "circle.create after the circle exists"
-            if (type == EventType.MEMBER_JOIN) return join(e)
+            if (type == EventType.MEMBER_JOIN) return join(e, id)
             val sender = devices[e.device]?.takeIf { !it.revoked }?.registration ?: return "sender device is unknown or revoked"
             if (sender.member != e.author) return "device does not belong to the author"
-            if (!e.hasValidSignature(crypto, sender.signPub)) return "bad signature"
+            if (!signedBy(e, id, sender.signPub)) return "bad signature"
             return when (type) {
                 EventType.MEMBER_INVITE -> invite(e, id)
                 EventType.DEVICE_ADD -> deviceAdd(e, sender)
@@ -118,14 +123,17 @@ class CircleFold(
             }
         }
 
-        private fun create(e: Envelope): String? {
+        private fun signedBy(e: Envelope, id: EventId, key: circles.encoding.ByteString): Boolean =
+            signatures.isVerified(id, key) || e.hasValidSignature(crypto, key)
+
+        private fun create(e: Envelope, id: EventId): String? {
             val terms = when (val parsed = PublicParts.circleCreate(e.public)) {
                 is Parsed.Ok -> parsed.value
                 is Parsed.Invalid -> return "bad circle.create: ${parsed.reason}"
             }
             val reg = terms.registration
             if (reg.member != e.author || reg.device != e.device) return "registration is not the author's"
-            if (!e.hasValidSignature(crypto, reg.signPub)) return "bad signature"
+            if (!signedBy(e, id, reg.signPub)) return "bad signature"
             created = true
             settings = terms.settings
             devices[reg.device] = DeviceState(reg, revoked = false)
@@ -139,11 +147,11 @@ class CircleFold(
             return null
         }
 
-        private fun join(e: Envelope): String? {
+        private fun join(e: Envelope, id: EventId): String? {
             val terms = (PublicParts.join(e.public) as? Parsed.Ok)?.value ?: return "bad join"
             val reg = terms.registration
             if (reg.member != e.author || reg.device != e.device) return "registration is not the author's"
-            if (!e.hasValidSignature(crypto, reg.signPub)) return "bad signature"
+            if (!signedBy(e, id, reg.signPub)) return "bad signature"
             if (devices.containsKey(reg.device)) return "device already registered"
             if (devices.values.any { it.registration.member == reg.member }) return "member already in the circle"
             val (invite, used) = invites[terms.invite] ?: return "no such invite"
