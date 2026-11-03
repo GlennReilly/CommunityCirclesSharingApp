@@ -14,3 +14,4 @@ summary { display: list-item; padding: 0.5rem 0; cursor: pointer; }
 nav a { display: inline-block; padding: 0.5rem 0; }
 label { display: inline-block; margin-top: 0.5rem; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.app-name { font-size: 1.5rem; font-weight: bold; margin: 0; }

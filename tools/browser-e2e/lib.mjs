@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ export async function startServer(port = 18081) {
   const proc = spawn('java', ['-jar', jar, 'serve'], { env: { ...process.env, CIRCLES_DATA_DIR: data, CIRCLES_BIND: '127.0.0.1', CIRCLES_RATE_LIMIT: 'false', CIRCLES_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; proc.stdout.on('data', d => log += d); proc.stderr.on('data', d => log += d);
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch {} await sleep(250); }
+  proc.once('exit', () => rmSync(data, { recursive: true, force: true }));
   return { url: `http://127.0.0.1:${port}`, stop: () => proc.kill(), log: () => log };
 }
 
@@ -33,7 +34,7 @@ export async function startChrome(port = 9333) {
     if (d.method === 'Log.entryAdded') logs.push(`log.${d.params.entry.level}: ${d.params.entry.text} ${d.params.entry.url ?? ''}`);
   });
   const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); return r.result.exceptionDetails ? `ERR ${r.result.exceptionDetails.exception?.description}` : r.result.result.value; };
-  return { send, evaluate, logs, goto: async url => { await send('Page.navigate', { url }); await sleep(1500); }, stop: () => { try { ws.close(); } catch {} proc.kill(); } };
+  return { send, evaluate, logs, goto: async url => { await send('Page.navigate', { url }); await sleep(1500); }, stop: () => { try { ws.close(); } catch {} proc.once('exit', () => setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500)); proc.kill(); } };
 }
 
 // ---- accessibility (axe-core) ----
@@ -41,6 +42,7 @@ import { readFileSync } from 'node:fs';
 const axeSource = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'node_modules/axe-core/axe.min.js'), 'utf8');
 export const A11Y = process.env.A11Y === '1';
 export const a11yFindings = [];
+export const readingLevels = [];
 
 /**
  * Runs axe-core against the page as it is now (WCAG 2.0, 2.1 and 2.2 level A and AA rules) and records every violation under [name].
@@ -53,10 +55,79 @@ export async function checkAccessibility(chrome, name) {
   const parsed = JSON.parse(result);
   for (const v of parsed.violations) a11yFindings.push({ page: name, ...v });
   console.log(`axe ${name}: ${parsed.violations.length} violation(s), ${parsed.passes} rules passed`);
+  await keyboardAndStructure(chrome, name);
+}
+
+const press = async (chrome, key, code, vk) => {
+  for (const type of ['keyDown', 'keyUp']) await chrome.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+};
+
+/**
+ * The checks axe cannot make (ADR-free, WCAG 2.1.1, 2.1.2, 2.4.1, 2.4.2, 2.4.7): the page has a language, a title, one main landmark and
+ * one h1 with no skipped heading levels; real Tab presses reach every visible control once, in order, without getting stuck; and each
+ * control shows a focus indicator. Also measures reading level of the page's text (Flesch-Kincaid grade) for the M6 review.
+ */
+async function keyboardAndStructure(chrome, name) {
+  await sleep(400); // let any re-render after the last action settle, or focus is measured on a page that is about to change
+  const structure = JSON.parse(await chrome.evaluate(`(() => {
+    const problems = [];
+    if (!document.documentElement.lang) problems.push('the page has no lang attribute');
+    if (!document.title.trim()) problems.push('the page has no title');
+    if (document.querySelectorAll('main').length !== 1) problems.push('expected exactly one main landmark, found ' + document.querySelectorAll('main').length);
+    const headings = [...document.querySelectorAll('h1,h2,h3,h4')].map(h => Number(h.tagName[1]));
+    if (headings.filter(h => h === 1).length !== 1) problems.push('expected exactly one h1, found ' + headings.filter(h => h === 1).length);
+    headings.forEach((h, i) => { if (i > 0 && h > headings[i - 1] + 1) problems.push('heading level jumps from h' + headings[i - 1] + ' to h' + h); });
+    const focusable = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')]
+      .filter(e => !e.disabled && e.tabIndex >= 0 && e.checkVisibility() && e.type !== 'hidden' && !e.hidden);
+    return JSON.stringify({ problems, count: focusable.length });
+  })()`));
+  const problems = [...structure.problems];
+  // Real Tab presses from the first control on the page (after a screen change focus sits on main, which is later in the page).
+  const probe = `(() => {
+    const e = document.activeElement; if (!e || e === document.body) return JSON.stringify({ body: true });
+    const cs = getComputedStyle(e);
+    const visibleFocus = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || cs.boxShadow !== 'none';
+    const label = (e.getAttribute('aria-label') || e.innerText || e.getAttribute('name') || e.id || e.tagName).trim().slice(0, 30);
+    return JSON.stringify({ key: e.tagName + '#' + [...document.querySelectorAll('*')].indexOf(e), label, visibleFocus });
+  })()`;
+  await press(chrome, 'Shift', 'ShiftLeft', 16); // tells the browser the last input was the keyboard, so :focus-visible applies to the first control too
+  await chrome.evaluate(`(() => { window.scrollTo(0, 0); const first = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')].find(e => !e.disabled && e.tabIndex >= 0 && e.checkVisibility() && e.type !== 'hidden' && !e.hidden); if (first) first.focus(); return true; })()`);
+  const seen = [JSON.parse(await chrome.evaluate(probe))];
+  let stopped = '';
+  for (let i = 1; i < structure.count * 4 + 6; i++) {
+    await press(chrome, 'Tab', 'Tab', 9);
+    const info = JSON.parse(await chrome.evaluate(probe));
+    if (info.body) { stopped = 'focus fell to the page body after ' + seen.length + ' stops (last: ' + (seen.at(-1)?.label ?? 'none') + ')'; break; }
+    if (info.key === seen.at(-1).key) continue; // a date field has several tab stops inside one control
+    if (seen.some(s => s.key === info.key)) { if (seen[0].key === info.key) seen[0].visibleFocus = info.visibleFocus; else seen.push(info); break; }
+    seen.push(info);
+  }
+  if (seen.length < structure.count) problems.push('Tab reached only ' + seen.length + ' of ' + structure.count + ' visible controls' + (stopped ? ': ' + stopped : '') + ' [' + seen.map(s => s.label).join(' | ') + ']');
+  const keys = seen.map(s => s.key);
+  if (new Set(keys).size !== keys.length) problems.push('a control was reached twice before the end (a keyboard trap or repeated focus)');
+  for (const s of seen) if (!s.visibleFocus) problems.push('no visible focus indicator on ' + s.label);
+  if (problems.length) a11yFindings.push({ page: name, id: 'keyboard-structure', impact: 'serious', help: 'Keyboard and page structure', nodes: problems });
+  console.log(`keys ${name}: ${seen.length} of ${structure.count} controls reached, ${problems.length} problem(s)`);
+  const level = JSON.parse(await chrome.evaluate(`(() => {
+    const text = [...document.querySelectorAll('main p, main li, main summary')].map(e => e.innerText.trim()).filter(t => t.length > 0).map(t => /[.!?]$/.test(t) ? t : t + '.').join(' ');
+    const sentences = text.split(/(?<=[.!?])\\s+/).filter(x => x.split(/\\s+/).length > 2);
+    const words = text.split(/\\s+/).filter(w => /[A-Za-z]/.test(w));
+    const syl = w => { const m = w.toLowerCase().replace(/[^a-z]/g, '').replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '').replace(/^y/, '').match(/[aeiouy]{1,2}/g); return Math.max(1, m ? m.length : 1); };
+    const syllables = words.reduce((n, w) => n + syl(w), 0);
+    const grade = sentences.length && words.length ? 0.39 * (words.length / sentences.length) + 11.8 * (syllables / words.length) - 15.59 : 0;
+    const longest = sentences.reduce((a, b) => (b.split(/\\s+/).length > a.split(/\\s+/).length ? b : a), '');
+    return JSON.stringify({ grade: Math.round(grade * 10) / 10, words: words.length, longest: longest.slice(0, 140), longestWords: longest.split(/\\s+/).length });
+  })()`));
+  readingLevels.push({ page: name, ...level });
 }
 
 export function reportAccessibility() {
   if (!A11Y) return 0;
+  const prose = readingLevels.filter(r => r.words >= 40);
+  if (prose.length) {
+    console.log('\nReading level (Flesch-Kincaid grade of the page text; the aim is grade 8 or below, and no sentence over 30 words):');
+    for (const r of prose.sort((a, b) => b.grade - a.grade)) console.log(`  grade ${String(r.grade).padStart(4)}  ${String(r.words).padStart(4)} words  longest sentence ${r.longestWords} words  [${r.page}]`);
+  }
   if (a11yFindings.length === 0) { console.log('\nAccessibility: no WCAG A/AA violations found by axe.'); return 0; }
   console.log(`\nAccessibility: ${a11yFindings.length} violation(s):`);
   for (const f of a11yFindings) console.log(`- [${f.page}] ${f.id} (${f.impact}): ${f.help}\n    ${f.nodes.join('\n    ')}`);

@@ -47,6 +47,7 @@ import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
+import kotlinx.html.classes
 import kotlinx.html.a
 import kotlinx.html.button
 import kotlinx.html.details
@@ -187,7 +188,11 @@ private const val MEMBER_SHORT_CHARS = 8
  */
 fun FlowContent.shell(state: AppState) {
     header {
-        h1 { +"Circles" }
+        // The app's name is not a heading: each page has exactly one h1 of its own.
+        p {
+            classes = setOf("app-name")
+            +"Circles"
+        }
         div {
             id = "sync-status"
             role = "status"
