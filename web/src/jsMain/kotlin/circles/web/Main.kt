@@ -15,6 +15,7 @@ import circles.event.ReturnOutcome
 import circles.policy.ItemClass
 import circles.policy.ItemId
 import circles.app.StartResult
+import circles.app.StewardResult
 import circles.crypto.JsCipher
 import circles.crypto.JsCrypto
 import circles.event.DeviceId
@@ -208,6 +209,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     circleApp.setAutoLockMinutes(it)
                     dispatch(AppAction.Notice("Saved."))
                 }
+                FORM_STEWARD_RULES -> {
+                    val quorum = field(FIELD_QUORUM).toIntOrNull()
+                    val inactive = field(FIELD_INACTIVE).toIntOrNull()
+                    val fallback = field(FIELD_FALLBACK).toIntOrNull()
+                    if (quorum == null || inactive == null || fallback == null) dispatch(AppAction.Notice("Fill in all three numbers."))
+                    else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback))
+                }
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
@@ -247,6 +255,18 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    private fun reportSteward(result: StewardResult) {
+        dispatch(
+            AppAction.Notice(
+                when (result) {
+                    is StewardResult.Sent -> if (result.takesEffect) "Done. It takes effect now." else "Sent. It takes effect when enough stewards agree."
+                    is StewardResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    StewardResult.NotAllowed -> "Only a steward can do that."
+                },
+            ),
+        )
+    }
+
     private fun report(result: StartResult) {
         when (result) {
             is StartResult.Started -> dispatch(AppAction.Notice(null))
@@ -274,6 +294,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             },
                         ),
                     )
+                }
+                ACTION_STEWARD_ADD -> target.getAttribute(ATTR_SUBJECT)?.let { reportSteward(circleApp?.proposeSteward(MemberId(it)) ?: StewardResult.NotAllowed) }
+                ACTION_STEWARD_REMOVE -> target.getAttribute(ATTR_SUBJECT)?.let { reportSteward(circleApp?.removeSteward(MemberId(it)) ?: StewardResult.NotAllowed) }
+                ACTION_STEWARD_SETTINGS -> target.getAttribute(ATTR_SUBJECT)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 3 }?.let {
+                    reportSteward(circleApp?.proposeStewardSettings(it[0], it[1], it[2]) ?: StewardResult.NotAllowed)
                 }
                 ACTION_BORROW_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.BorrowItem(ItemId(it)))

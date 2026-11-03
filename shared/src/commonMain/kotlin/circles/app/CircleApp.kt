@@ -13,6 +13,17 @@ import circles.event.InviteKey
 import circles.event.ItemKeys
 import circles.event.MAX_ITEM_NAME_CHARS
 import circles.event.DAMAGE_CLAIM_DAYS
+import circles.event.DEFAULT_STEWARD_FALLBACK_DELAY_DAYS
+import circles.event.DEFAULT_STEWARD_INACTIVE_DAYS
+import circles.event.DEFAULT_STEWARD_QUORUM
+import circles.event.StewardChange
+import circles.event.StewardOutcome
+import circles.event.StewardPolicy
+import circles.event.StewardRules
+import circles.event.StewardSettings
+import circles.event.StewardVote
+import circles.event.DEFAULT_STEWARD_COOL_OFF_DAYS
+import circles.event.DEFAULT_STEWARD_PROPOSAL_DAYS
 import circles.event.DisputeClaim
 import circles.event.DisputeOutcome
 import circles.event.LoanId
@@ -96,6 +107,34 @@ data class StandingSummary(
 
 /** Whether this member may ask for an item, and if not why and how to change that. */
 data class AccessSummary(val canAsk: Boolean, val reasons: List<String>, val howToUnlock: List<String>)
+
+/** A steward as the Stewards screen shows them. [votesFromDay] is set while a new steward is still cooling off. */
+data class StewardInfo(val member: MemberId, val isMe: Boolean, val sinceDay: Int?, val votesFromDay: Int?)
+
+/** The three settings that govern stewards (ADR 0027). */
+data class StewardSettingsSummary(val quorum: Int, val inactiveDays: Int, val fallbackDelayDays: Int)
+
+/** A steward change that is waiting for enough stewards to agree. */
+data class ProposalSummary(
+    val change: StewardChange,
+    /** The member being added or removed; null for a settings change. */
+    val member: MemberId?,
+    val settings: StewardSettingsSummary?,
+    val agreeing: Int,
+    val needed: Int,
+    val iAgree: Boolean,
+    val canAgree: Boolean,
+)
+
+sealed interface StewardResult {
+    /** Sent. [takesEffect] says whether it already completes the change (enough stewards agree). */
+    data class Sent(val takesEffect: Boolean) : StewardResult
+
+    /** The circle's rules refuse it now; [reason] is plain text to show. */
+    data class Refused(val reason: String) : StewardResult
+
+    data object NotAllowed : StewardResult
+}
 
 /** A person in the circle, as the Members screen shows them. */
 data class MemberSummary(
@@ -207,6 +246,9 @@ data class HomeData(
     val canVouch: Boolean = false,
     /** How many stewards the circle has; one means disputes the steward is part of cannot be decided. */
     val stewardCount: Int = 0,
+    val stewardList: List<StewardInfo> = emptyList(),
+    val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
+    val proposals: List<ProposalSummary> = emptyList(),
     /** Everyone in the circle, in the order they joined. */
     val people: List<MemberSummary> = emptyList(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
@@ -284,6 +326,46 @@ class CircleApp(
         session?.scheduler?.stop()
         session?.hints?.stop()
         session = null
+    }
+
+    /** Proposes [member] as a steward, or agrees to an existing proposal (the same event). */
+    suspend fun proposeSteward(member: MemberId): StewardResult = stewardChange(StewardChange.ADD, member.v)
+
+    /** Proposes removing [member]; for yourself it is stepping down, which needs no vote. */
+    suspend fun removeSteward(member: MemberId): StewardResult = stewardChange(StewardChange.REMOVE, member.v)
+
+    /** Proposes new steward settings, or agrees to the same proposal (ADR 0027). */
+    suspend fun proposeStewardSettings(quorum: Int, inactiveDays: Int, fallbackDelayDays: Int): StewardResult =
+        stewardChange(StewardChange.POLICY, StewardSettings(quorum, inactiveDays, fallbackDelayDays).subject())
+
+    private suspend fun stewardChange(change: StewardChange, subject: String): StewardResult {
+        val s = session ?: return StewardResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val me = s.identity.member
+        val policy = StewardPolicy().with(view.stewardSettings)
+        val prior = view.pendingStewardVotes.filter { it.change == change && it.subject == subject }.map { it.vote }
+        val outcome = when (change) {
+            StewardChange.POLICY -> {
+                val proposed = StewardSettings.fromSubject(subject) ?: return StewardResult.NotAllowed
+                StewardRules.decidePolicy(policy, proposed, me, today(), view.stewardSince, prior)
+            }
+            else -> {
+                val target = MemberId(subject)
+                if (view.devices.values.none { !it.revoked && it.registration.member == target }) return StewardResult.Refused("That person is not in the circle.")
+                StewardRules.decide(policy, change, target, me, today(), view.stewardSince, prior)
+            }
+        }
+        if (outcome is StewardOutcome.Refused) return StewardResult.Refused(outcome.reason)
+        s.author.keyRing = view.keys
+        val event = when (change) {
+            StewardChange.ADD -> s.author.stewardAdd(s.circle, MemberId(subject), today())
+            StewardChange.REMOVE -> s.author.stewardRemove(s.circle, MemberId(subject), today())
+            StewardChange.POLICY -> s.author.stewardPolicy(s.circle, StewardSettings.fromSubject(subject)!!, today())
+        }
+        s.engine.enqueue(s.circle, event)
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return StewardResult.Sent(outcome is StewardOutcome.Effective)
     }
 
     /** Syncs now and waits for the result (a "sync now" button, tests). Null while locked. */
@@ -627,6 +709,12 @@ class CircleApp(
                 ),
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 stewardCount = view.stewards.size,
+                stewardList = view.stewardSince.map { (member, since) ->
+                    val coolOffEnds = if (since == circles.event.FOUNDING_STEWARD_DAY || view.stewardSettings.quorum == 1) null else since + DEFAULT_STEWARD_COOL_OFF_DAYS
+                    StewardInfo(member, member == me, since.takeIf { it != circles.event.FOUNDING_STEWARD_DAY }, coolOffEnds?.takeIf { it > now })
+                },
+                stewardSettings = StewardSettingsSummary(view.stewardSettings.quorum, view.stewardSettings.inactiveDays, view.stewardSettings.fallbackDelayDays),
+                proposals = proposalsFrom(view, me, now),
                 autoLockMinutes = vault.autoLockMinutes,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     MemberSummary(
@@ -698,6 +786,29 @@ class CircleApp(
                 },
             ),
         )
+    }
+
+    private fun proposalsFrom(view: circles.event.CircleView, me: MemberId, now: Int): List<ProposalSummary> {
+        val policy = StewardPolicy().with(view.stewardSettings)
+        return view.pendingStewardVotes.groupBy { it.change to it.subject }.mapNotNull { (key, votes) ->
+            val (change, subject) = key
+            val latest = votes.maxOf { it.vote.day }
+            val live = votes.map { it.vote }.filter { latest - it.day <= DEFAULT_STEWARD_PROPOSAL_DAYS && it.voter in view.stewards && it.voter.v != subject.takeIf { change == StewardChange.REMOVE } }
+            if (now - latest > DEFAULT_STEWARD_PROPOSAL_DAYS) return@mapNotNull null // the window closed without enough agreement
+            val needed = if (change == StewardChange.REMOVE) policy.quorum else minOf(policy.quorum, view.stewards.size)
+            val iAgree = live.any { it.voter == me }
+            val settings = if (change == StewardChange.POLICY) StewardSettings.fromSubject(subject)?.let { StewardSettingsSummary(it.quorum, it.inactiveDays, it.fallbackDelayDays) } else null
+            val cooling = view.stewardSince[me]?.let { since -> since != circles.event.FOUNDING_STEWARD_DAY && policy.quorum > 1 && now < since + policy.coolOffDays } ?: true
+            ProposalSummary(
+                change = change,
+                member = if (change == StewardChange.POLICY) null else MemberId(subject),
+                settings = settings,
+                agreeing = live.map { it.voter }.toSet().size,
+                needed = needed,
+                iAgree = iAgree,
+                canAgree = me in view.stewards && !iAgree && !cooling,
+            )
+        }
     }
 
     /** Plain next steps for the standing page: what moves a member up (ADR 0042). */

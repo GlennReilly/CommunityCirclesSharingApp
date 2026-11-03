@@ -4,6 +4,14 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
 import circles.app.CalendarDay
+import circles.app.ProposalSummary
+import circles.event.StewardChange
+import circles.event.MAX_STEWARD_FALLBACK_DELAY_DAYS
+import circles.event.MAX_STEWARD_INACTIVE_DAYS
+import circles.event.MAX_STEWARD_QUORUM
+import circles.event.MIN_STEWARD_FALLBACK_DELAY_DAYS
+import circles.event.MIN_STEWARD_INACTIVE_DAYS
+import circles.event.MIN_STEWARD_QUORUM
 import circles.app.DisputeStatus
 import circles.event.DAMAGE_CLAIM_DAYS
 import circles.event.DisputeClaim
@@ -83,6 +91,14 @@ const val ATTR_ITEM = "data-item"
 const val ATTR_MIN = "data-min"
 const val ATTR_LOAN = "data-loan"
 const val ATTR_MEMBER = "data-member"
+const val ATTR_SUBJECT = "data-subject"
+const val ACTION_STEWARD_ADD = "steward-add"
+const val ACTION_STEWARD_REMOVE = "steward-remove"
+const val ACTION_STEWARD_SETTINGS = "steward-settings"
+const val FORM_STEWARD_RULES = "steward-rules-form"
+const val FIELD_QUORUM = "quorum"
+const val FIELD_INACTIVE = "inactive-days"
+const val FIELD_FALLBACK = "fallback-days"
 const val ACTION_VOUCH = "vouch"
 const val ACTION_BORROW_ITEM = "borrow-item"
 const val ACTION_APPROVE_LOAN = "approve-loan"
@@ -181,6 +197,7 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home)
                 Screen.Standing -> standing(model.home.standing)
+                Screen.Stewards -> stewards(model.home)
                 Screen.Items -> items(model.home)
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
@@ -883,5 +900,131 @@ private fun FlowContent.standing(standing: StandingSummary?) {
     section {
         h2 { +"How to unlock more" }
         ul { for (step in standing.howToUnlock) li { +step } }
+    }
+}
+
+private fun FlowContent.agreeButton(proposal: ProposalSummary) {
+    val (action, subject) = when (proposal.change) {
+        StewardChange.ADD -> ACTION_STEWARD_ADD to proposal.member?.v
+        StewardChange.REMOVE -> ACTION_STEWARD_REMOVE to proposal.member?.v
+        StewardChange.POLICY -> ACTION_STEWARD_SETTINGS to proposal.settings?.let { "${it.quorum}:${it.inactiveDays}:${it.fallbackDelayDays}" }
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = action
+        attributes[ATTR_SUBJECT] = subject.orEmpty()
+        +"Agree"
+    }
+}
+
+private fun proposalText(proposal: ProposalSummary): String = when (proposal.change) {
+    StewardChange.ADD -> "Make member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} a steward"
+    StewardChange.REMOVE -> "Remove member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} as a steward"
+    StewardChange.POLICY -> proposal.settings?.let {
+        "Change the rules: ${it.quorum} to agree, ${it.inactiveDays} quiet days, ${it.fallbackDelayDays} days to wait"
+    } ?: "Change the rules"
+}
+
+/** Who looks after the circle, what is waiting for their agreement, and the rules they follow (ADR 0027). */
+private fun FlowContent.stewards(home: HomeData) {
+    h1 { +Screen.Stewards.title }
+    p { +"Stewards let people in, decide disputes, and decide who the stewards are." }
+    if (home.stewardCount == 1) {
+        p {
+            role = "status"
+            +"This circle has one steward. If they are away, nobody can let people in or decide disputes that involve them. Consider adding another."
+        }
+    }
+    section {
+        h2 { +"Current stewards" }
+        ul {
+            for (steward in home.stewardList) {
+                li {
+                    h3 { +(if (steward.isMe) "You" else "Member ${steward.member.v.take(MEMBER_SHORT_CHARS)}") }
+                    p {
+                        +(steward.sinceDay?.let { "Steward since ${CalendarDay.format(it)}" } ?: "Founding steward")
+                        steward.votesFromDay?.let { +". Can vote from ${CalendarDay.format(it)}" }
+                    }
+                    if (home.isSteward && home.stewardCount > 1) {
+                        details {
+                            summary { +(if (steward.isMe) "Step down" else "Remove") }
+                            p { +(if (steward.isMe) "You stop being a steward at once; others remain." else "Other stewards must agree, as the circle's rules say.") }
+                            button(type = ButtonType.button) {
+                                attributes[ATTR_ACTION] = ACTION_STEWARD_REMOVE
+                                attributes[ATTR_SUBJECT] = steward.member.v
+                                +(if (steward.isMe) "Step down as steward" else "Propose removing")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (home.proposals.isNotEmpty()) {
+        section {
+            h2 { +"Waiting for agreement" }
+            ul {
+                for (proposal in home.proposals) {
+                    li {
+                        p { +proposalText(proposal) }
+                        p { +"${proposal.agreeing} of ${proposal.needed} stewards agree." }
+                        if (proposal.iAgree) p { +"You agree." }
+                        if (proposal.canAgree) agreeButton(proposal)
+                    }
+                }
+            }
+        }
+    }
+    if (home.isSteward) {
+        val candidates = home.people.filter { person -> !person.isMe && home.stewardList.none { it.member == person.member } }
+        if (candidates.isNotEmpty()) {
+            section {
+                h2 { +"Propose a new steward" }
+                ul {
+                    for (person in candidates) {
+                        li {
+                            +"Member ${person.member.v.take(MEMBER_SHORT_CHARS)} "
+                            button(type = ButtonType.button) {
+                                attributes[ATTR_ACTION] = ACTION_STEWARD_ADD
+                                attributes[ATTR_SUBJECT] = person.member.v
+                                +"Propose as steward"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    section {
+        h2 { +"Rules for stewards" }
+        ul {
+            li { +"Stewards who must agree: ${home.stewardSettings.quorum}" }
+            li { +"Days a steward must be quiet before the others may act without them: ${home.stewardSettings.inactiveDays}" }
+            li { +"Days the others must wait first: ${home.stewardSettings.fallbackDelayDays}" }
+        }
+        if (home.isSteward) {
+            p { +"To change the rules, fill in all three and propose. Other stewards must agree." }
+            form {
+                id = FORM_STEWARD_RULES
+                for ((field, label, range) in listOf(
+                    Triple(FIELD_QUORUM, "Stewards who must agree: ", MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM),
+                    Triple(FIELD_INACTIVE, "Quiet days: ", MIN_STEWARD_INACTIVE_DAYS..MAX_STEWARD_INACTIVE_DAYS),
+                    Triple(FIELD_FALLBACK, "Days to wait: ", MIN_STEWARD_FALLBACK_DELAY_DAYS..MAX_STEWARD_FALLBACK_DELAY_DAYS),
+                )) {
+                    label {
+                        attributes["for"] = field
+                        +label
+                    }
+                    input(type = InputType.number, name = field) {
+                        id = field
+                        required = true
+                        attributes["min"] = range.first.toString()
+                        attributes["max"] = range.last.toString()
+                        attributes[ATTR_MIN] = "1"
+                        attributes["placeholder"] = "${range.first} to ${range.last}"
+                    }
+                }
+                formSubmit("Propose these rules")
+            }
+        }
     }
 }

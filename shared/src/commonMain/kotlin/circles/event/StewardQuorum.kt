@@ -38,6 +38,14 @@ data class StewardSettings(
 
     /** Names this exact set of values, so votes for different proposals are never mixed. */
     fun subject(): String = "$quorum:$inactiveDays:$fallbackDelayDays"
+
+    companion object {
+        /** The settings a [subject] string names, or null if it is not one. */
+        fun fromSubject(subject: String): StewardSettings? {
+            val parts = subject.split(':').map { it.toIntOrNull() ?: return null }
+            return if (parts.size == 3) StewardSettings(parts[0], parts[1], parts[2]) else null
+        }
+    }
 }
 
 /** The numbers behind ADR 0027. Both the server and the client fold take one, so they cannot drift apart. */

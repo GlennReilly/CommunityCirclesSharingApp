@@ -6,7 +6,10 @@ import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.ItemResult
 import circles.app.LoanResult
+import circles.app.StewardResult
 import circles.app.VouchResult
+import circles.event.StewardChange
+import circles.policy.MemberId
 import circles.app.DisputeStatus
 import circles.event.DisputeClaim
 import circles.event.DisputeOutcome
@@ -36,6 +39,7 @@ import circles.sync.SyncState
 import circles.policy.ItemClass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -464,5 +468,83 @@ class CircleAppEndToEndTest {
         assertTrue(carolNow.reasons.any { it.contains("unreported incident") && it.contains("on hold") })
         assertEquals("1.3", home(bea.app).standing!!.points, "an upheld dispute earns the owner nothing for that loan")
         assertEquals(0, home(alice.app).loans.count { it.canResolve })
+    }
+
+    @Test
+    fun stewardsAreAddedByQuorumAfterTheCoolingOffAndTheRulesCanBeChanged() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        var day = TODAY
+        val alice = browser(transport, crypto, today = { day })
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto, today = { day })
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val carol = join()
+        fun id(b: Browser) = home(b.app).me
+        // Everyone pushes, then everyone pulls, so a change made by one is seen by all.
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea, carol).forEach { it.app.syncOnce() } } }
+
+        // One steward and the default quorum of two: the only steward can add another at once.
+        assertEquals(1, home(alice.app).stewardList.size)
+        assertEquals(2, home(alice.app).stewardSettings.quorum)
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(id(bea)))
+        sync()
+        val beaView = home(bea.app)
+        assertTrue(beaView.isSteward)
+        val beaInfo = beaView.stewardList.single { it.isMe }
+        assertEquals(day + 7, beaInfo.votesFromDay, "a new steward cools off for 7 days")
+
+        // A second addition now needs two stewards; Bea cannot vote yet, and says why when she tries.
+        assertEquals(StewardResult.Sent(takesEffect = false), alice.app.proposeSteward(id(carol)))
+        sync()
+        val waiting = home(bea.app).proposals.single()
+        assertEquals(StewardChange.ADD, waiting.change)
+        assertEquals(id(carol), waiting.member)
+        assertEquals(1, waiting.agreeing); assertEquals(2, waiting.needed)
+        assertFalse(waiting.canAgree)
+        assertTrue(assertIs<StewardResult.Refused>(bea.app.proposeSteward(id(carol))).reason.contains("cannot vote until day"))
+        assertFalse(home(alice.app).proposals.single().canAgree, "Alice already agrees")
+
+        day += 7; server.clock.advanceSeconds(7L * 24 * 60 * 60)
+        sync()
+        assertTrue(home(bea.app).proposals.single().canAgree)
+        assertEquals(StewardResult.Sent(takesEffect = true), bea.app.proposeSteward(id(carol)))
+        sync()
+        assertEquals(3, home(alice.app).stewardList.size)
+        assertEquals(emptyList(), home(alice.app).proposals)
+        assertTrue(home(carol.app).isSteward)
+
+        // The rules themselves are a proposal too: quorum 1 needs two of the three to agree.
+        assertEquals(StewardResult.Sent(takesEffect = false), alice.app.proposeStewardSettings(1, 60, 14))
+        sync()
+        val rules = home(bea.app).proposals.single()
+        assertEquals(StewardChange.POLICY, rules.change)
+        assertEquals(1, rules.settings!!.quorum)
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14)).reason.contains("already the circle's settings"))
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(0, 60, 14)).reason.contains("quorum"))
+        assertEquals(StewardResult.Sent(takesEffect = true), bea.app.proposeStewardSettings(1, 60, 14))
+        sync()
+        assertEquals(1, home(carol.app).stewardSettings.quorum)
+
+        // With quorum one a single steward can remove another; anyone may step down while another remains; the last stays.
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.removeSteward(id(carol)))
+        sync()
+        assertEquals(2, home(alice.app).stewardList.size)
+        assertFalse(home(carol.app).isSteward)
+        assertEquals(StewardResult.Sent(takesEffect = true), bea.app.removeSteward(id(bea)))
+        sync()
+        assertEquals(1, home(alice.app).stewardList.size)
+        assertEquals("a circle keeps at least one steward", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(alice))).reason)
+        assertEquals("member is not a steward", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(carol))).reason)
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeSteward(MemberId("9".repeat(32)))).reason.contains("not in the circle"))
+        listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }

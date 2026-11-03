@@ -28,7 +28,14 @@ class CircleView(
     val market: MarketView,
     /** The circle's steward settings in force at the end of the log (ADR 0027). */
     val stewardSettings: StewardSettings = StewardSettings(),
+    /** Each steward and the day they became one ([FOUNDING_STEWARD_DAY] for founders). */
+    val stewardSince: Map<MemberId, Int> = emptyMap(),
+    /** Steward proposals that are valid but have not yet reached their quorum (ADR 0027), in log order. */
+    val pendingStewardVotes: List<PendingStewardVote> = emptyList(),
 )
+
+/** One steward's vote on a change that is still waiting: [subject] is the member id, or the settings for [StewardChange.POLICY]. */
+data class PendingStewardVote(val change: StewardChange, val subject: String, val vote: StewardVote)
 
 /**
  * Replays a circle's log in `serverSeq` order the way every client must (spec 3.1, 3.4): it trusts nothing the server
@@ -82,6 +89,7 @@ class CircleFold(
         return CircleView(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
             opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
+            state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
         )
     }
 

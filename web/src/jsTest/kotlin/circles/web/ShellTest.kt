@@ -10,6 +10,10 @@ import circles.event.LoanId
 import circles.event.LoanStatus
 import circles.event.ReturnOutcome
 import circles.app.AccessSummary
+import circles.app.ProposalSummary
+import circles.app.StewardInfo
+import circles.app.StewardSettingsSummary
+import circles.event.StewardChange
 import circles.app.DisputeStatus
 import circles.app.DisputeSummary
 import circles.event.DisputeClaim
@@ -242,6 +246,7 @@ class ShellViewTest {
             render(open().copy(screen = Screen.AddItem)),
             render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item)),
             settings(),
+            stewards(true, listOf(meSteward)),
             borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
             borrow(returned(LoanRole.OWNER, { it.copy(canDispute = true) })),
         )
@@ -252,7 +257,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 3, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -665,6 +670,82 @@ class ShellViewTest {
         assertFalse("only steward" in fine)
         val member = render(open(home(steward = false, loans = listOf(loan)).copy(stewardCount = 1)).copy(screen = Screen.Borrow))
         assertFalse("only steward" in member)
+    }
+
+    private val meSteward = StewardInfo(me, isMe = true, sinceDay = null, votesFromDay = null)
+    private val beaSteward = StewardInfo(bea, isMe = false, sinceDay = 20_759, votesFromDay = 20_766)
+
+    private fun stewards(steward: Boolean, list: List<StewardInfo>, proposals: List<ProposalSummary> = emptyList(), people: List<MemberSummary> = emptyList()) =
+        render(open(home(steward = steward, people = people).copy(stewardList = list, stewardCount = list.size, proposals = proposals)).copy(screen = Screen.Stewards))
+
+    @Test fun theStewardsPageListsStewardsWithTheirSinceDateAndCoolingOff() {
+        val html = stewards(true, listOf(meSteward, beaSteward))
+        assertTrue("Founding steward" in html)
+        assertTrue("Steward since 2026-11-02" in html)
+        assertTrue("Can vote from 2026-11-09" in html)
+        assertTrue("Stewards who must agree: 2" in html)
+    }
+
+    @Test fun aLoneStewardIsToldTheCircleNeedsAnother() {
+        assertTrue("This circle has one steward" in stewards(true, listOf(meSteward)))
+        assertFalse("This circle has one steward" in stewards(true, listOf(meSteward, beaSteward)))
+    }
+
+    @Test fun stewardsCanStepDownOnlyWhileAnotherRemainsAndProposeRemovingOthersBehindADisclosure() {
+        val alone = stewards(true, listOf(meSteward))
+        assertFalse("""$ATTR_ACTION="$ACTION_STEWARD_REMOVE"""" in alone, "the last steward cannot step down")
+        val two = stewards(true, listOf(meSteward, beaSteward))
+        assertEquals(2, Regex("""$ATTR_ACTION="$ACTION_STEWARD_REMOVE"""").findAll(two).count())
+        assertTrue("Step down as steward" in two && "Propose removing" in two)
+        assertTrue(two.indexOf("<details") < two.indexOf(ACTION_STEWARD_REMOVE))
+        val member = stewards(false, listOf(meSteward, beaSteward))
+        assertFalse(ACTION_STEWARD_REMOVE in member, "ordinary members cannot")
+    }
+
+    @Test fun proposalsShowProgressAndOnlyThoseWhoCanVoteSeeAgree() {
+        val add = ProposalSummary(StewardChange.ADD, MemberId("c".repeat(32)), null, agreeing = 1, needed = 2, iAgree = false, canAgree = true)
+        val html = stewards(true, listOf(meSteward, beaSteward), listOf(add))
+        assertTrue("Make member cccccccc a steward" in html)
+        assertTrue("1 of 2 stewards agree." in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_ADD" $ATTR_SUBJECT="${"c".repeat(32)}"""" in html)
+        val mine = stewards(true, listOf(meSteward, beaSteward), listOf(add.copy(iAgree = true, canAgree = false)))
+        assertTrue("You agree." in mine)
+        assertFalse("""$ATTR_SUBJECT="${"c".repeat(32)}"""" in mine.substringAfter("Waiting for agreement"))
+        val cooling = stewards(true, listOf(meSteward, beaSteward), listOf(add.copy(canAgree = false)))
+        assertFalse(">Agree<" in cooling)
+    }
+
+    @Test fun settingsProposalsCarryTheirSettingsAndRemovalsSayWho() {
+        val rules = ProposalSummary(StewardChange.POLICY, null, StewardSettingsSummary(1, 60, 14), 1, 2, iAgree = false, canAgree = true)
+        val html = stewards(true, listOf(meSteward, beaSteward), listOf(rules))
+        assertTrue("Change the rules: 1 to agree, 60 quiet days, 14 days to wait" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_SETTINGS" $ATTR_SUBJECT="1:60:14"""" in html)
+        val removal = ProposalSummary(StewardChange.REMOVE, bea, null, 1, 2, false, true)
+        assertTrue("Remove member bbbbbbbb as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
+    }
+
+    @Test fun onlyStewardsSeeWhoCanBeProposedAndTheRulesForm() {
+        val people = listOf(
+            MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "x"),
+            MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "y"),
+        )
+        val steward = stewards(true, listOf(meSteward), people = people)
+        assertTrue("Propose a new steward" in steward && "Propose as steward" in steward)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_STEWARD_ADD"""").findAll(steward).count(), "not for yourself")
+        assertTrue("""id="$FORM_STEWARD_RULES"""" in steward)
+        val member = stewards(false, listOf(meSteward), people = people)
+        assertFalse("Propose a new steward" in member)
+        assertFalse(FORM_STEWARD_RULES in member)
+        assertTrue("Stewards who must agree: 2" in member, "everyone can read the rules")
+    }
+
+    @Test fun theRulesFormHasThreeLabelledNumbersWithTheirRangesAndAHiddenButton() {
+        val html = stewards(true, listOf(meSteward))
+        for (label in listOf("Stewards who must agree: ", "Quiet days: ", "Days to wait: ")) assertTrue(label in html, label)
+        assertEquals(3, Regex("""type="number"""").findAll(html).count())
+        assertTrue("""min="1"""" in html && """max="9"""" in html && """min="7"""" in html && """max="365"""" in html && """max="90"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_STEWARD_RULES))?.value ?: error("no button")
+        assertTrue("hidden" in button)
     }
 
     @Test fun statusLineIsALiveRegion() {

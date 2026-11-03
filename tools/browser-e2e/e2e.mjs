@@ -151,6 +151,17 @@ try {
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
   if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a newcomer is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
+  // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
+  await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'This circle has one steward'), 'steward page'); ok('a lone steward is told the circle needs another');
+  if (await alice.evaluate('document.querySelector("[data-action=steward-remove]") !== null')) throw new Error('the last steward is offered Step down');
+  if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible while empty');
+  await setField(alice, 'steward-rules-form', 'quorum', '1'); await setField(alice, 'steward-rules-form', 'inactive-days', '60');
+  if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with two of three'); await setField(alice, 'steward-rules-form', 'fallback-days', '14');
+  if (await buttonHidden(alice, 'steward-rules-form')) throw new Error('rules button hidden with all three'); ok('the rules button waits for all three numbers');
+  await click(alice, 'steward-add'); await until(alice, has(alice, 'Done. It takes effect now.'), 'bea made steward'); await until(alice, has(alice, 'Steward since') , 'two stewards listed');
+  ok('alice made bea a steward (a lone steward needs no one else to agree)');
+  await syncUntil(bea, 'location.hash = "#/stewards"; ' + has(bea, 'Can vote from'), 'bea sees she is cooling off'); ok('bea, the new steward, sees when she can vote from');
+  if (await bea.evaluate('document.querySelector("[data-action=steward-remove]") === null')) throw new Error('a steward is not offered Step down'); ok('with two stewards a steward may step down or propose removal');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
