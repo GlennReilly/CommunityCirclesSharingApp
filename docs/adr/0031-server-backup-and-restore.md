@@ -1,6 +1,6 @@
 # 0031. Server backup and restore (`circles-backup/1`)
 
-- Status: Accepted
+- Status: Accepted (points 6, 7 and 9 amended by ADR 0032)
 - Date: 2026-11-03
 
 ## Context

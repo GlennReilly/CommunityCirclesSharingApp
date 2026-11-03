@@ -21,6 +21,7 @@ const val ENV_RATE_LIMIT = "CIRCLES_RATE_LIMIT"
 const val ENV_BLOB_QUOTA_MIB = "CIRCLES_BLOB_QUOTA_MIB"
 const val ENV_BACKUP_INTERVAL_HOURS = "CIRCLES_BACKUP_INTERVAL_HOURS"
 const val ENV_BACKUP_KEEP = "CIRCLES_BACKUP_KEEP"
+const val ENV_BACKUP_DIR = "CIRCLES_BACKUP_DIR"
 const val DEFAULT_BACKUP_KEEP = 7
 
 /** Settings from the `CIRCLES_*` environment variables (spec 7). */
@@ -38,6 +39,8 @@ data class ServerConfig(
     val backupIntervalHours: Int = 0,
     /** How many scheduled backups to keep. */
     val backupKeep: Int = DEFAULT_BACKUP_KEEP,
+    /** Where scheduled and pre-migration backups go; required for both, no default (ADR 0032). */
+    val backupDir: Path? = null,
 )
 
 sealed interface ConfigResult {
@@ -60,6 +63,10 @@ object ServerConfigReader {
         val rateLimit = flag(env, ENV_RATE_LIMIT, default = true, problems)
         val backupIntervalHours = positiveInt(env, ENV_BACKUP_INTERVAL_HOURS, problems) ?: 0
         val backupKeep = positiveInt(env, ENV_BACKUP_KEEP, problems) ?: DEFAULT_BACKUP_KEEP
+        val backupDir = env[ENV_BACKUP_DIR]?.takeIf { it.isNotBlank() }?.let { Paths.get(it) }
+        if (backupIntervalHours > 0 && backupDir == null) {
+            problems += "$ENV_BACKUP_INTERVAL_HOURS needs $ENV_BACKUP_DIR: name a folder for backups, ideally on another disk"
+        }
         val blobQuotaMib = env[ENV_BLOB_QUOTA_MIB]?.let { text ->
             text.toLongOrNull()?.takeIf { it >= 1 } ?: run {
                 problems += "$ENV_BLOB_QUOTA_MIB must be a whole number of MiB, at least 1, not '$text'"
@@ -74,7 +81,7 @@ object ServerConfigReader {
         } ?: LogLevel.INFO
         val bind = env[ENV_BIND]?.takeIf { it.isNotBlank() } ?: DEFAULT_BIND
         val dataDir = env[ENV_DATA_DIR]?.takeIf { it.isNotBlank() } ?: DEFAULT_DATA_DIR
-        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit, blobQuotaMib, backupIntervalHours, backupKeep)) else ConfigResult.Invalid(problems)
+        return if (problems.isEmpty()) ConfigResult.Valid(ServerConfig(Paths.get(dataDir), bind, port, allowCreate, logLevel, trustProxy, rateLimit, blobQuotaMib, backupIntervalHours, backupKeep, backupDir)) else ConfigResult.Invalid(problems)
     }
 
     private fun positiveInt(env: Map<String, String>, name: String, problems: MutableList<String>): Int? =

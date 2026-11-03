@@ -57,8 +57,12 @@ class ServerConfigTest {
         assertEquals(256L, defaults.blobQuotaMib)
         assertEquals(0, defaults.backupIntervalHours)
         assertEquals(7, defaults.backupKeep)
-        assertEquals(6, valid(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6")).backupIntervalHours)
+        assertEquals(6, valid(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6", ENV_BACKUP_DIR to "/b")).backupIntervalHours)
         assertEquals(3, valid(mapOf(ENV_BACKUP_KEEP to "3")).backupKeep)
+        assertEquals(null, defaults.backupDir)
+        assertEquals(java.nio.file.Paths.get("/mnt/backups"), valid(mapOf(ENV_BACKUP_DIR to "/mnt/backups")).backupDir)
+        assertEquals(null, valid(mapOf(ENV_BACKUP_DIR to "  ")).backupDir, "a blank folder counts as unset")
+        assertEquals(6, valid(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6", ENV_BACKUP_DIR to "/b")).backupIntervalHours)
         assertEquals(64L, valid(mapOf(ENV_BLOB_QUOTA_MIB to "64")).blobQuotaMib)
         val changed = valid(mapOf(ENV_LOG_LEVEL to "debug", ENV_TRUST_PROXY to "true", ENV_RATE_LIMIT to "false"))
         assertEquals(circles.server.logging.LogLevel.DEBUG, changed.logLevel)
@@ -71,6 +75,7 @@ class ServerConfigTest {
         assertTrue(problems(mapOf(ENV_LOG_LEVEL to "LOUD")).single().contains(ENV_LOG_LEVEL))
         assertTrue(problems(mapOf(ENV_TRUST_PROXY to "yes")).single().contains(ENV_TRUST_PROXY))
         assertTrue(problems(mapOf(ENV_RATE_LIMIT to "0")).single().contains(ENV_RATE_LIMIT))
+        assertTrue(problems(mapOf(ENV_BACKUP_INTERVAL_HOURS to "6")).single().contains("needs $ENV_BACKUP_DIR"))
         listOf("0", "-1", "daily", "1.5").forEach { assertTrue(problems(mapOf(ENV_BACKUP_INTERVAL_HOURS to it)).single().contains(ENV_BACKUP_INTERVAL_HOURS), it) }
         listOf("0", "-1", "all").forEach { assertTrue(problems(mapOf(ENV_BACKUP_KEEP to it)).single().contains(ENV_BACKUP_KEEP), it) }
         listOf("0", "-5", "lots", "1.5").forEach { assertTrue(problems(mapOf(ENV_BLOB_QUOTA_MIB to it)).single().contains(ENV_BLOB_QUOTA_MIB), it) }

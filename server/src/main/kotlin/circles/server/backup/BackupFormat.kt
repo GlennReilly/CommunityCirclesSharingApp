@@ -6,7 +6,6 @@ import kotlinx.serialization.Serializable
 const val BACKUP_FORMAT = "circles-backup/1"
 const val BACKUP_DB_ENTRY = "circles.db"
 const val BACKUP_BLOB_PREFIX = "blobs/"
-const val BACKUP_DIR_NAME = "backups"
 const val BLOBS_DIR_NAME = "blobs"
 
 @Serializable

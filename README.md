@@ -66,7 +66,7 @@ java -jar circles-server.jar restore circles-backup-<time>.zip           # new h
 java -jar circles-server.jar restore circles-backup-<time>.zip --force   # existing data is moved aside, never deleted
 ```
 
-`migrate` takes a database-only backup first, so a failed or unwanted migration can be undone. Copy backups off the machine: the default folder is on the same disk.
+`migrate` takes a full backup (database and blobs) into `CIRCLES_BACKUP_DIR` first and refuses to run without that folder, so a failed or unwanted migration can be undone. Point it at another disk.
 
 Settings (environment variables, all optional):
 
@@ -78,7 +78,8 @@ Settings (environment variables, all optional):
 | `CIRCLES_RATE_LIMIT` | `true` | Per-address and per-device request limits ([ADR 0015](docs/adr/0015-rate-limiting-pulled-forward.md)) |
 | `CIRCLES_TRUST_PROXY` | `false` | Behind a reverse proxy, take the client address from the last `X-Forwarded-For` entry; otherwise every client looks like the proxy and shares one limit |
 | `CIRCLES_BLOB_QUOTA_MIB` | `256` | Blob storage allowed per circle, in MiB; uploads beyond it get `507` ([ADR 0026](docs/adr/0026-sse-hints-and-blob-storage.md)) |
-| `CIRCLES_BACKUP_INTERVAL_HOURS` | off | Write a full backup every this many hours while serving, into `<data dir>/backups/` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) |
+| `CIRCLES_BACKUP_DIR` | unset | Folder for scheduled and pre-migration backups, ideally on another disk. Required for both: scheduling and `migrate` of existing data refuse to run without it ([ADR 0032](docs/adr/0032-explicit-backup-folder-and-full-pre-migration-backup.md)) |
+| `CIRCLES_BACKUP_INTERVAL_HOURS` | off | Write a full backup into `CIRCLES_BACKUP_DIR` every this many hours while serving ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) |
 | `CIRCLES_BACKUP_KEEP` | `7` | How many scheduled backups to keep |
 | `CIRCLES_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 

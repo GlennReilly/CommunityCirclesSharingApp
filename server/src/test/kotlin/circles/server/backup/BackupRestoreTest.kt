@@ -271,9 +271,8 @@ class BackupRestoreTest {
     @Test
     fun theSchedulerWritesScheduledBackupsAndKeepsOnlyTheNewest() {
         val (data, _, _) = host("a")
-        val backups = data.resolve(BACKUP_DIR_NAME)
+        val backups = dir("elsewhere")
         val scheduler = BackupScheduler(BackupService(data, crypto), backups, keep = 2, clock = clock, log = circles.server.logging.NoLog)
-        Files.createDirectories(backups)
         Files.write(backups.resolve("pre-migrate-from-v3-20260101000000.zip"), byteArrayOf(1))
         Files.write(backups.resolve("notes.txt"), byteArrayOf(2))
         repeat(4) {
@@ -290,7 +289,7 @@ class BackupRestoreTest {
     @Test
     fun twoScheduledRunsInTheSameSecondGetDifferentNames() {
         val (data, _, _) = host("a")
-        val backups = data.resolve(BACKUP_DIR_NAME)
+        val backups = dir("elsewhere")
         val scheduler = BackupScheduler(BackupService(data, crypto), backups, keep = 5, clock = clock, log = circles.server.logging.NoLog)
         assertIs<BackupResult.Done>(scheduler.runOnce())
         assertIs<BackupResult.Done>(scheduler.runOnce())
@@ -300,7 +299,7 @@ class BackupRestoreTest {
     @Test
     fun aFailedScheduledRunPrunesNothing() {
         val (data, fixture, _) = host("a")
-        val backups = data.resolve(BACKUP_DIR_NAME)
+        val backups = dir("elsewhere")
         val scheduler = BackupScheduler(BackupService(data, crypto), backups, keep = 1, clock = clock, log = circles.server.logging.NoLog)
         assertIs<BackupResult.Done>(scheduler.runOnce())
         clock.millis += MILLIS_PER_DAY

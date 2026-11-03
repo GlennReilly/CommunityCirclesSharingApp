@@ -5,7 +5,6 @@ import circles.crypto.JvmCrypto
 import circles.api.ApiJson
 import circles.event.isValidRandomId
 import circles.export.ExportSource
-import circles.server.backup.BACKUP_DIR_NAME
 import circles.server.backup.BACKUP_FORMAT
 import circles.server.backup.BackupResult
 import circles.server.backup.BackupScheduler
@@ -29,6 +28,7 @@ import circles.server.logging.NoLog
 import java.nio.file.Files
 import java.nio.file.Paths
 import circles.server.config.ConfigResult
+import circles.server.config.ENV_BACKUP_DIR
 import circles.server.config.ServerConfig
 import circles.server.config.ServerConfigReader
 import circles.server.data.Database
@@ -63,7 +63,7 @@ Commands:
 
 Settings come from the environment: CIRCLES_DATA_DIR, CIRCLES_BIND, CIRCLES_PORT, CIRCLES_ALLOW_CREATE,
 CIRCLES_LOG_LEVEL, CIRCLES_TRUST_PROXY, CIRCLES_RATE_LIMIT, CIRCLES_BLOB_QUOTA_MIB,
-CIRCLES_BACKUP_INTERVAL_HOURS, CIRCLES_BACKUP_KEEP (see the README)."""
+CIRCLES_BACKUP_DIR, CIRCLES_BACKUP_INTERVAL_HOURS, CIRCLES_BACKUP_KEEP (see the README)."""
 
 /** Starts the HTTP server and blocks until it stops. Replaceable so tests need not open a port. */
 fun interface ServerLauncher {
@@ -287,11 +287,16 @@ class Cli(
             }
         }
 
-    /** ADR 0031: a database-only backup before any migration of existing data; no backup means no migration. */
+    /** ADR 0032: a full backup in the configured folder before any migration of existing data; no backup means no migration. */
     private fun backupBeforeMigrating(config: ServerConfig, fromVersion: Int): Boolean {
-        val target = config.dataDir.resolve(BACKUP_DIR_NAME).resolve("pre-migrate-from-v$fromVersion-${fileStamp(clock)}.zip")
-        return when (val result = BackupService(config.dataDir, crypto).backup(target, includeBlobs = false)) {
-            is BackupResult.Done -> out.println("Backed up the database to $target before migrating.").let { true }
+        val folder = config.backupDir
+        if (folder == null) {
+            err.println("error: this database needs migrating. Set $ENV_BACKUP_DIR to a folder (ideally on another disk) so a backup can be taken first; the database was not migrated.")
+            return false
+        }
+        val target = folder.resolve("pre-migrate-from-v$fromVersion-${fileStamp(clock)}.zip")
+        return when (val result = BackupService(config.dataDir, crypto).backup(target)) {
+            is BackupResult.Done -> out.println("Backed up the database and ${result.blobs} blobs to $target before migrating.").let { true }
             is BackupResult.Failed -> {
                 result.problems.forEach { err.println("problem: $it") }
                 err.println("error: the backup before migrating failed, so the database was not migrated.")
@@ -328,8 +333,9 @@ class Cli(
             "backup_every_hours" to config.backupIntervalHours,
             "version" to SERVER_VERSION,
         )
-        if (config.backupIntervalHours > 0) {
-            BackupScheduler(BackupService(config.dataDir, crypto), config.dataDir.resolve(BACKUP_DIR_NAME), config.backupKeep, clock, log).start(config.backupIntervalHours)
+        val backupFolder = config.backupDir
+        if (config.backupIntervalHours > 0 && backupFolder != null) {
+            BackupScheduler(BackupService(config.dataDir, crypto), backupFolder, config.backupKeep, clock, log).start(config.backupIntervalHours)
         }
         connection.use { launcher.launch(config, buildServices(it, crypto, clock, config.allowCreate, log, config.rateLimit, config.trustProxy, config.dataDir.resolve("blobs"), config.blobQuotaMib * BYTES_PER_MIB)) }
         return EXIT_OK
