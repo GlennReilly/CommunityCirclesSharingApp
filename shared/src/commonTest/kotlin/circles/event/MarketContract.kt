@@ -831,4 +831,48 @@ abstract class MarketContract {
         assertEquals(emptyList(), stale.market.configs)
         assertEquals(DAY + 15, stale.market.pendingConfigs.single { it.settings == wanted }.firstDay)
     }
+
+    // ---- loan windows (ADR 0052) ----
+
+    @Test
+    fun anItemCannotBePromisedTwiceForTheSameDaysButMayBeAskedForTwice() = runTest {
+        val w = world()
+        w.shareItem()
+        val promised = "the item is already promised for some of those days"
+        val (first, firstRequest) = w.request(by = w.bea)
+        w.log += firstRequest
+        val (second, secondRequest) = w.request(by = w.carol)
+        w.log += secondRequest
+        assertEquals(emptyList(), w.foldAs(w.founder).rejected, "two people may ask for the same days")
+        w.log += w.approve(first)
+        // The second request can no longer be approved, and a new overlapping one is refused; the next days are free.
+        assertEquals(listOf(promised), w.reasons(listOf(w.founder.loanApprove(w.circle, DAY, second, w.item, FROM, TO, w.itemKey, listOf(w.carol.identity.registration)))))
+        assertEquals(listOf(promised), w.reasons(listOf(w.carol.loanRequest(w.circle, DAY, newLoanId(w.crypto), w.item, TO, TO + 2))), "the last day counts")
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.loanRequest(w.circle, DAY, newLoanId(w.crypto), w.item, TO + 1, TO + 2))))
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.loanRequest(w.circle, DAY, newLoanId(w.crypto), w.item, FROM - 3, FROM - 1))))
+        // Declining is always possible; cancelling the first one frees the days.
+        assertEquals(emptyList(), w.reasons(listOf(w.founder.loanDecline(w.circle, DAY, second, FROM, TO))))
+        val cancelled = w.foldAs(w.founder, w.log + w.bea.loanCancel(w.circle, DAY, first))
+        assertEquals(emptyList(), cancelled.rejected)
+        assertEquals(LoanStatus.CANCELLED, cancelled.market.loans.getValue(first).status)
+        val freed = w.founder.loanApprove(w.circle, DAY, second, w.item, FROM, TO, w.itemKey, listOf(w.carol.identity.registration))
+        assertEquals(LoanStatus.APPROVED, w.foldAs(w.carol, w.log + w.bea.loanCancel(w.circle, DAY, first) + freed).market.loans.getValue(second).status)
+    }
+
+    @Test
+    fun onlyTheBorrowerMayCancelAndNotOnceTheItemHasChangedHands() = runTest {
+        val w = world()
+        w.shareItem()
+        val (loan, request) = w.request(by = w.bea)
+        w.log += request
+        val onlyBorrower = "only the borrower may cancel"
+        assertEquals(listOf(onlyBorrower), w.reasons(listOf(w.founder.loanCancel(w.circle, DAY, loan))))
+        assertEquals(listOf(onlyBorrower), w.reasons(listOf(w.carol.loanCancel(w.circle, DAY, loan))))
+        assertEquals(listOf("unknown loan"), w.reasons(listOf(w.bea.loanCancel(w.circle, DAY, newLoanId(w.crypto)))))
+        w.log += w.approve(loan)
+        assertEquals(emptyList(), w.reasons(listOf(w.bea.loanCancel(w.circle, DAY, loan))), "an approval can be withdrawn before the hand-over")
+        w.log += w.founder.loanHandover(w.circle, DAY, loan)
+        w.log += w.bea.loanHandover(w.circle, DAY, loan)
+        assertEquals(listOf("only a request or an approval before the hand-over can be cancelled"), w.reasons(listOf(w.bea.loanCancel(w.circle, DAY, loan))))
+    }
 }

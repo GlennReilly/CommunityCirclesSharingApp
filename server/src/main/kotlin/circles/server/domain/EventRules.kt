@@ -46,6 +46,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.LOAN_REQUEST,
     EventType.LOAN_RESPOND,
     EventType.LOAN_HANDOVER,
+    EventType.LOAN_CANCEL,
     EventType.LOAN_RETURN,
     EventType.VOUCH,
     EventType.STANDING_CONFIRM,

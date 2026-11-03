@@ -25,6 +25,7 @@ enum class EventType(val wire: String) {
     LOAN_RESPOND("loan.respond"),
     LOAN_HANDOVER("loan.handover"),
     LOAN_RETURN("loan.return"),
+    LOAN_CANCEL("loan.cancel"),
     LOAN_DISPUTE("loan.dispute"),
     LOAN_RESOLVE("loan.resolve"),
     STANDING_NOTE("standing.note"),

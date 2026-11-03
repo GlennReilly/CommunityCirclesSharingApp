@@ -237,6 +237,9 @@ sealed interface LoanResult {
     /** The circle's access rules say not yet; [reasons] and [howToUnlock] are for the member to read. */
     data class NotYet(val reasons: List<String>, val howToUnlock: List<String>) : LoanResult
 
+    /** Someone else has the item, or has been promised it, for some of those days (ADR 0052). */
+    data object AlreadyBooked : LoanResult
+
     /** The member's access is paused (ADR 0050); [reasons] name the expiry and the appeal route. */
     data class Paused(val reasons: List<String>) : LoanResult
 
@@ -1245,6 +1248,7 @@ class CircleApp(
         if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
         if (decision is AccessDecision.Paused) return LoanResult.Paused(decision.reasons)
         if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
+        if (view.market.loans.values.any { it.item == state.item && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) && it.fromDay <= toDay && fromDay <= it.toDay }) return LoanResult.AlreadyBooked
         s.author.keyRing = view.keys
         val loan = newLoanId(crypto)
         s.engine.enqueue(s.circle, s.author.loanRequest(s.circle, today(), loan, state.item, fromDay, toDay, note.trim().ifEmpty { null }))
@@ -1259,6 +1263,7 @@ class CircleApp(
         if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         val state = view.market.loans[loan]?.takeIf { it.owner == s.identity.member && it.status == LoanStatus.REQUESTED } ?: return LoanResult.NotAllowed
+        if (approve && view.market.loans.values.any { it.item == state.item && it.loan != loan && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) && it.fromDay <= state.toDay && state.fromDay <= it.toDay }) return LoanResult.AlreadyBooked
         s.author.keyRing = view.keys
         val reply = note.trim().ifEmpty { null }
         val event = if (approve) {
@@ -1270,6 +1275,18 @@ class CircleApp(
             s.author.loanDecline(s.circle, today(), loan, state.fromDay, state.toDay, reply)
         }
         s.engine.enqueue(s.circle, event)
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return LoanResult.Done(loan)
+    }
+
+    /** The borrower withdraws a request, or an approval before the hand-over (ADR 0052). */
+    suspend fun cancelLoan(loan: LoanId): LoanResult {
+        val s = session ?: return LoanResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        view.market.loans[loan]?.takeIf { it.borrower == s.identity.member && (it.status == LoanStatus.REQUESTED || it.status == LoanStatus.APPROVED) } ?: return LoanResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.loanCancel(s.circle, today(), loan))
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
         return LoanResult.Done(loan)

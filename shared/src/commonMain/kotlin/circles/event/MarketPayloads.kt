@@ -49,6 +49,9 @@ data class LoanRespond(val loan: LoanId, val approve: Boolean, val fromDay: Int,
 
 data class LoanHandover(val loan: LoanId)
 
+/** `loan.cancel`: the borrower withdraws a request, or an approval before the hand-over (ADR 0052). */
+data class LoanCancel(val loan: LoanId)
+
 /** What the owner says went wrong that the borrower did not report. */
 enum class DisputeClaim { DAMAGE, LOSS }
 
@@ -191,6 +194,7 @@ object MarketPayloads {
     fun vouch(v: VouchTerms): CborMap = CborMap.of(K_VOUCHEE to CborText(v.vouchee.v), K_EXPIRES to CborInt(v.expiresDay.toLong()))
 
     fun loanHandover(v: LoanHandover): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v))
+    fun loanCancel(v: LoanCancel): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v))
 
     fun loanReturn(v: LoanReturn): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v), K_OUTCOME to CborText(v.outcome.name))
 
@@ -293,6 +297,11 @@ object MarketPayloads {
         if (approve != hasWraps) return Parsed.Invalid(if (approve) "an approval needs keyWraps" else "a decline has no keyWraps")
         val keyWraps = if (hasWraps) readWraps(map) ?: return Parsed.Invalid("keyWraps must list 1 to $MAX_KEY_WRAPS distinct devices with sealed keys") else emptyList()
         return Parsed.Ok(LoanRespond(LoanId(loan), approve, from, to, note.value, keyWraps))
+    }
+
+    fun parseLoanCancel(map: CborMap): Parsed<LoanCancel> {
+        keys(map, required = setOf(K_LOAN))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(LoanCancel(LoanId(randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters"))))
     }
 
     fun parseLoanHandover(map: CborMap): Parsed<LoanHandover> {

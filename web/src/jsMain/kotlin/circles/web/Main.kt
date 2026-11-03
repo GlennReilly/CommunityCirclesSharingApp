@@ -399,6 +399,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             is LoanResult.BadDates -> dispatch(AppAction.Notice("Choose dates from today on, with the end not before the start and at most ${result.maximumDays} days."))
             is LoanResult.NoteTooLong -> dispatch(AppAction.Notice("Keep the note to ${result.maximum} characters or fewer."))
             is LoanResult.NotYet -> dispatch(AppAction.Notice("Not yet: " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
+            LoanResult.AlreadyBooked -> dispatch(AppAction.Notice("Someone else has been promised that item for some of those days. Try other dates."))
             is LoanResult.Paused -> dispatch(AppAction.Notice((result.reasons + "You can still borrow essentials. Open Pauses to appeal.").joinToString(" ")))
             LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
             LoanResult.NotAllowed -> dispatch(AppAction.Notice("That cannot be done right now. Try syncing, then again."))
@@ -538,6 +539,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_CONFIRM_RETURN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmReturn(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed. Thank you.", null) }
                 ACTION_UPHOLD -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.UPHELD) ?: LoanResult.NotAllowed, "Decided: the owner's report is upheld.", null) }
                 ACTION_DISMISS_DISPUTE -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.DISMISSED) ?: LoanResult.NotAllowed, "Decided: the return counts as reported.", null) }
+                ACTION_CANCEL_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.cancelLoan(LoanId(it)) ?: LoanResult.NotAllowed, "Cancelled.", null) }
                 ACTION_HANDOVER -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmHandover(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed.", null) }
                 ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.EditItem(ItemId(it)))

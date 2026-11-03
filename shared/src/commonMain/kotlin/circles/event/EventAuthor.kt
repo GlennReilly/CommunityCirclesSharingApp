@@ -183,6 +183,9 @@ class EventAuthor(
     fun loanHandover(circle: CircleId, day: Int, loan: LoanId): Envelope =
         build(circle, EventType.LOAN_HANDOVER, day, CborMap.EMPTY, MarketPayloads.loanHandover(LoanHandover(loan)))
 
+    fun loanCancel(circle: CircleId, day: Int, loan: LoanId): Envelope =
+        build(circle, EventType.LOAN_CANCEL, day, CborMap.EMPTY, MarketPayloads.loanCancel(LoanCancel(loan)))
+
     fun loanReturn(circle: CircleId, day: Int, loan: LoanId, outcome: ReturnOutcome): Envelope =
         build(circle, EventType.LOAN_RETURN, day, CborMap.EMPTY, MarketPayloads.loanReturn(LoanReturn(loan, outcome)))
 

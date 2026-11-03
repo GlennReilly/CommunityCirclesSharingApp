@@ -1181,4 +1181,44 @@ class CircleAppEndToEndTest {
         assertEquals(null, home(bea.app).items.single { it.item == valuable }.ownerMinTier)
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
+
+    @Test
+    fun anItemCannotBeLentTwiceForTheSameDaysAndARequestCanBeCancelled() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join(); val carol = join()
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea, carol).forEach { it.app.syncOnce() } } }
+        val ladder = (alice.app.addItem("Ladder", ItemClass.ESSENTIAL, "") as ItemResult.Saved).item
+        sync()
+        val beaLoan = (bea.app.requestLoan(ladder, TODAY + 1, TODAY + 3, "") as LoanResult.Done).loan
+        val carolLoan = (carol.app.requestLoan(ladder, TODAY + 2, TODAY + 4, "") as LoanResult.Done).loan
+        sync()
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(beaLoan, approve = true, note = ""))
+        assertEquals(LoanResult.AlreadyBooked, alice.app.respondToLoan(carolLoan, approve = true, note = ""), "the days are promised to Bea")
+        sync()
+        assertEquals(LoanResult.AlreadyBooked, carol.app.requestLoan(ladder, TODAY + 3, TODAY + 5, ""))
+        assertIs<LoanResult.Done>(carol.app.requestLoan(ladder, TODAY + 4, TODAY + 5, ""), "the day after is free")
+        // Only the borrower cancels; once Bea cancels, the days are free for Carol's first request.
+        assertEquals(LoanResult.NotAllowed, carol.app.cancelLoan(beaLoan))
+        assertEquals(LoanResult.NotAllowed, alice.app.cancelLoan(beaLoan))
+        assertIs<LoanResult.Done>(bea.app.cancelLoan(beaLoan))
+        assertEquals(LoanStatus.CANCELLED, home(bea.app).loans.single { it.loan == beaLoan }.status)
+        sync()
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(carolLoan, approve = true, note = ""))
+        sync()
+        assertEquals(LoanStatus.APPROVED, home(carol.app).loans.single { it.loan == carolLoan }.status)
+        assertEquals(LoanResult.NotAllowed, bea.app.cancelLoan(beaLoan), "already cancelled")
+        listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
 }

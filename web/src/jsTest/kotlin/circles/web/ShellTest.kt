@@ -532,10 +532,11 @@ class ShellViewTest {
         assertTrue("""$ATTR_LOAN="${"a".repeat(32)}"""" in html)
     }
 
-    @Test fun aBorrowerWaitingForAnAnswerHasNoButtons() {
+    @Test fun aBorrowerWaitingForAnAnswerCanOnlyCancel() {
         val html = borrow(loan("b", LoanRole.BORROWER, LoanStatus.REQUESTED))
         assertTrue("Waiting for an answer" in html)
-        assertFalse("<button" in html.substringAfter("<main"))
+        assertEquals(1, Regex("<button").findAll(html.substringAfter("<main")).count())
+        assertTrue("Cancel my request" in html)
     }
 
     @Test fun handoverNeedsBothPeopleAndTheBorrowerSeesTheDetailsOnceApproved() {
@@ -1101,5 +1102,21 @@ class ShellViewTest {
         assertTrue("""for="$FIELD_MIN_TIER"""" in html && "Who may ask: " in html)
         assertTrue("Neighbour and above" in html && "Trusted and above" in html)
         assertFalse("Newcomer and above" in html)
+    }
+
+    // ---- loan windows (ADR 0052) ----
+
+    private fun loanLine(role: LoanRole, status: LoanStatus, iConfirmed: Boolean = false) =
+        LoanSummary(circles.event.LoanId("c".repeat(32)), circles.policy.ItemId("e".repeat(32)), "Ladder", role, bea, 20_760, 20_762, status, iConfirmed, false, null, null)
+
+    @Test fun aBorrowerCanCancelARequestOrAnApprovalBeforeHandOverButNotAfterConfirming() {
+        fun borrow(vararg loans: LoanSummary) = render(open(home().copy(loans = loans.toList())).copy(screen = Screen.Borrow))
+        assertTrue("Cancel my request" in borrow(loanLine(LoanRole.BORROWER, LoanStatus.REQUESTED)))
+        assertTrue("Cancel this loan" in borrow(loanLine(LoanRole.BORROWER, LoanStatus.APPROVED)))
+        assertFalse("Cancel this loan" in borrow(loanLine(LoanRole.BORROWER, LoanStatus.APPROVED, iConfirmed = true)))
+        assertFalse(ACTION_CANCEL_LOAN in borrow(loanLine(LoanRole.OWNER, LoanStatus.APPROVED)))
+        assertFalse(ACTION_CANCEL_LOAN in borrow(loanLine(LoanRole.BORROWER, LoanStatus.ACTIVE)))
+        val finished = borrow(loanLine(LoanRole.BORROWER, LoanStatus.CANCELLED))
+        assertTrue("Cancelled." in finished && "Finished" in finished)
     }
 }

@@ -55,6 +55,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0049](0049-item-keys-after-a-removal.md) | Item detail keys after a removal | Accepted |
 | [0050](0050-pauses.md) | Pauses | Accepted |
 | [0051](0051-config-events.md) | Config events | Accepted |
+| [0052](0052-loan-windows.md) | Loan windows: no double booking, and cancelling | Accepted |
 
 ## Open decisions still to record
 

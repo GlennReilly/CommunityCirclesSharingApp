@@ -10,7 +10,7 @@ import circles.policy.ItemId
 import circles.policy.MemberId
 import circles.policy.Tier
 
-enum class LoanStatus { REQUESTED, DECLINED, APPROVED, ACTIVE, RETURNED }
+enum class LoanStatus { REQUESTED, DECLINED, APPROVED, ACTIVE, RETURNED, CANCELLED }
 
 /** An item as the log has shaped it. [keyWraps] holds the owner's own item keys by `detailKeyId`; sealed detail likewise. */
 data class ItemState(
@@ -136,7 +136,7 @@ internal class MarketResult(val view: MarketView, val rejected: Map<EventId, Str
 
 private val MARKET_TYPES = setOf(
     EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
-    EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.VOUCH,
+    EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.LOAN_CANCEL, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
     EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE,
 )
@@ -196,6 +196,7 @@ internal class MarketFold(
         EventType.PAUSE_APPEAL -> parse(MarketPayloads.parsePauseAppeal(payload)) { appealPause(e.author, it, e.day) }
         EventType.PAUSE_LIFT -> parse(MarketPayloads.parsePauseLift(payload)) { liftPause(e.author, it, e.day, id) }
         EventType.LOAN_RESPOND -> parse(MarketPayloads.parseLoanRespond(payload)) { respond(e.author, it) }
+        EventType.LOAN_CANCEL -> parse(MarketPayloads.parseLoanCancel(payload)) { cancel(e.author, it) }
         EventType.LOAN_HANDOVER -> parse(MarketPayloads.parseLoanHandover(payload)) { handover(e.author, it) }
         EventType.LOAN_RETURN -> parse(MarketPayloads.parseLoanReturn(payload)) { giveBack(e.author, it, e.day) }
         else -> null
@@ -358,6 +359,7 @@ internal class MarketFold(
         if (item.owner == author) return "a member cannot borrow their own item"
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
+        if (bookedOver(v.item, v.fromDay, v.toDay, except = null)) return "the item is already promised for some of those days"
         val decision = StandingRules.decide(author, item, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day))
         if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
         loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
@@ -380,6 +382,7 @@ internal class MarketFold(
             loans[v.loan] = loan.copy(status = LoanStatus.DECLINED)
             return null
         }
+        if (loan.status == LoanStatus.REQUESTED && bookedOver(loan.item, loan.fromDay, loan.toDay, except = loan.loan)) return "the item is already promised for some of those days"
         if (v.keyWraps.any { devices[it.device]?.registration?.member != loan.borrower }) return "keyWraps must go to the borrower's devices"
         val keyId = loan.detailKeyId ?: item.detailKeyId
         loans[v.loan] = loan.copy(
@@ -389,6 +392,20 @@ internal class MarketFold(
             detailKeyId = keyId,
             keyWraps = loan.keyWraps + v.keyWraps.associate { it.device to it.wrapped },
         )
+        return null
+    }
+
+    /** Is the item already promised (approved or out) for any day of the window? Asking is allowed over other requests (ADR 0052). */
+    private fun bookedOver(item: ItemId, fromDay: Int, toDay: Int, except: LoanId?): Boolean =
+        loans.values.any {
+            it.item == item && it.loan != except && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) && it.fromDay <= toDay && fromDay <= it.toDay
+        }
+
+    private fun cancel(author: MemberId, v: LoanCancel): String? {
+        val loan = loans[v.loan] ?: return "unknown loan"
+        if (loan.borrower != author) return "only the borrower may cancel"
+        if (loan.status != LoanStatus.REQUESTED && loan.status != LoanStatus.APPROVED) return "only a request or an approval before the hand-over can be cancelled"
+        loans[v.loan] = loan.copy(status = LoanStatus.CANCELLED)
         return null
     }
 

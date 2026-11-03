@@ -163,6 +163,7 @@ const val ACTION_BORROW_ITEM = "borrow-item"
 const val ACTION_APPROVE_LOAN = "approve-loan"
 const val ACTION_DECLINE_LOAN = "decline-loan"
 const val ACTION_HANDOVER = "handover-loan"
+const val ACTION_CANCEL_LOAN = "cancel-loan"
 const val ACTION_CONFIRM_RETURN = "confirm-return"
 const val ACTION_UPHOLD = "uphold-dispute"
 const val ACTION_DISMISS_DISPUTE = "dismiss-dispute"
@@ -737,7 +738,7 @@ private fun FlowContent.borrow(home: HomeData) {
     val waiting = mine.filter { it.role == LoanRole.BORROWER && it.status == LoanStatus.REQUESTED }
     val handovers = mine.filter { it.status == LoanStatus.APPROVED }
     val out = mine.filter { it.status == LoanStatus.ACTIVE }
-    val finished = mine.filter { it.status == LoanStatus.RETURNED || it.status == LoanStatus.DECLINED }
+    val finished = mine.filter { it.status == LoanStatus.RETURNED || it.status == LoanStatus.DECLINED || it.status == LoanStatus.CANCELLED }
     val toResolve = home.loans.filter { it.canResolve }
     if (toResolve.isNotEmpty()) {
         section {
@@ -772,6 +773,7 @@ private fun FlowContent.borrow(home: HomeData) {
                 div {
                     loanHeading(loan)
                     loan.description?.takeIf { loan.role == LoanRole.BORROWER && it.isNotBlank() }?.let { p { +"Details: $it" } }
+                    if (loan.role == LoanRole.BORROWER && !loan.iConfirmedHandover) loanButton(ACTION_CANCEL_LOAN, loan, "Cancel this loan")
                     if (loan.iConfirmedHandover) {
                         p { +"You have confirmed. Waiting for ${who(loan)} to confirm too." }
                     } else {
@@ -819,7 +821,10 @@ private fun FlowContent.borrow(home: HomeData) {
     if (waiting.isNotEmpty()) {
         section {
             h2 { +"Waiting for an answer" }
-            for (loan in waiting) div { loanHeading(loan) }
+            for (loan in waiting) div {
+                loanHeading(loan)
+                loanButton(ACTION_CANCEL_LOAN, loan, "Cancel my request")
+            }
         }
     }
     if (finished.isNotEmpty()) {
@@ -829,7 +834,7 @@ private fun FlowContent.borrow(home: HomeData) {
                 div {
                     loanHeading(loan)
                     p {
-                        +(if (loan.status == LoanStatus.DECLINED) "Declined." else loan.outcome?.let { outcomeLabel(it) + "." } ?: "Returned.")
+                        +(if (loan.status == LoanStatus.DECLINED) "Declined." else if (loan.status == LoanStatus.CANCELLED) "Cancelled." else loan.outcome?.let { outcomeLabel(it) + "." } ?: "Returned.")
                     }
                     loan.dispute?.let { dispute ->
                         val claim = if (dispute.claim == DisputeClaim.LOSS) "loss" else "damage"
