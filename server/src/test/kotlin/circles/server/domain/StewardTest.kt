@@ -82,6 +82,16 @@ class StewardTest {
     }
 
     @Test
+    fun aStewardCannotRevokeAnotherStewardsDevicesButCanOnceTheyHaveSteppedDown() {
+        twoStewards()
+        reject(RejectionCode.STEWARD_PROTECTED, founder.deviceRevoke(circle, bea.identity.device, TODAY + COOL_OFF), "only be revoked by that steward")
+        // Stepping down is always allowed while another steward remains; after that the ordinary rule applies (ADR 0044).
+        accept(bea.stewardRemove(circle, bea.identity.member, TODAY + COOL_OFF))
+        assertEquals(ids(founder), stewards())
+        accept(founder.deviceRevoke(circle, bea.identity.device, TODAY + COOL_OFF))
+    }
+
+    @Test
     fun aLoneStewardAddsASecondAloneThenChangesNeedBothAndTheNewOneWaitsAWeek() {
         setup()
         accept(founder.stewardAdd(circle, bea.identity.member, TODAY, "second pair of hands"))

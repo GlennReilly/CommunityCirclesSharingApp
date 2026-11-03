@@ -185,7 +185,7 @@ class ReduceTest {
         assertEquals("Offline, 1 change waiting", describe(SyncState.Offline(1)))
         assertEquals("Offline, 3 changes waiting", describe(SyncState.Offline(3)))
         assertEquals("The server is busy, trying again soon, 2 changes waiting", describe(SyncState.Busy(2, 30)))
-        assertEquals("Signed out, sign in again to sync", describe(SyncState.SignedOut))
+        assertEquals("Cannot sign in to the circle. If you were removed, ask a steward", describe(SyncState.SignedOut))
         assertEquals("The server refused the request (403): HTTP 403, 1 change waiting", describe(SyncState.Problem("The server refused the request (403): HTTP 403", 1)))
     }
 }
@@ -746,6 +746,35 @@ class ShellViewTest {
         assertTrue("""min="1"""" in html && """max="9"""" in html && """min="7"""" in html && """max="365"""" in html && """max="90"""" in html)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_STEWARD_RULES))?.value ?: error("no button")
         assertTrue("hidden" in button)
+    }
+
+    private val removable = MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "y", canRemove = true)
+    private val mine2 = MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "x")
+
+    @Test fun aStewardCanRemoveAnOrdinaryMemberBehindAWarning() {
+        val html = members(home(people = listOf(mine2, removable)))
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_REMOVE_MEMBER"""").findAll(html).count())
+        assertTrue("""$ATTR_MEMBER="${bea.v}"""" in html)
+        assertTrue("cuts off all their devices at once and changes the circle's key" in html)
+        assertTrue("What they already read stays with them" in html)
+        assertTrue(html.indexOf("<details") < html.indexOf(ACTION_REMOVE_MEMBER), "a second click is needed")
+        assertFalse(ACTION_REMOVE_MEMBER in members(home(people = listOf(mine2, removable.copy(canRemove = false)))))
+    }
+
+    @Test fun stewardsAreToldToChangeTheKeyAfterSomeoneLeavesAndOthersAreNot() {
+        val prompted = members(home(people = listOf(mine2)).copy(needsRotation = true))
+        assertTrue("Someone left the circle." in prompted)
+        assertTrue("""$ATTR_ACTION="$ACTION_ROTATE_KEY"""" in prompted)
+        assertFalse(ACTION_ROTATE_KEY in members(home(people = listOf(mine2))))
+    }
+
+    @Test fun settingsOffersLeavingToMembersAndTellsStewardsToStepDownFirst() {
+        val member = render(open(home(steward = false)).copy(screen = Screen.Settings))
+        assertTrue("""$ATTR_ACTION="$ACTION_LEAVE"""" in member)
+        assertTrue(member.indexOf("<details") < member.indexOf(ACTION_LEAVE))
+        val steward = render(open(home(steward = true)).copy(screen = Screen.Settings))
+        assertFalse("""$ATTR_ACTION="$ACTION_LEAVE"""" in steward)
+        assertTrue("Step down on the Stewards page first" in steward)
     }
 
     @Test fun statusLineIsALiveRegion() {

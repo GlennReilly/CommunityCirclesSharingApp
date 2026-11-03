@@ -228,6 +228,10 @@ class EventRules(
         if (target.member != sender.member && !directory.isSteward(envelope.circle, sender.member)) {
             return reject(RejectionCode.NOT_STEWARD, "only a steward may revoke another member's device")
         }
+        // A steward leaves office by the quorum of ADR 0027, not by having their devices revoked (ADR 0044).
+        if (target.member != sender.member && directory.isSteward(envelope.circle, target.member)) {
+            return reject(RejectionCode.STEWARD_PROTECTED, "a steward's devices can only be revoked by that steward")
+        }
         return Decision.Accept(listOf(Effect.RevokeDevice(envelope.circle, target.device)))
     }
 

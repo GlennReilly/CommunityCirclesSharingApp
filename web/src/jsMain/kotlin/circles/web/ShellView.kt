@@ -100,6 +100,9 @@ const val FIELD_QUORUM = "quorum"
 const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_REMOVE_MEMBER = "remove-member"
+const val ACTION_ROTATE_KEY = "rotate-key"
+const val ACTION_LEAVE = "leave-circle"
 const val ACTION_BORROW_ITEM = "borrow-item"
 const val ACTION_APPROVE_LOAN = "approve-loan"
 const val ACTION_DECLINE_LOAN = "decline-loan"
@@ -396,11 +399,35 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                         }
                     }
                 }
+                if (person.canRemove) {
+                    details {
+                        summary { +"Remove from the circle" }
+                        p { +"This cuts off all their devices at once and changes the circle's key, so they cannot read anything new. What they already read stays with them. They can be invited again." }
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_REMOVE_MEMBER
+                            attributes[ATTR_MEMBER] = person.member.v
+                            +"Remove this person"
+                        }
+                    }
+                }
             }
         }
     }
     p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
     p { +"Vouching tells the circle you know this person. Two neighbours who vouch open neighbour access for a newcomer. Only vouch for people you know." }
+    if (home.needsRotation) {
+        section {
+            h2 { +"Change the key" }
+            p {
+                role = "status"
+                +"Someone left the circle. Change the circle's key now, so they cannot read anything new."
+            }
+            button(type = ButtonType.button) {
+                attributes[ATTR_ACTION] = ACTION_ROTATE_KEY
+                +"Change the key"
+            }
+        }
+    }
     if (home.isSteward && home.waiting.isNotEmpty()) {
         section {
             h2 { +"Waiting to be let in" }
@@ -862,6 +889,21 @@ private fun FlowContent.settings(home: HomeData) {
             formSubmit("Save", ready = true)
         }
         p { +"Locking drops your keys from memory; you type your passphrase to continue." }
+    }
+    section {
+        h2 { +"Leave the circle" }
+        if (home.isSteward) {
+            p { +"You are a steward. Step down on the Stewards page first, then you can leave." }
+        } else {
+            details {
+                summary { +"Leave the circle" }
+                p { +"This cuts off all your devices and forgets the circle on this one. A steward will change the circle's key. You can be invited again." }
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_LEAVE
+                    +"Leave the circle"
+                }
+            }
+        }
     }
     section {
         h2 { +"Forget this device" }

@@ -86,7 +86,7 @@ fun describe(state: SyncState): String = when (state) {
     SyncState.Syncing -> "Syncing"
     is SyncState.Offline -> "Offline" + waiting(state.changesWaiting)
     is SyncState.Busy -> "The server is busy, trying again soon" + waiting(state.changesWaiting)
-    SyncState.SignedOut -> "Signed out, sign in again to sync"
+    SyncState.SignedOut -> "Cannot sign in to the circle. If you were removed, ask a steward"
     is SyncState.Problem -> state.message + waiting(state.changesWaiting)
 }
 

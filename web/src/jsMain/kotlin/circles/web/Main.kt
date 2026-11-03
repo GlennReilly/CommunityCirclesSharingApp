@@ -14,6 +14,8 @@ import circles.event.LoanId
 import circles.event.ReturnOutcome
 import circles.policy.ItemClass
 import circles.policy.ItemId
+import circles.app.LeaveResult
+import circles.app.RemoveResult
 import circles.app.StartResult
 import circles.app.StewardResult
 import circles.crypto.JsCipher
@@ -284,6 +286,28 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()
+                ACTION_REMOVE_MEMBER -> target.getAttribute(ATTR_MEMBER)?.let { id ->
+                    dispatch(
+                        AppAction.Notice(
+                            when (circleApp?.removeMember(MemberId(id))) {
+                                RemoveResult.Removed -> "Removed. The circle's key has been changed."
+                                RemoveResult.IsSteward -> "A steward must first step down on the Stewards page."
+                                RemoveResult.NotInCircle -> "That person is not in the circle."
+                                else -> "Only a steward can remove someone."
+                            },
+                        ),
+                    )
+                }
+                ACTION_ROTATE_KEY -> dispatch(AppAction.Notice(if (circleApp?.rotateKeyNow() == RemoveResult.Removed) "The circle's key has been changed." else "There is nothing to change right now."))
+                ACTION_LEAVE -> dispatch(
+                    AppAction.Notice(
+                        when (circleApp?.leaveCircle()) {
+                            LeaveResult.Left -> "You have left the circle. This device has forgotten it."
+                            LeaveResult.StewardMustStepDown -> "Step down as a steward first."
+                            else -> "Could not send your departure. Check the connection and try again; nothing was forgotten."
+                        },
+                    ),
+                )
                 ACTION_VOUCH -> target.getAttribute(ATTR_MEMBER)?.let { id ->
                     dispatch(
                         AppAction.Notice(

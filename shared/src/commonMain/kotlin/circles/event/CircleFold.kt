@@ -9,7 +9,7 @@ import circles.policy.ItemId
 import circles.policy.MemberId
 
 /** A device as the log has shaped it: its keys and whether it has been revoked. */
-data class DeviceState(val registration: DeviceRegistration, val revoked: Boolean)
+data class DeviceState(val registration: DeviceRegistration, val revoked: Boolean, val revokedDay: Int? = null)
 
 /** An event that passed validation, with its payload opened if this device holds the key. */
 class OpenedEvent(val id: EventId, val envelope: Envelope, val payload: Parsed<CborMap>)
@@ -32,6 +32,8 @@ class CircleView(
     val stewardSince: Map<MemberId, Int> = emptyMap(),
     /** Steward proposals that are valid but have not yet reached their quorum (ADR 0027), in log order. */
     val pendingStewardVotes: List<PendingStewardVote> = emptyList(),
+    /** Members who left or were removed and whose departure no `key.rotate` has followed yet (ADR 0044). */
+    val unrotatedRemovals: Set<MemberId> = emptySet(),
 )
 
 /** One steward's vote on a change that is still waiting: [subject] is the member id, or the settings for [StewardChange.POLICY]. */
@@ -90,6 +92,7 @@ class CircleFold(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
             opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
             state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
+            state.unrotatedRemovals(),
         )
     }
 
@@ -113,6 +116,15 @@ class CircleFold(
                 activityByMember[member]?.any { it.first > position } == true
         }
         val rejected = mutableListOf<RejectedEvent>()
+        private val revokedAt = mutableMapOf<DeviceId, Long>()
+        private var lastRotatePosition = -1L
+
+        /** Members whose every device is revoked, the latest of those revocations coming after the last key rotation. */
+        fun unrotatedRemovals(): Set<MemberId> =
+            devices.values.groupBy { it.registration.member }
+                .filter { (_, own) -> own.all { it.revoked } && own.maxOf { revokedAt[it.registration.device] ?: -1L } > lastRotatePosition }
+                .keys
+
         val invites = mutableMapOf<EventId, Pair<InviteTerms, Int>>()
         var keys: KeyRing = KeyRing.EMPTY
         var epoch = 0
@@ -130,12 +142,12 @@ class CircleFold(
             return when (type) {
                 EventType.MEMBER_INVITE -> invite(e, id)
                 EventType.DEVICE_ADD -> deviceAdd(e, sender)
-                EventType.DEVICE_REVOKE -> revoke(e, sender)
+                EventType.DEVICE_REVOKE -> revoke(e, sender, position)
                 EventType.STEWARD_ADD -> stewardChange(e, sender, StewardChange.ADD, position)
                 EventType.STEWARD_REMOVE -> stewardChange(e, sender, StewardChange.REMOVE, position)
                 EventType.STEWARD_POLICY -> stewardPolicyChange(e, sender, position)
                 EventType.KEY_WRAP -> wrap(e, sender)
-                EventType.KEY_ROTATE -> rotate(e, sender)
+                EventType.KEY_ROTATE -> rotate(e, sender, position)
                 else -> null
             }
         }
@@ -191,11 +203,13 @@ class CircleFold(
             return null
         }
 
-        private fun revoke(e: Envelope, sender: DeviceRegistration): String? {
+        private fun revoke(e: Envelope, sender: DeviceRegistration, position: Long): String? {
             val target = (PublicParts.revoke(e.public) as? Parsed.Ok)?.value?.let { devices[it] } ?: return "unknown device"
             if (target.revoked) return "device already revoked"
             if (target.registration.member != sender.member && sender.member !in stewards) return "only a steward may revoke another member's device"
-            devices[target.registration.device] = target.copy(revoked = true)
+            if (target.registration.member != sender.member && target.registration.member in stewards) return "a steward's devices can only be revoked by that steward"
+            devices[target.registration.device] = target.copy(revoked = true, revokedDay = e.day)
+            revokedAt[target.registration.device] = position
             return null
         }
 
@@ -258,11 +272,12 @@ class CircleFold(
             }
         }
 
-        private fun rotate(e: Envelope, sender: DeviceRegistration): String? {
+        private fun rotate(e: Envelope, sender: DeviceRegistration, position: Long): String? {
             if (sender.member !in stewards) return "only a steward may rotate the circle key"
             val next = (CircleKeys.keyRotate(e.public) as? Parsed.Ok)?.value ?: return "bad key.rotate"
             if (next != e.epoch || epoch == 0 || next != epoch + 1) return "the new epoch must be the current epoch plus one"
             epoch = next
+            lastRotatePosition = position
             return null
         }
     }

@@ -24,6 +24,7 @@ enum class RejectionCode(val wire: String) {
     INVITE_EXPIRED("invite_expired"),
     INVITE_EXHAUSTED("invite_exhausted"),
     BAD_INVITE_PROOF("bad_invite_proof"),
+    STEWARD_PROTECTED("steward_protected"),
 }
 
 data class Rejection(val code: RejectionCode, val detail: String)

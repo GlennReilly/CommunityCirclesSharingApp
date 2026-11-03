@@ -6,7 +6,13 @@ import circles.app.HomeData
 import circles.app.InviteLink
 import circles.app.ItemResult
 import circles.app.LoanResult
+import circles.app.LeaveResult
+import circles.app.RemoveResult
 import circles.app.StewardResult
+import circles.event.DeviceIdentity
+import circles.keys.SeedWrapping
+import circles.keys.UnwrapResult
+import circles.sync.fold
 import circles.app.VouchResult
 import circles.event.StewardChange
 import circles.policy.MemberId
@@ -14,6 +20,7 @@ import circles.app.DisputeStatus
 import circles.event.DisputeClaim
 import circles.event.DisputeOutcome
 import circles.policy.Tier
+import circles.event.CircleFold
 import circles.app.LoanRole
 import circles.event.LoanStatus
 import circles.event.MAX_LOAN_DAYS
@@ -546,5 +553,80 @@ class CircleAppEndToEndTest {
         assertEquals("member is not a steward", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(carol))).reason)
         assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeSteward(MemberId("9".repeat(32)))).reason.contains("not in the circle"))
         listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun aRemovedMemberIsCutOffAndCannotReadAnythingAfterTheKeyRotation() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        suspend fun join(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = join()
+        val carol = join()
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea, carol).filter { it.app.model.value is AppModel.Open }.forEach { it.app.syncOnce() } } }
+        val carolsItem = (carol.app.addItem("Ladder", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        val beforeRemoval = (alice.app.addItem("Planter", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        sync()
+        assertEquals(2, home(alice.app).items.size)
+        val aliceId = home(alice.app).me; val beaId = home(bea.app).me; val carolId = home(carol.app).me
+
+        // Who may remove whom.
+        assertEquals(RemoveResult.NotAllowed, bea.app.removeMember(carolId), "only a steward")
+        assertEquals(RemoveResult.NotAllowed, alice.app.removeMember(aliceId), "not yourself")
+        assertEquals(RemoveResult.NotInCircle, alice.app.removeMember(MemberId("9".repeat(32))))
+        assertTrue(home(alice.app).people.single { it.member == carolId }.canRemove)
+        assertFalse(home(alice.app).people.single { it.isMe }.canRemove)
+        assertFalse(home(bea.app).people.any { it.canRemove })
+
+        // Carol's device, as the operator or a thief would hold it: the identity and the log she could read.
+        val stored = assertNotNull(carol.store.load())
+        val carolSeed = (SeedWrapping.unwrapWithPassphrase(testCipher, JvmPasswordHasher(), stored.wrapped, stored.deviceId, PASSPHRASE) as UnwrapResult.Opened).seed
+        val carolIdentity = DeviceIdentity.fromSeed(crypto, testCipher, carolSeed, stored.memberId, stored.deviceId)
+
+        assertEquals(RemoveResult.Removed, alice.app.removeMember(carolId))
+        sync()
+        assertEquals(setOf(aliceId, beaId), home(alice.app).people.map { it.member }.toSet())
+        assertEquals(setOf(aliceId, beaId), home(bea.app).people.map { it.member }.toSet())
+        assertFalse(home(alice.app).needsRotation, "the removal already rotated the key")
+        assertEquals(emptyList(), home(alice.app).items.filter { it.item == carolsItem }, "a removed member's items are not listed")
+        assertEquals(LoanResult.NotAllowed, bea.app.requestLoan(carolsItem, TODAY, TODAY + 1, ""), "and cannot be requested")
+
+        // Carol's next sync is refused: she is signed out.
+        assertEquals(SyncState.SignedOut, assertNotNull(carol.app.syncOnce()).state)
+
+        // Something added after the rotation reaches Bea but is unreadable with Carol's keys; earlier things stay readable to her.
+        val afterRemoval = (alice.app.addItem("Secret shed code", ItemClass.EVERYDAY, "behind the red door") as ItemResult.Saved).item
+        sync()
+        assertEquals("behind the red door", home(alice.app).items.single { it.item == afterRemoval }.description)
+        assertTrue(home(bea.app).items.any { it.item == afterRemoval })
+        val leakedLog = (alice.replica.entries(home(alice.app).circle))
+        val asCarol = CircleFold(crypto, testCipher, carolIdentity).fold(home(alice.app).circle, leakedLog.map { it.envelope })
+        assertTrue(beforeRemoval in asCarol.market.items.keys, "she keeps what she could already read")
+        assertFalse(afterRemoval in asCarol.market.items.keys, "but nothing sealed after the rotation")
+        assertEquals(2, asCarol.currentEpoch)
+        assertEquals(null, asCarol.keys[2], "no key for the new epoch was ever wrapped to her device")
+
+        // Leaving on one's own: Bea revokes her devices, forgets everything, and a steward is prompted to rotate.
+        assertEquals(LeaveResult.StewardMustStepDown, alice.app.leaveCircle())
+        assertEquals(LeaveResult.Left, bea.app.leaveCircle())
+        assertEquals(AppModel.NoIdentity, bea.app.model.value)
+        assertNull(bea.store.load())
+        assertEquals(emptyList(), bea.replica.entries(home(alice.app).circle), "the local copy of the circle is gone")
+        alice.app.syncOnce()
+        assertTrue(home(alice.app).needsRotation)
+        assertEquals(setOf(aliceId), home(alice.app).people.map { it.member }.toSet())
+        assertEquals(RemoveResult.Removed, alice.app.rotateKeyNow())
+        assertFalse(home(alice.app).needsRotation)
+        assertEquals(RemoveResult.NotAllowed, alice.app.rotateKeyNow(), "nothing left to rotate for")
+        assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
     }
 }

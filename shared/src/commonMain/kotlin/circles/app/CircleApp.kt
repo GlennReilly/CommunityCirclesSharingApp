@@ -126,6 +126,29 @@ data class ProposalSummary(
     val canAgree: Boolean,
 )
 
+sealed interface RemoveResult {
+    /** Done: the devices are revoked and the key has been rotated (queued together). */
+    data object Removed : RemoveResult
+
+    /** Only a steward can, and not for themselves or for another steward (they leave office first). */
+    data object NotAllowed : RemoveResult
+
+    data object IsSteward : RemoveResult
+
+    data object NotInCircle : RemoveResult
+}
+
+sealed interface LeaveResult {
+    /** The departure was sent; this device has forgotten the circle. */
+    data object Left : LeaveResult
+
+    /** A steward must step down on the Stewards page first. */
+    data object StewardMustStepDown : LeaveResult
+
+    /** Could not be sent (offline, or the server refused), so nothing was forgotten. */
+    data object NotSent : LeaveResult
+}
+
 sealed interface StewardResult {
     /** Sent. [takesEffect] says whether it already completes the change (enough stewards agree). */
     data class Sent(val takesEffect: Boolean) : StewardResult
@@ -146,6 +169,8 @@ data class MemberSummary(
     val fingerprint: String,
     /** Until when my vouch for this person lasts, if I have a live one. */
     val vouchedByMeUntil: Int? = null,
+    /** May I, as a steward, remove this person from the circle? */
+    val canRemove: Boolean = false,
 )
 
 enum class LoanRole { BORROWER, OWNER, /** Neither party: a steward who may resolve this loan's dispute. */ STEWARD }
@@ -246,6 +271,8 @@ data class HomeData(
     val canVouch: Boolean = false,
     /** How many stewards the circle has; one means disputes the steward is part of cannot be decided. */
     val stewardCount: Int = 0,
+    /** A steward is told when someone left or was removed and the key has not been rotated since (ADR 0044). */
+    val needsRotation: Boolean = false,
     val stewardList: List<StewardInfo> = emptyList(),
     val stewardSettings: StewardSettingsSummary = StewardSettingsSummary(DEFAULT_STEWARD_QUORUM, DEFAULT_STEWARD_INACTIVE_DAYS, DEFAULT_STEWARD_FALLBACK_DELAY_DAYS),
     val proposals: List<ProposalSummary> = emptyList(),
@@ -368,6 +395,63 @@ class CircleApp(
         return StewardResult.Sent(outcome is StewardOutcome.Effective)
     }
 
+    /**
+     * Removes a member (ADR 0044): their devices are revoked, the circle key is rotated, and the new key is wrapped to every
+     * device that remains, all queued in this order as one batch.
+     */
+    suspend fun removeMember(member: MemberId): RemoveResult {
+        val s = session ?: return RemoveResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val me = s.identity.member
+        if (me !in view.stewards || member == me || view.currentEpoch < FIRST_EPOCH) return RemoveResult.NotAllowed
+        if (member in view.stewards) return RemoveResult.IsSteward
+        val theirs = view.devices.values.filter { !it.revoked && it.registration.member == member }
+        if (theirs.isEmpty()) return RemoveResult.NotInCircle
+        val day = today()
+        s.author.keyRing = view.keys
+        val revokes = theirs.map { s.author.deviceRevoke(s.circle, it.registration.device, day) }
+        val remaining = view.devices.values.filter { !it.revoked && it.registration.member != member }.map { it.registration }
+        val rotation = s.author.rotateKeys(s.circle, view.currentEpoch + 1, remaining, day)
+        (revokes + rotation).forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return RemoveResult.Removed
+    }
+
+    /** A steward rotates the circle key after someone left on their own, wrapping the new key to every live device. */
+    suspend fun rotateKeyNow(): RemoveResult {
+        val s = session ?: return RemoveResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (s.identity.member !in view.stewards || view.currentEpoch < FIRST_EPOCH || view.unrotatedRemovals.isEmpty()) return RemoveResult.NotAllowed
+        s.author.keyRing = view.keys
+        val live = view.devices.values.filter { !it.revoked }.map { it.registration }
+        s.author.rotateKeys(s.circle, view.currentEpoch + 1, live, today()).forEach { s.engine.enqueue(s.circle, it) }
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return RemoveResult.Removed
+    }
+
+    /** Leaves the circle: this member's devices are revoked and sent, then this device forgets everything. */
+    suspend fun leaveCircle(): LeaveResult {
+        val s = session ?: return LeaveResult.NotSent
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val me = s.identity.member
+        if (me in view.stewards) return LeaveResult.StewardMustStepDown
+        val day = today()
+        s.author.keyRing = view.keys
+        view.devices.values.filter { !it.revoked && it.registration.member == me }
+            .forEach { s.engine.enqueue(s.circle, s.author.deviceRevoke(s.circle, it.registration.device, day)) }
+        val report = s.engine.sync(s.circle)
+        // Once the revocations are accepted this device can no longer pull, so the state afterwards says nothing; what
+        // matters is that the push emptied the outbox and nothing was refused.
+        if (replica.outbox(s.circle).isNotEmpty() || replica.refused(s.circle).isNotEmpty()) {
+            afterSync(report)
+            return LeaveResult.NotSent
+        }
+        erase()
+        return LeaveResult.Left
+    }
+
     /** Syncs now and waits for the result (a "sync now" button, tests). Null while locked. */
     suspend fun syncOnce(): SyncReport? {
         val s = session ?: return null
@@ -441,6 +525,7 @@ class CircleApp(
     suspend fun erase() {
         stopSession()
         vault.erase()
+        replica.clear()
         mutableModel.value = AppModel.NoIdentity
     }
 
@@ -515,7 +600,7 @@ class CircleApp(
         val cfg = StandingRules.defaultConfig(s.circle)
         val inCircle = view.devices.values.any { !it.revoked && it.registration.member == member }
         if (member == s.identity.member || !inCircle) return VouchResult.NotAllowed
-        if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouches, view.stewards, today())) return VouchResult.NotAllowed
+        if (!StandingRules.mayVouch(s.identity.member, cfg, view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today())) return VouchResult.NotAllowed
         s.author.keyRing = view.keys
         val expires = today() + VOUCH_DAYS
         s.engine.enqueue(s.circle, s.author.vouch(s.circle, today(), member, expires))
@@ -531,9 +616,9 @@ class CircleApp(
         if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return LoanResult.NotLetInYet
-        val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member } ?: return LoanResult.NotAllowed
+        val state = view.market.items[item]?.takeIf { !it.retired && it.owner != s.identity.member && it.owner !in view.market.departed } ?: return LoanResult.NotAllowed
         // The same rule every client applies when folding (ADR 0042); asking first spares the member a request that would be ignored.
-        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouches, view.stewards, today())
+        val decision = StandingRules.decide(s.identity.member, state, StandingRules.defaultConfig(s.circle), view.market.loans.values, view.market.vouchesOn(today()), view.stewards, today())
         if (decision is AccessDecision.NotYet) return LoanResult.NotYet(decision.reasons, decision.howToUnlock)
         if (decision !is AccessDecision.Eligible) return LoanResult.NotAllowed
         s.author.keyRing = view.keys
@@ -687,7 +772,7 @@ class CircleApp(
         val cfg = StandingRules.defaultConfig(s.circle)
         val now = today()
         val loansNow = view.market.loans.values
-        val vouchesNow = view.market.vouches
+        val vouchesNow = view.market.vouchesOn(now)
         val me = s.identity.member
         val myStanding = StandingRules.standingOf(me, cfg, loansNow, vouchesNow, view.stewards, now)
         mutableModel.value = AppModel.Open(
@@ -709,6 +794,7 @@ class CircleApp(
                 ),
                 canVouch = StandingRules.mayVouch(me, cfg, loansNow, vouchesNow, view.stewards, now),
                 stewardCount = view.stewards.size,
+                needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 stewardList = view.stewardSince.map { (member, since) ->
                     val coolOffEnds = if (since == circles.event.FOUNDING_STEWARD_DAY || view.stewardSettings.quorum == 1) null else since + DEFAULT_STEWARD_COOL_OFF_DAYS
                     StewardInfo(member, member == me, since.takeIf { it != circles.event.FOUNDING_STEWARD_DAY }, coolOffEnds?.takeIf { it > now })
@@ -721,6 +807,7 @@ class CircleApp(
                         member = member,
                         isMe = member == s.identity.member,
                         isSteward = member in view.stewards,
+                        canRemove = me in view.stewards && member != me && member !in view.stewards,
                         devices = devices.size,
                         fingerprint = fingerprint(devices.first().registration.signPub),
                         vouchedByMeUntil = vouchesNow.filter { it.voucher == me && it.vouchee == member && it.isLiveOn(now, cfg) }.maxOfOrNull { it.effectiveExpiry(cfg) },
@@ -768,7 +855,7 @@ class CircleApp(
                             canResolve = canResolve(loan, me, view.stewards, now),
                         )
                     },
-                items = view.market.items.values.filter { !it.retired }.map { state ->
+                items = view.market.items.values.filter { !it.retired && it.owner !in view.market.departed }.map { state ->
                     ItemSummary(
                         item = state.item,
                         name = state.name,

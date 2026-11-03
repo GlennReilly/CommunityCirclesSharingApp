@@ -109,5 +109,28 @@ abstract class ReplicaContract {
         assertEquals(emptyList(), replica.entries(other))
     }
 
+
+    @Test fun clearForgetsEverythingForEveryCircle() = runTest {
+        val (f, replica, circle) = fixture()
+        val other = circles.event.newCircleId(f.crypto)
+        val a = f.event()
+        replica.append(circle, listOf(f.entry(1, a)), 1, emptySet())
+        replica.append(other, listOf(f.entry(1)), 1, emptySet())
+        replica.enqueue(circle, f.event())
+        val refused = f.event()
+        replica.enqueue(other, refused)
+        replica.markRefused(other, refused.eventId(f.crypto), refused.type, "no")
+        replica.clear()
+        for (c in listOf(circle, other)) {
+            assertEquals(0, replica.cursor(c))
+            assertEquals(emptyList(), replica.entries(c))
+            assertEquals(emptyList(), replica.outbox(c))
+            assertEquals(emptyList(), replica.refused(c))
+        }
+        // It is usable again afterwards.
+        replica.append(circle, listOf(f.entry(1)), 1, emptySet())
+        assertEquals(1, replica.entries(circle).size)
+    }
+
     private companion object { const val DAY = 20_000 }
 }

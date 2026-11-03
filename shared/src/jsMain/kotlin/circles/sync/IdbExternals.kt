@@ -39,6 +39,7 @@ internal external interface IdbObjectStore {
     fun get(key: dynamic): IdbRequest
     fun getAll(range: dynamic): IdbRequest
     fun delete(key: dynamic): IdbRequest
+    fun clear(): IdbRequest
     fun createIndex(name: String, keyPath: dynamic, options: dynamic): dynamic
     fun index(name: String): IdbIndex
 }

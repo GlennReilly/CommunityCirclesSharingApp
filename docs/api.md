@@ -30,7 +30,7 @@ Status codes: `401` missing or bad token, `403` the device is not in that circle
 
 ## Rejection reasons
 
-`malformed`, `unsupported_version`, `unsupported_type`, `too_large`, `future_day`, `unknown_circle`, `circle_exists`, `creation_disabled`, `wrong_circle`, `unknown_device`, `device_revoked`, `device_exists`, `member_exists`, `author_mismatch`, `bad_signature`, `not_steward`, `invalid_public`, `invalid_payload`, `unknown_invite`, `invite_expired`, `invite_exhausted`, `bad_invite_proof`.
+`malformed`, `unsupported_version`, `unsupported_type`, `too_large`, `future_day`, `unknown_circle`, `circle_exists`, `creation_disabled`, `wrong_circle`, `unknown_device`, `device_revoked`, `device_exists`, `member_exists`, `author_mismatch`, `bad_signature`, `not_steward`, `invalid_public`, `invalid_payload`, `unknown_invite`, `invite_expired`, `invite_exhausted`, `bad_invite_proof`, `steward_protected` (a steward's device may only be revoked by that steward, ADR 0044).
 
 ## Not yet
 

@@ -67,7 +67,12 @@ class MarketView(
     val details: Map<ItemId, Parsed<CborMap>>,
     /** Vouches that passed the rules (ADR 0042), in log order. */
     val vouches: List<circles.policy.Vouch> = emptyList(),
-)
+    /** Members who have left or been removed (every device revoked), and the day they went. */
+    val departed: Map<MemberId, Int> = emptyMap(),
+) {
+    /** The vouches that still count for a decision dated [day]: those by someone who has left stop counting from the day they left (ADR 0044). */
+    fun vouchesOn(day: Int): List<circles.policy.Vouch> = vouches.filter { vouch -> departed[vouch.voucher]?.let { day < it } ?: true }
+}
 
 internal class MarketResult(val view: MarketView, val rejected: Map<EventId, String>)
 
@@ -106,7 +111,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList()), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap()), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -159,10 +164,20 @@ internal class MarketFold(
         return null
     }
 
+    /** The day a member left or was removed: the latest revocation, once every device of theirs is revoked (ADR 0044). */
+    private fun removedOn(member: MemberId): Int? {
+        val own = devices.values.filter { it.registration.member == member }
+        return if (own.isNotEmpty() && own.all { it.revoked }) own.mapNotNull { it.revokedDay }.maxOrNull() else null
+    }
+
+    /** Vouches by someone who has left stop counting from the day they left. */
+    private fun vouchesCounting(day: Int): List<circles.policy.Vouch> =
+        vouches.filter { vouch -> removedOn(vouch.voucher)?.let { day < it } ?: true }
+
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
         if (v.vouchee == author) return "a member cannot vouch for themselves"
         if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config, loans.values, vouches, stewardsAt(id), day)) return "only a neighbour or above may vouch"
+        if (!StandingRules.mayVouch(author, config, loans.values, vouchesCounting(day), stewardsAt(id), day)) return "only a neighbour or above may vouch"
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }
@@ -173,7 +188,7 @@ internal class MarketFold(
         if (item.owner == author) return "a member cannot borrow their own item"
         if (loans.containsKey(v.loan)) return "loan id already used"
         if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
-        val decision = StandingRules.decide(author, item, config, loans.values, vouches, stewardsAt(id), day)
+        val decision = StandingRules.decide(author, item, config, loans.values, vouchesCounting(day), stewardsAt(id), day)
         if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
         loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
         return null

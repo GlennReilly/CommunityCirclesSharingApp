@@ -571,4 +571,81 @@ abstract class MarketContract {
         assertTrue(afterCooldown.eventId(w.crypto) !in reasons, "the hold is a pause that ends")
         assertEquals(DisputeOutcome.UPHELD, view.market.loans.getValue(loan).dispute?.outcome)
     }
+
+    @Test
+    fun aStewardsDevicesCanOnlyBeRevokedByThatStewardAndOrdinaryOnesByAnyStewardOrTheOwner() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
+        val onSteward = w.founder.deviceRevoke(w.circle, w.bea.identity.device, DAY + 1)
+        val onMember = w.founder.deviceRevoke(w.circle, w.carol.identity.device, DAY + 1)
+        val ownDevice = w.bea.deviceRevoke(w.circle, w.bea.identity.device, DAY + 1)
+        val view = w.foldAs(w.founder, w.log + listOf(onSteward, onMember, ownDevice))
+        val reasons = view.rejected.associate { it.id to it.reason }
+        assertTrue(reasons.getValue(onSteward.eventId(w.crypto)).contains("only be revoked by that steward"))
+        assertFalse(onMember.eventId(w.crypto) in reasons, "a steward may remove an ordinary member")
+        assertFalse(ownDevice.eventId(w.crypto) in reasons, "a steward may revoke their own device")
+        assertTrue(view.devices.getValue(w.carol.identity.device).revoked)
+        assertEquals(DAY + 1, view.devices.getValue(w.carol.identity.device).revokedDay)
+    }
+
+    @Test
+    fun aDepartureNeedsARotationAndTheRotationClearsIt() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        assertEquals(emptySet(), w.foldAs(w.founder).unrotatedRemovals)
+        w.log += w.founder.deviceRevoke(w.circle, w.carol.identity.device, DAY + 1)
+        assertEquals(setOf(w.carol.identity.member), w.foldAs(w.founder).unrotatedRemovals)
+        // The member leaving on their own counts too.
+        w.log += w.bea.deviceRevoke(w.circle, w.bea.identity.device, DAY + 2)
+        assertEquals(setOf(w.carol.identity.member, w.bea.identity.member), w.foldAs(w.founder).unrotatedRemovals)
+        val remaining = listOf(w.founder.identity.registration)
+        w.log += w.founder.rotateKeys(w.circle, 2, remaining, DAY + 3)
+        val after = w.foldAs(w.founder)
+        assertEquals(emptySet(), after.unrotatedRemovals)
+        assertEquals(2, after.currentEpoch)
+        assertEquals(emptyList(), after.rejected)
+        // A later departure needs its own rotation.
+        val dee = w.person()
+        val invite = InviteKey(w.crypto.generateSigningKeyPair())
+        val inviteEvent = w.founder.invite(w.circle, invite, DAY + 40, 1, DAY + 4)
+        w.log += inviteEvent
+        w.log += dee.join(w.circle, inviteEvent.eventId(w.crypto), invite, DAY + 4)
+        w.log += w.founder.deviceRevoke(w.circle, dee.identity.device, DAY + 5)
+        assertEquals(setOf(dee.identity.member), w.foldAs(w.founder).unrotatedRemovals)
+    }
+
+    @Test
+    fun vouchesByAMemberWhoHasLeftStopCountingFromTheDayTheyLeft() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start()
+        // Bea earns Neighbour by lending four times (good returns on DAY + 2 count from DAY + 2 + the grace period).
+        val (lent, lentKey) = w.share(w.bea, ItemClass.EVERYDAY)
+        listOf(w.carol, w.carol, w.founder, w.founder).forEach { w.goodLoan(w.bea, it, lent, lentKey, DAY, DAY + 2) }
+        val day = DAY + 2 + RETURN_GRACE_DAYS
+        val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
+        // Two vouches for a newcomer (the steward's and the neighbour's) open Neighbour access.
+        val dee = w.person().also { it.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, w.circleKey) }
+        val invite = InviteKey(w.crypto.generateSigningKeyPair())
+        val inviteEvent = w.founder.invite(w.circle, invite, day + 60, 1, day)
+        w.log += inviteEvent
+        w.log += dee.join(w.circle, inviteEvent.eventId(w.crypto), invite, day)
+        w.log += w.founder.keyWrap(w.circle, dee.identity.registration, FIRST_EPOCH, w.circleKey, day)
+        w.log += w.founder.vouch(w.circle, day, dee.identity.member, day + 100)
+        w.log += w.bea.vouch(w.circle, day, dee.identity.member, day + 100)
+        val before = w.requestOf(dee, valuable, day + 1)
+        w.log += before
+        // The founder removes bea on day + 3. A request dated day + 2 (judged after that, in log order) still has her vouch;
+        // one dated day + 3 does not.
+        w.log += w.founder.deviceRevoke(w.circle, w.bea.identity.device, day + 3)
+        val lastDayCounted = w.requestOf(dee, valuable, day + 2)
+        val dayGone = w.requestOf(dee, valuable, day + 3)
+        w.log += listOf(lastDayCounted, dayGone)
+        val view = w.foldAs(w.founder)
+        val rejected = view.rejected.map { it.id }
+        assertFalse(before.eventId(w.crypto) in rejected, "two live vouches")
+        assertFalse(lastDayCounted.eventId(w.crypto) in rejected, "her vouch still counted before she left")
+        assertTrue(dayGone.eventId(w.crypto) in rejected, "from the day she left only the steward's vouch remains")
+        assertEquals(mapOf(w.bea.identity.member to day + 3), view.market.departed)
+    }
 }

@@ -121,8 +121,9 @@ class AdminApiTest {
     @Test
     fun aRevokedStewardDeviceCannotExport() {
         val a = hosted()
-        val founder = a.fixture.founder
-        val revoke = founder.deviceRevoke(a.fixture.circle, a.fixture.members[2].identity.device, circles.server.support.TODAY)
+        // A steward's device can only be revoked by that steward (ADR 0044), so this steward revokes their own.
+        val steward = a.fixture.members[2]
+        val revoke = steward.deviceRevoke(a.fixture.circle, steward.identity.device, circles.server.support.TODAY)
         val r = a.live.server.services.sync.submit(listOf(revoke.toDto()), circles.server.domain.Entrance.Push(a.fixture.circle)).single()
         assertEquals("accepted", r.status.name.lowercase())
         assertEquals(403, export(a, a.fixture.members[2].identity).status)

@@ -164,6 +164,13 @@ class IndexedDbReplica private constructor(
         transact(arrayOf(STORE_KEYS)) { tx -> tx.objectStore(STORE_KEYS).delete(KEY_IDENTITY) }
     }
 
+    /** Empties the log, outbox, refused and meta stores in one transaction; the keys store is [erase]'s business. */
+    override suspend fun clear() {
+        transact(arrayOf(STORE_EVENTS, STORE_OUTBOX, STORE_REFUSED, STORE_META)) { tx ->
+            for (store in listOf(STORE_EVENTS, STORE_OUTBOX, STORE_REFUSED, STORE_META)) tx.objectStore(store).clear()
+        }
+    }
+
     /** Closes the connection; a later upgrade by another tab is then not blocked. */
     fun close() = db.close()
 

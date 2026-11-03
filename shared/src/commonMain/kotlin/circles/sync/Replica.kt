@@ -46,6 +46,9 @@ interface Replica {
     suspend fun markRefused(circle: CircleId, id: EventId, type: String, reason: String)
 
     suspend fun refused(circle: CircleId): List<RefusedEvent>
+
+    /** Forgets everything stored for every circle: the log, cursors, outbox and refused events ("forget this device"). */
+    suspend fun clear()
 }
 
 /** A [Replica] in memory. Not persistent; it is the specification the IndexedDB version must match. */
@@ -91,4 +94,8 @@ class InMemoryReplica(private val idOf: (Envelope) -> EventId) : Replica {
     }
 
     override suspend fun refused(circle: CircleId): List<RefusedEvent> = of(circle).refused.toList()
+
+    override suspend fun clear() {
+        circles.clear()
+    }
 }

@@ -167,6 +167,17 @@ try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
   await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'That passphrase did not work'), 'old passphrase refused'); ok('the old passphrase no longer works');
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked with the new passphrase, circle intact with 2 members');
+  // Removal: Bea steps down as a steward, Alice removes her as a member; Bea can no longer sign in.
+  await bea.evaluate('location.hash = "#/stewards"'); await until(bea, 'document.querySelector("[data-action=steward-remove]") !== null', 'bea step down button');
+  await bea.evaluate('(() => { const mine = [...document.querySelectorAll("li")].find(li => li.textContent.includes("Step down as steward")); mine.querySelector("button").click(); return true; })()');
+  await until(bea, has(bea, 'Done. It takes effect now.'), 'bea stepped down'); await sleep(1500); await click(bea, 'sync'); ok('bea stepped down as a steward');
+  await alice.evaluate('location.hash = "#/members"');
+  await syncUntil(alice, 'document.querySelector("[data-action=remove-member]") !== null', 'alice is offered Remove'); ok('alice is offered "Remove this person" once bea is not a steward');
+  await alice.evaluate('document.querySelector("[data-action=remove-member]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key has been changed.'), 'removed');
+  await until(alice, '!document.querySelector("[data-action=remove-member]") && ' + has(alice, 'Key fingerprint'), 'bea gone from the list'); ok('alice removed bea; the key was changed in the same action');
+  if (await alice.evaluate(has(alice, 'Change the key'))) throw new Error('a rotation prompt after a removal that already rotated'); ok('no rotation prompt, because the removal rotated the key');
+  await sleep(1500); await click(alice, 'sync'); await sleep(1500);
+  await click(bea, 'sync'); await until(bea, has(bea, 'Cannot sign in to the circle. If you were removed, ask a steward'), 'bea cut off'); ok('bea is told she cannot sign in and to ask a steward');
   const stored = await alice.evaluate(`new Promise(r => { const q = indexedDB.open('circles'); q.onsuccess = () => { const tx = q.result.transaction(['keys'], 'readonly'); const g = tx.objectStore('keys').get('identity'); g.onsuccess = () => r(JSON.stringify(g.result)); }; })`);
   if (/seed/i.test(stored.replace(/"(sealed|salt)"/g, ''))) console.log('note: stored text mentions seed', stored.slice(0, 200));
   ok('stored identity is only the wrapped blob: ' + stored.slice(0, 120) + '...');
