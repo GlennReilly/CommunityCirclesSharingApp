@@ -4,6 +4,8 @@ import circles.app.AppModel
 import circles.app.CircleApp
 import circles.app.HomeData
 import circles.app.InviteLink
+import circles.app.ItemResult
+import circles.app.MAX_ITEM_DESCRIPTION_CHARS
 import circles.app.StartResult
 import circles.crypto.JvmCrypto
 import circles.keys.Argon2Params
@@ -21,6 +23,7 @@ import circles.sync.HttpSyncApi
 import circles.sync.HttpTransport
 import circles.sync.InMemoryReplica
 import circles.sync.SyncState
+import circles.policy.ItemClass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlin.test.Test
@@ -155,5 +158,72 @@ class CircleAppEndToEndTest {
         val report = assertNotNull(second.app.syncOnce())
         assertEquals(SyncState.UpToDate, report.state)
         assertEquals(0, report.refused)
+    }
+
+    @Test
+    fun itemsAreAddedEditedKeptPrivateAndRetired() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce()
+
+        // Before a steward lets her in, Bea cannot seal anything.
+        assertEquals(ItemResult.NotLetInYet, bea.app.addItem("Ladder", ItemClass.EVERYDAY, "x"))
+
+        alice.app.syncOnce()
+        assertTrue(alice.app.admit(home(alice.app).waiting.single().device))
+        alice.app.syncOnce(); bea.app.syncOnce()
+
+        // Bad input is refused before anything is queued.
+        assertEquals(ItemResult.BadName, alice.app.addItem("   ", ItemClass.EVERYDAY, ""))
+        assertEquals(ItemResult.BadName, alice.app.addItem("x".repeat(81), ItemClass.EVERYDAY, ""))
+        assertEquals(ItemResult.DescriptionTooLong(MAX_ITEM_DESCRIPTION_CHARS), alice.app.addItem("Ladder", ItemClass.EVERYDAY, "d".repeat(MAX_ITEM_DESCRIPTION_CHARS + 1)))
+        assertEquals(0, home(alice.app).changesWaiting)
+
+        // Alice adds a ladder; she sees her own description.
+        val saved = assertIs<ItemResult.Saved>(alice.app.addItem("  Ladder  ", ItemClass.EVERYDAY, "Garage at the back, ring first"))
+        assertEquals(2, home(alice.app).changesWaiting)
+        val first = assertNotNull(alice.app.syncOnce())
+        assertEquals(SyncState.UpToDate, first.state)
+        assertEquals(0, first.refused)
+        val mine = home(alice.app).items.single()
+        assertEquals("Ladder", mine.name)
+        assertEquals("Garage at the back, ring first", mine.description)
+        assertTrue(mine.ownedByMe)
+
+        // Bea sees the item but not the private description, and cannot change or retire it.
+        bea.app.syncOnce()
+        val theirs = home(bea.app).items.single()
+        assertEquals("Ladder", theirs.name)
+        assertEquals(ItemClass.EVERYDAY, theirs.itemClass)
+        assertNull(theirs.description)
+        assertFalse(theirs.ownedByMe)
+        assertEquals(ItemResult.NotAllowed, bea.app.editItem(saved.item, "Mine now", ItemClass.EVERYDAY, ""))
+        assertEquals(ItemResult.NotAllowed, bea.app.retireItem(saved.item))
+
+        // Alice edits it; Bea sees the new name and kind, still not the description.
+        assertIs<ItemResult.Saved>(alice.app.editItem(saved.item, "Long ladder", ItemClass.VALUABLE, "Side gate code is private"))
+        assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
+        assertEquals("Side gate code is private", home(alice.app).items.single().description)
+        bea.app.syncOnce()
+        assertEquals("Long ladder", home(bea.app).items.single().name)
+        assertEquals(ItemClass.VALUABLE, home(bea.app).items.single().itemClass)
+        assertNull(home(bea.app).items.single().description)
+
+        // The server never saw the words: nothing readable is in the database.
+        val dump = server.rows("SELECT public, encrypted FROM events").joinToString { row -> row.joinToString { (it as? ByteArray)?.decodeToString().orEmpty() } }
+        assertFalse("Long ladder" in dump || "Garage" in dump || "gate code" in dump)
+
+        // Retiring takes it off both lists.
+        assertIs<ItemResult.Saved>(alice.app.retireItem(saved.item))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(emptyList(), home(alice.app).items)
+        assertEquals(emptyList(), home(bea.app).items)
+        assertEquals(ItemResult.NotAllowed, alice.app.editItem(saved.item, "Back again", ItemClass.EVERYDAY, ""))
     }
 }

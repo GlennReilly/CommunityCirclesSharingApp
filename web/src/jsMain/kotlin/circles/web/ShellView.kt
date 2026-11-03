@@ -3,10 +3,17 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.INVITE_VALID_DAYS
+import circles.app.ItemSummary
+import circles.app.MAX_ITEM_DESCRIPTION_CHARS
+import circles.event.MAX_ITEM_NAME_CHARS
+import circles.policy.ItemClass
 import circles.keys.MIN_PASSPHRASE_CHARS
 import kotlinx.html.ButtonType
 import kotlinx.html.FlowContent
 import kotlinx.html.InputType
+import kotlinx.html.option
+import kotlinx.html.select
+import kotlinx.html.textArea
 import kotlinx.html.a
 import kotlinx.html.button
 import kotlinx.html.details
@@ -46,6 +53,15 @@ const val ACTION_LOCK = "lock"
 const val ACTION_SYNC = "sync"
 const val ACTION_ERASE = "erase"
 const val ACTION_DISMISS = "dismiss"
+const val ACTION_EDIT_ITEM = "edit-item"
+const val ACTION_RETIRE_ITEM = "retire-item"
+const val FORM_ITEM_ADD = "item-add-form"
+const val FORM_ITEM_EDIT = "item-edit-form"
+const val FIELD_NAME = "name"
+const val FIELD_KIND = "kind"
+const val FIELD_DETAILS = "details"
+const val ATTR_ITEM = "data-item"
+const val ATTR_MIN = "data-min"
 const val ATTR_ACTION = "data-action"
 const val ATTR_DEVICE = "data-device"
 private const val ID_INVITE_OUTPUT = "invite-output"
@@ -62,6 +78,12 @@ fun FlowContent.shell(state: AppState) {
             id = "sync-status"
             role = "status"
             +describe(state.sync)
+        }
+        if (state.signedIn) {
+            button(type = ButtonType.button) {
+                attributes[ATTR_ACTION] = ACTION_SYNC
+                +"Sync now"
+            }
         }
         if (state.updateAvailable) {
             div {
@@ -111,16 +133,25 @@ fun FlowContent.shell(state: AppState) {
             }
             AppModel.NoIdentity -> newcomer(state)
             is AppModel.Locked -> signIn()
-            is AppModel.Open -> if (state.screen == Screen.Home) home(model.home, state) else comingSoon(state.screen)
+            is AppModel.Open -> when (state.screen) {
+                Screen.Home -> home(model.home, state)
+                Screen.Items -> items(model.home)
+                Screen.AddItem -> itemForm(null)
+                Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
+                else -> comingSoon(state.screen)
+            }
         }
     }
 }
 
-/** The submit button of a passphrase form: hidden until a long enough passphrase is typed (the glue shows it). */
-private fun FlowContent.passphraseSubmit(text: String) {
+/**
+ * The submit button of a form: hidden until every field marked with [ATTR_MIN] has at least that many characters (the
+ * glue shows it as the user types). [ready] is true for a form that starts filled in.
+ */
+private fun FlowContent.formSubmit(text: String, ready: Boolean = false) {
     button(type = ButtonType.submit) {
         id = SUBMIT_ID
-        attributes["hidden"] = "hidden"
+        if (!ready) attributes["hidden"] = "hidden"
         +text
     }
 }
@@ -134,6 +165,7 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
         id = FIELD_PASSPHRASE
         required = true
         attributes["minlength"] = MIN_PASSPHRASE_CHARS.toString()
+        attributes[ATTR_MIN] = MIN_PASSPHRASE_CHARS.toString()
         attributes["autocomplete"] = autocomplete
         attributes["aria-describedby"] = "passphrase-help"
     }
@@ -187,7 +219,7 @@ private fun FlowContent.startCircle() {
     form {
         id = FORM_START
         passphraseField("new-password", hint = true)
-        passphraseSubmit("Start a circle")
+        formSubmit("Start a circle")
     }
     backToWelcome()
 }
@@ -205,17 +237,18 @@ private fun FlowContent.joinCircle(state: AppState) {
             input(type = InputType.text, name = FIELD_LINK) {
                 id = FIELD_LINK
                 required = true
+                attributes[ATTR_MIN] = "1"
                 attributes["autocomplete"] = "off"
                 attributes["spellcheck"] = "false"
             }
-            button(type = ButtonType.submit) { +"Continue" }
+            formSubmit("Continue")
         }
     } else {
         p { +"You were invited to a circle on this server. Choose a passphrase to protect your keys on this device." }
         form {
             id = FORM_JOIN
             passphraseField("new-password", hint = true)
-            passphraseSubmit("Join")
+            formSubmit("Join")
         }
     }
     backToWelcome()
@@ -226,7 +259,7 @@ private fun FlowContent.signIn() {
     form {
         id = FORM_UNLOCK
         passphraseField("current-password", hint = false)
-        passphraseSubmit("Unlock")
+        formSubmit("Unlock")
     }
     details {
         summary { +"Forget this device" }
@@ -291,10 +324,6 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
         }
     }
     button(type = ButtonType.button) {
-        attributes[ATTR_ACTION] = ACTION_SYNC
-        +"Sync now"
-    }
-    button(type = ButtonType.button) {
         attributes[ATTR_ACTION] = ACTION_LOCK
         +"Lock now"
     }
@@ -303,4 +332,109 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
 private fun FlowContent.comingSoon(screen: Screen) {
     h1 { +screen.title }
     p { +"This screen is not built yet." }
+}
+
+private fun itemClassLabel(itemClass: ItemClass): String = when (itemClass) {
+    ItemClass.ESSENTIAL -> "Essential: always open to every member"
+    ItemClass.EVERYDAY -> "Everyday: simple things like a crockpot"
+    ItemClass.VALUABLE -> "Valuable: power tools, camping gear"
+    ItemClass.HIGH_VALUE -> "High value: a trailer, a chainsaw"
+}
+
+private fun FlowContent.items(home: HomeData) {
+    h1 { +Screen.Items.title }
+    if (!home.canRead) {
+        p {
+            role = "status"
+            +"A steward needs to let you in before you can see or add items."
+        }
+        return
+    }
+    p {
+        a(href = Screen.AddItem.fragment) { +"Add an item" }
+    }
+    if (home.items.isEmpty()) {
+        p { +"Nothing has been shared yet." }
+        return
+    }
+    ul {
+        for (item in home.items) {
+            li {
+                h2 { +item.name }
+                p { +itemClassLabel(item.itemClass).substringBefore(":") }
+                p { +(if (item.ownedByMe) "Yours" else "Shared by member ${item.owner.v.take(MEMBER_SHORT_CHARS)}") }
+                item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
+                if (item.ownedByMe) {
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_EDIT_ITEM
+                        attributes[ATTR_ITEM] = item.item.v
+                        +"Change"
+                    }
+                    details {
+                        summary { +"Remove" }
+                        p { +"This takes the item off everyone's list. It cannot be put back, but you can add it again." }
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_RETIRE_ITEM
+                            attributes[ATTR_ITEM] = item.item.v
+                            +"Remove from the list"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Adding an item ([existing] null) or changing one: the same fields, on a page of their own. */
+private fun FlowContent.itemForm(existing: ItemSummary?) {
+    h1 { +(if (existing == null) Screen.AddItem.title else Screen.EditItem.title) }
+    form {
+        id = if (existing == null) FORM_ITEM_ADD else FORM_ITEM_EDIT
+        label {
+            attributes["for"] = FIELD_NAME
+            +"Name: "
+        }
+        input(type = InputType.text, name = FIELD_NAME) {
+            id = FIELD_NAME
+            required = true
+            value = existing?.name.orEmpty()
+            attributes["maxlength"] = MAX_ITEM_NAME_CHARS.toString()
+            attributes[ATTR_MIN] = "1"
+            attributes["autocomplete"] = "off"
+        }
+        label {
+            attributes["for"] = FIELD_KIND
+            +"Kind: "
+        }
+        select {
+            id = FIELD_KIND
+            name = FIELD_KIND
+            for (kind in ItemClass.entries) {
+                option {
+                    value = kind.name
+                    selected = kind == (existing?.itemClass ?: ItemClass.EVERYDAY)
+                    +itemClassLabel(kind)
+                }
+            }
+        }
+        label {
+            attributes["for"] = FIELD_DETAILS
+            +"Details: "
+        }
+        textArea {
+            id = FIELD_DETAILS
+            name = FIELD_DETAILS
+            attributes["maxlength"] = MAX_ITEM_DESCRIPTION_CHARS.toString()
+            attributes["aria-describedby"] = "details-help"
+            +existing?.description.orEmpty()
+        }
+        p {
+            id = "details-help"
+            +"Only you and people you approve to borrow it can read the details, for example where to collect it."
+        }
+        formSubmit(if (existing == null) "Add item" else "Save changes", ready = existing != null)
+    }
+    p {
+        a(href = Screen.Items.fragment) { +"Back to items" }
+    }
 }

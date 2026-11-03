@@ -2,6 +2,7 @@ package circles.web
 
 import circles.app.AppModel
 import circles.app.InviteLink
+import circles.policy.ItemId
 import circles.sync.SyncState
 
 data class AppState(
@@ -16,6 +17,8 @@ data class AppState(
     val notice: String? = null,
     /** The invite link just made, shown once so it can be copied. */
     val newInvite: String? = null,
+    /** The item being changed on the Change an item page. */
+    val editing: ItemId? = null,
 ) {
     val signedIn: Boolean get() = model is AppModel.Open
 }
@@ -27,13 +30,15 @@ sealed interface AppAction {
     data class InviteSeen(val link: InviteLink?) : AppAction
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
+    data class EditItem(val item: ItemId) : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
 }
 
 /** Pure state transition. Signed-out users never leave the sign-in pages; signed-in users never land on them. */
 fun reduce(state: AppState, action: AppAction): AppState = when (action) {
-    is AppAction.Navigate -> state.copy(screen = allowed(state.model, action.screen))
+    is AppAction.Navigate -> state.copy(screen = allowed(state.model, action.screen).let { if (it == Screen.EditItem && state.editing == null) Screen.Items else it })
+    is AppAction.EditItem -> if (state.signedIn) state.copy(editing = action.item, screen = Screen.EditItem) else state
     is AppAction.ModelChanged -> {
         val open = action.model is AppModel.Open
         state.copy(

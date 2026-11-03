@@ -3,13 +3,15 @@ package circles.web
 import circles.app.AppModel
 import circles.app.CircleApp
 import circles.app.InviteLink
+import circles.app.ItemResult
+import circles.policy.ItemClass
+import circles.policy.ItemId
 import circles.app.StartResult
 import circles.crypto.JsCipher
 import circles.crypto.JsCrypto
 import circles.event.DeviceId
 import circles.keys.JsPasswordHasher
 import circles.keys.KeyVault
-import circles.keys.MIN_PASSPHRASE_CHARS
 import circles.keys.UnlockResult
 import circles.sync.FetchTransport
 import circles.sync.HttpSyncApi
@@ -28,6 +30,8 @@ import org.w3c.dom.Element
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLFormElement
 import org.w3c.dom.HTMLInputElement
+import org.w3c.dom.HTMLSelectElement
+import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.Event
 
 private const val ROOT_ID = "app"
@@ -99,19 +103,32 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         circleApp.open()
     }
 
-    /** A passphrase form's button appears only once the passphrase is long enough to be accepted. */
+    /** A form's button appears only once every field that needs text has enough of it (`data-min`, in the views). */
     private fun onInput(event: Event) {
-        val field = event.target as? HTMLInputElement ?: return
-        if (field.id != FIELD_PASSPHRASE) return
-        val button = field.form?.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
-        button.hidden = field.value.length < MIN_PASSPHRASE_CHARS
+        val form = (event.target as? Element)?.closest("form") as? HTMLFormElement ?: return
+        val button = form.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
+        var ready = true
+        val needy = form.querySelectorAll("[$ATTR_MIN]")
+        for (index in 0 until needy.length) {
+            val field = needy.item(index) as HTMLInputElement
+            val min = field.getAttribute(ATTR_MIN)?.toIntOrNull() ?: continue
+            // Passphrases count every character; other text ignores spaces at the ends.
+            val length = if (field.type == "password") field.value.length else field.value.trim().length
+            if (length < min) ready = false
+        }
+        button.hidden = !ready
     }
 
     private fun onSubmit(event: Event) {
         val form = event.target as? HTMLFormElement ?: return
         event.preventDefault()
         val circleApp = app ?: return
-        fun field(name: String): String = (form.elements.namedItem(name) as? HTMLInputElement)?.value.orEmpty()
+        fun field(name: String): String = when (val element = form.elements.namedItem(name)) {
+            is HTMLInputElement -> element.value
+            is HTMLTextAreaElement -> element.value
+            is HTMLSelectElement -> element.value
+            else -> ""
+        }
         scope.launch {
             when (form.id) {
                 FORM_START -> report(circleApp.startCircle(field(FIELD_PASSPHRASE)))
@@ -121,6 +138,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     if (link == null) dispatch(AppAction.Notice("That does not look like an invite link. Paste the whole link you were sent."))
                     else dispatch(AppAction.InviteSeen(link))
                 }
+                FORM_ITEM_ADD -> reportItem(circleApp.addItem(field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS)))
+                FORM_ITEM_EDIT -> state.editing?.let { reportItem(circleApp.editItem(it, field(FIELD_NAME), kind(field(FIELD_KIND)), field(FIELD_DETAILS))) }
                 FORM_UNLOCK -> when (val result = circleApp.unlock(field(FIELD_PASSPHRASE))) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
@@ -128,6 +147,21 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Circles (${result.reason})."))
                 }
             }
+        }
+    }
+
+    private fun kind(name: String): ItemClass = ItemClass.entries.firstOrNull { it.name == name } ?: ItemClass.EVERYDAY
+
+    private fun reportItem(result: ItemResult) {
+        when (result) {
+            is ItemResult.Saved -> {
+                dispatch(AppAction.Notice("Saved."))
+                window.location.hash = Screen.Items.fragment
+            }
+            ItemResult.BadName -> dispatch(AppAction.Notice("Give the item a name of 1 to 80 characters."))
+            is ItemResult.DescriptionTooLong -> dispatch(AppAction.Notice("Keep the details to ${result.maximum} characters or fewer."))
+            ItemResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can add items."))
+            ItemResult.NotAllowed -> dispatch(AppAction.Notice("That item cannot be changed here."))
         }
     }
 
@@ -147,6 +181,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_SYNC -> circleApp?.syncNow()
+                ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
+                    dispatch(AppAction.EditItem(ItemId(it)))
+                    window.location.hash = Screen.EditItem.fragment
+                }
+                ACTION_RETIRE_ITEM -> target.getAttribute(ATTR_ITEM)?.let { id ->
+                    reportItem(circleApp?.retireItem(ItemId(id)) ?: ItemResult.NotAllowed)
+                }
                 ACTION_ERASE -> circleApp?.erase()
                 ACTION_INVITE -> circleApp?.makeInvite()?.let { dispatch(AppAction.InviteMade(it.format(window.location.origin))) }
                 ACTION_COPY -> state.newInvite?.let {

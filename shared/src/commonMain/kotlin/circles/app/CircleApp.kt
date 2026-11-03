@@ -10,6 +10,14 @@ import circles.event.EventAuthor
 import circles.event.EventType
 import circles.event.FIRST_EPOCH
 import circles.event.InviteKey
+import circles.event.ItemKeys
+import circles.event.MAX_ITEM_NAME_CHARS
+import circles.event.newDetailKeyId
+import circles.event.newItemId
+import circles.encoding.CborMap
+import circles.encoding.CborText
+import circles.policy.ItemClass
+import circles.policy.ItemId
 import circles.event.KeyRing
 import circles.event.newCircleId
 import circles.keys.CreateResult
@@ -40,6 +48,34 @@ const val INVITE_USES = 1
 /** A device that has joined but has no circle key yet (a steward admits it by wrapping the key to it). */
 data class WaitingDevice(val device: DeviceId, val member: MemberId)
 
+const val MAX_ITEM_DESCRIPTION_CHARS = 500
+private const val DETAIL_DESCRIPTION = "description"
+
+/** An item as the Items screen shows it. [description] is null unless this device holds the item's key (owner or approved borrower). */
+data class ItemSummary(
+    val item: ItemId,
+    val name: String,
+    val itemClass: ItemClass,
+    val owner: MemberId,
+    val ownedByMe: Boolean,
+    val description: String?,
+)
+
+sealed interface ItemResult {
+    data class Saved(val item: ItemId) : ItemResult
+
+    /** The name is empty or longer than [MAX_ITEM_NAME_CHARS]. */
+    data object BadName : ItemResult
+
+    data class DescriptionTooLong(val maximum: Int) : ItemResult
+
+    /** No circle key has been wrapped to this device yet, so nothing can be sealed. */
+    data object NotLetInYet : ItemResult
+
+    /** Locked, or the item is not this member's, or it is retired. */
+    data object NotAllowed : ItemResult
+}
+
 /** What the home screen shows, computed from the local copy of the log. */
 data class HomeData(
     val circle: CircleId,
@@ -51,6 +87,8 @@ data class HomeData(
     val waiting: List<WaitingDevice>,
     val changesWaiting: Int,
     val refusedChanges: Int,
+    /** Items that are not retired, newest events last. */
+    val items: List<ItemSummary> = emptyList(),
 )
 
 sealed interface AppModel {
@@ -212,6 +250,58 @@ class CircleApp(
         return true
     }
 
+    /** Adds an item owned by this member. Its description is sealed with a key of its own; only approved borrowers will get it. */
+    suspend fun addItem(name: String, itemClass: ItemClass, description: String): ItemResult {
+        val s = session ?: return ItemResult.NotAllowed
+        checkFields(name, description)?.let { return it }
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.currentEpoch < FIRST_EPOCH || view.keys[view.currentEpoch] == null) return ItemResult.NotLetInYet
+        s.author.keyRing = view.keys
+        return saveItem(s, view, newItemId(crypto), newDetailKeyId(crypto), ItemKeys.newKey(crypto), name.trim(), itemClass, description.trim())
+    }
+
+    /** Changes an item's name, kind or description. Only its owner can, and only while this device holds the item's key. */
+    suspend fun editItem(item: ItemId, name: String, itemClass: ItemClass, description: String): ItemResult {
+        val s = session ?: return ItemResult.NotAllowed
+        checkFields(name, description)?.let { return it }
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.items[item]?.takeIf { it.owner == s.identity.member && !it.retired } ?: return ItemResult.NotAllowed
+        val key = view.market.itemKeys[item to state.detailKeyId] ?: return ItemResult.NotAllowed
+        s.author.keyRing = view.keys
+        return saveItem(s, view, item, state.detailKeyId, key, name.trim(), itemClass, description.trim())
+    }
+
+    /** Takes an item off the list (its owner only). Loans already active can still be returned. */
+    suspend fun retireItem(item: ItemId): ItemResult {
+        val s = session ?: return ItemResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.market.items[item]?.let { it.owner == s.identity.member && !it.retired } != true) return ItemResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.itemRetire(s.circle, today(), item))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return ItemResult.Saved(item)
+    }
+
+    private fun checkFields(name: String, description: String): ItemResult? = when {
+        name.isBlank() || name.trim().length > MAX_ITEM_NAME_CHARS -> ItemResult.BadName
+        description.trim().length > MAX_ITEM_DESCRIPTION_CHARS -> ItemResult.DescriptionTooLong(MAX_ITEM_DESCRIPTION_CHARS)
+        else -> null
+    }
+
+    private suspend fun saveItem(
+        s: Session, view: circles.event.CircleView, item: ItemId, detailKeyId: String, itemKey: circles.encoding.ByteString,
+        name: String, itemClass: ItemClass, description: String,
+    ): ItemResult {
+        val mine = view.devices.values.filter { !it.revoked && it.registration.member == s.identity.member }.map { it.registration }
+        val day = today()
+        s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item, name, itemClass, detailKeyId, itemKey, mine))
+        s.engine.enqueue(s.circle, s.author.itemDetail(s.circle, day, item, detailKeyId, itemKey, CborMap.of(DETAIL_DESCRIPTION to CborText(description))))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return ItemResult.Saved(item)
+    }
+
     /** Recomputes the home data from the local log. Called after every sync and every local action. */
     suspend fun refresh() {
         val s = session ?: return
@@ -234,6 +324,16 @@ class CircleApp(
                 waiting = waiting,
                 changesWaiting = replica.outbox(s.circle).size,
                 refusedChanges = replica.refused(s.circle).size,
+                items = view.market.items.values.filter { !it.retired }.map { state ->
+                    ItemSummary(
+                        item = state.item,
+                        name = state.name,
+                        itemClass = state.itemClass,
+                        owner = state.owner,
+                        ownedByMe = state.owner == s.identity.member,
+                        description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
+                    )
+                },
             ),
         )
     }

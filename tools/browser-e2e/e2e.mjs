@@ -6,9 +6,12 @@ async function until(c, expr, what, ms = 20000) { const t0 = Date.now(); while (
 // Types into the form's fields like a person would (an input event per field), then submits.
 const submit = (c, formId, fields) => c.evaluate(`(() => { const f = document.getElementById(${JSON.stringify(formId)}); for (const [k, v] of Object.entries(${JSON.stringify(fields)})) { const e = f.elements.namedItem(k); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); } f.requestSubmit(); return true; })()`);
 const type = (c, formId, name, v) => c.evaluate(`(() => { const e = document.getElementById(${JSON.stringify(formId)}).elements.namedItem(${JSON.stringify(name)}); e.value = ${JSON.stringify(v)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+const setField = (c, formId, name, v) => type(c, formId, name, v);
 const buttonHidden = (c, formId) => c.evaluate(`document.getElementById(${JSON.stringify(formId)}).querySelector('#submit').hidden`);
 const click = (c, action, extra = '') => c.evaluate(`(() => { const b = document.querySelector('[data-action="${action}"]${extra}'); if (!b) return 'no button'; b.click(); return true; })()`);
 const has = (c, s) => `document.getElementById("app").innerText.includes(${JSON.stringify(s)})`;
+// Clicks "Sync now" every couple of seconds until the page shows what is expected (the other browser may not have pushed yet).
+async function syncUntil(c, expr, what, ms = 25000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await click(c, 'sync'); await sleep(1500); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
 let step = 0; const ok = m => console.log(`ok ${++step}: ${m}`);
 try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Circles'), 'welcome page');
@@ -43,6 +46,28 @@ try {
   await click(alice, 'sync'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, '!' + has(bea, 'A steward needs to let you in'), 'bea can read'); ok('bea can now read the circle');
+  // Items: add, privacy, change, remove.
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'empty items page'); ok('items page starts empty');
+  await alice.evaluate('document.querySelector(\'a[href="#/items/add"]\').click()'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add item page');
+  const itemLabels = await alice.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
+  if (itemLabels.some(l => !l.endsWith(': '))) throw new Error('item labels: ' + JSON.stringify(itemLabels));
+  if (!(await buttonHidden(alice, 'item-add-form'))) throw new Error('add button visible before a name'); ok('add-item button hidden until a name is typed; labels ' + JSON.stringify(itemLabels));
+  await setField(alice, 'item-add-form', 'name', 'Ladder'); if (await buttonHidden(alice, 'item-add-form')) throw new Error('add button still hidden after a name');
+  await setField(alice, 'item-add-form', 'details', 'Garage at the back, ring first');
+  await alice.evaluate('document.getElementById("item-add-form").requestSubmit()');
+  await until(alice, has(alice, 'Ladder') + ' && ' + has(alice, 'Details: Garage at the back, ring first') + ' && ' + has(alice, 'Yours'), 'ladder listed'); ok('alice added a ladder and sees her own details');
+  await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced item');
+  await bea.evaluate('location.hash = "#/items"'); await syncUntil(bea, has(bea, 'Ladder') + ' && ' + has(bea, 'Shared by member'), 'bea sees ladder'); ok('bea sees the ladder');
+  if (await bea.evaluate('document.body.innerText.includes("Garage at the back")')) throw new Error('bea can read the private details'); ok('bea cannot read the private details');
+  if (await bea.evaluate('document.querySelector(\'[data-action="edit-item"]\') !== null')) throw new Error('bea is offered Change'); ok('bea is not offered Change or Remove');
+  await click(alice, 'edit-item'); await until(alice, 'document.getElementById("item-edit-form") !== null', 'edit page');
+  if (await alice.evaluate('document.getElementById("item-edit-form").elements.namedItem("name").value') !== 'Ladder') throw new Error('edit form not prefilled'); ok('change page is prefilled');
+  await setField(alice, 'item-edit-form', 'name', 'Long ladder'); await alice.evaluate('document.getElementById("item-edit-form").requestSubmit()');
+  await until(alice, has(alice, 'Long ladder'), 'renamed'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced edit');
+  await syncUntil(bea, has(bea, 'Long ladder'), 'bea sees rename'); ok('rename reached bea');
+  await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
+  await syncUntil(bea, has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
+  await alice.evaluate('location.hash = "#/home"');
   await click(alice, 'lock'); await until(alice, has(alice, 'Sign in'), 'alice locked'); ok('alice locked');
   await submit(alice, 'unlock-form', { passphrase: 'wrong wrong wrong wrong' }); await until(alice, has(alice, 'That passphrase did not work'), 'wrong passphrase'); ok('wrong passphrase refused');
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');

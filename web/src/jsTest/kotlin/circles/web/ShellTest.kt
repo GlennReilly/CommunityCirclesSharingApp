@@ -3,11 +3,14 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.InviteLink
+import circles.app.ItemSummary
 import circles.app.WaitingDevice
 import circles.encoding.ByteString
 import circles.event.DeviceId
 import circles.event.EventId
 import circles.policy.CircleId
+import circles.policy.ItemClass
+import circles.policy.ItemId
 import circles.policy.MemberId
 import circles.sync.SyncState
 import kotlinx.html.div
@@ -30,7 +33,11 @@ private fun home(
     members: Int = 2,
     waiting: List<WaitingDevice> = emptyList(),
     refused: Int = 0,
-) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused)
+    items: List<ItemSummary> = emptyList(),
+) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items)
+
+private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVERYDAY, me, ownedByMe = true, description = "Garage at the back")
+private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null)
 
 private val link = InviteLink(circle, EventId("e".repeat(64)), ByteString.of(ByteArray(32) { it.toByte() }))
 private fun open(home: HomeData = home()) = AppState(screen = Screen.Home, model = AppModel.Open(home))
@@ -48,7 +55,8 @@ class ScreenTest {
 
     @Test fun navigationOmitsEveryPageThatComesBeforeSignIn() {
         for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
-        assertEquals(Screen.entries.size - Screen.beforeSignIn.size, Screen.navigation.size)
+        for (screen in Screen.subPages) assertFalse(screen in Screen.navigation, screen.name)
+        assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size, Screen.navigation.size)
         assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle), Screen.newcomer)
     }
 }
@@ -99,6 +107,16 @@ class ReduceTest {
         assertEquals(link, reduce(seen, AppAction.ModelChanged(AppModel.NoIdentity)).pendingInvite)
         // The page reads the link before the app reports its first model, which is Loading.
         assertEquals(link, reduce(seen, AppAction.ModelChanged(AppModel.Loading)).pendingInvite)
+    }
+
+    @Test fun changingAnItemRemembersWhichOneAndGoesToItsPage() {
+        val state = reduce(open(), AppAction.EditItem(ladder.item))
+        assertEquals(ladder.item, state.editing)
+        assertEquals(Screen.EditItem, state.screen)
+        assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.EditItem)).screen, "no item chosen, so back to the list")
+        assertEquals(Screen.EditItem, reduce(state, AppAction.Navigate(Screen.EditItem)).screen)
+        assertEquals(Screen.AddItem, reduce(open(), AppAction.Navigate(Screen.AddItem)).screen)
+        assertEquals(AppState(model = AppModel.NoIdentity), reduce(AppState(model = AppModel.NoIdentity), AppAction.EditItem(ladder.item)))
     }
 
     @Test fun noticesAndMadeInvitesAreStoredAndCleared() {
@@ -188,6 +206,7 @@ class ShellViewTest {
             newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle), newcomer(Screen.JoinCircle, link),
             render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
             render(open().copy(newInvite = "https://x")),
+            render(open().copy(screen = Screen.AddItem)),
         )
         var labels = 0
         for (html in pages) {
@@ -196,7 +215,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(5, labels)
+        assertEquals(8, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -210,10 +229,17 @@ class ShellViewTest {
         }
     }
 
-    @Test fun theLinkFormButtonIsNotAPassphraseButtonAndShowsAtOnce() {
+    @Test fun theLinkFormButtonAlsoWaitsForSomeInput() {
         val html = newcomer(Screen.JoinCircle)
-        assertFalse("""id="$SUBMIT_ID"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("""$ATTR_MIN="1"""" in html)
         assertTrue("Continue" in html)
+    }
+
+    @Test fun theMinimumLengthOfEveryRequiredFieldIsMarked() {
+        assertTrue("""$ATTR_MIN="12"""" in newcomer(Screen.StartCircle))
+        assertTrue("""$ATTR_MIN="1"""" in render(open().copy(screen = Screen.AddItem)))
     }
 
     @Test fun passphraseFieldsAreLabelledMinLengthAndNeverAutofilledAsAnotherSite() {
@@ -237,10 +263,10 @@ class ShellViewTest {
     }
 
     @Test fun signedInNavigationMarksCurrentScreen() {
-        val html = render(open().copy(screen = Screen.Items))
+        val html = render(open().copy(screen = Screen.Skills))
         assertTrue("""aria-label="Main"""" in html)
         assertEquals(1, Regex("""aria-current="page"""").findAll(html).count())
-        assertTrue("""href="#/items"""" in html)
+        assertTrue("""href="#/skills"""" in html)
         assertFalse("""href="#/sign-in"""" in html)
         assertTrue("This screen is not built yet." in html)
     }
@@ -279,10 +305,79 @@ class ShellViewTest {
         assertFalse("could not be sent" in render(open(home(refused = 0))))
     }
 
-    @Test fun homeCanLockTheSessionAndSyncNow() {
-        val html = render(open())
-        assertTrue("""$ATTR_ACTION="$ACTION_LOCK"""" in html)
-        assertTrue("""$ATTR_ACTION="$ACTION_SYNC"""" in html)
+    @Test fun homeCanLockTheSession() {
+        assertTrue("""$ATTR_ACTION="$ACTION_LOCK"""" in render(open()))
+    }
+
+    @Test fun syncNowIsInTheHeaderOfEverySignedInPageAndNowhereElse() {
+        for (screen in listOf(Screen.Home, Screen.Items, Screen.AddItem, Screen.Skills)) {
+            assertTrue("""$ATTR_ACTION="$ACTION_SYNC"""" in render(open().copy(screen = screen)), screen.name)
+        }
+        assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in render(AppState(model = AppModel.Locked(circle), screen = Screen.SignIn)))
+        assertFalse("""$ATTR_ACTION="$ACTION_SYNC"""" in render(AppState(model = AppModel.NoIdentity)))
+    }
+
+    private fun items(home: HomeData) = render(open(home).copy(screen = Screen.Items))
+
+    @Test fun theItemsPageSaysWhenYouCannotSeeItemsYet() {
+        val html = items(home(canRead = false))
+        assertTrue("A steward needs to let you in" in html)
+        assertFalse(Screen.AddItem.fragment in html)
+    }
+
+    @Test fun anEmptyItemsPageInvitesYouToAddTheFirst() {
+        val html = items(home())
+        assertTrue("Nothing has been shared yet." in html)
+        assertTrue("""href="${Screen.AddItem.fragment}"""" in html)
+    }
+
+    @Test fun theItemsPageListsItemsAndOffersChangesOnlyOnYourOwn() {
+        val html = items(home(items = listOf(ladder, drill)))
+        assertTrue("Ladder" in html && "Drill" in html)
+        assertTrue("Yours" in html)
+        assertTrue("Shared by member bbbbbbbb" in html)
+        assertTrue("Details: Garage at the back" in html)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EDIT_ITEM"""").findAll(html).count())
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_RETIRE_ITEM"""").findAll(html).count())
+        assertTrue("""$ATTR_ITEM="${ladder.item.v}"""" in html)
+        assertFalse("""$ATTR_ITEM="${drill.item.v}"""" in html)
+        assertEquals(1, Regex("Details:").findAll(html).count(), "someone else's item shows no details")
+    }
+
+    @Test fun removingAnItemNeedsASecondDeliberateClick() {
+        val html = items(home(items = listOf(ladder)))
+        assertTrue(html.indexOf("<details") < html.indexOf(ACTION_RETIRE_ITEM))
+        assertTrue("cannot be put back" in html)
+    }
+
+    @Test fun theAddItemPageHasNameKindAndDetailsAndAHiddenButton() {
+        val html = render(open().copy(screen = Screen.AddItem))
+        assertTrue("""id="$FORM_ITEM_ADD"""" in html)
+        assertTrue("""for="$FIELD_NAME"""" in html && """for="$FIELD_KIND"""" in html && """for="$FIELD_DETAILS"""" in html)
+        for (kind in ItemClass.entries) assertTrue("""value="${kind.name}"""" in html, kind.name)
+        assertTrue("""maxlength="80"""" in html && """maxlength="500"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertTrue("""href="${Screen.Items.fragment}"""" in html)
+        assertFalse(FORM_ITEM_EDIT in html)
+    }
+
+    @Test fun theChangeItemPageIsPrefilledAndItsButtonShowsAtOnce() {
+        val html = render(open(home(items = listOf(ladder))).copy(screen = Screen.EditItem, editing = ladder.item))
+        assertTrue("""id="$FORM_ITEM_EDIT"""" in html)
+        assertTrue("""value="Ladder"""" in html)
+        assertTrue(">Garage at the back</textarea>" in html)
+        assertTrue(Regex("""<option[^>]*value="EVERYDAY"[^>]*selected""").containsMatchIn(html))
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
+        assertFalse("hidden" in button)
+        assertFalse(FORM_ITEM_ADD in html)
+    }
+
+    @Test fun theNavigationBarListsItemsButNotItsSubPages() {
+        val html = render(open().copy(screen = Screen.Items))
+        assertTrue("""href="#/items"""" in html)
+        assertFalse("""href="#/items/add"""" in html.substringBefore("</nav>"))
+        assertFalse("""href="#/items/edit"""" in html)
     }
 
     @Test fun statusLineIsALiveRegion() {
