@@ -5,6 +5,7 @@ import circles.server.support.TestServer
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
@@ -83,5 +84,26 @@ class WebAppTest {
         val empty = java.net.URLClassLoader(emptyArray(), null)
         assertTrue(!webAppPresent(empty))
         assertTrue(webAppPresent())
+    }
+
+    @Test
+    fun largeTextIsSentGzippedOnlyToThoseWhoAskAndComesBackIdentical() = webTest {
+        val original = javaClass.classLoader.getResourceAsStream("web/big.js")!!.readBytes()
+        val plain = get("/big.js")
+        assertEquals(null, plain.headers[HttpHeaders.ContentEncoding], "no Accept-Encoding, no compression")
+        assertEquals(original.size, plain.readRawBytes().size)
+        val zipped = get("/big.js") { header(HttpHeaders.AcceptEncoding, "gzip") }
+        assertEquals("gzip", zipped.headers[HttpHeaders.ContentEncoding])
+        val bytes = zipped.readRawBytes()
+        assertTrue(bytes.size < original.size / 2, "${bytes.size} of ${original.size}")
+        assertTrue(java.util.zip.GZIPInputStream(bytes.inputStream()).readBytes().contentEquals(original))
+    }
+
+    @Test
+    fun smallRepliesAndTheApiProblemAnswersAreLeftAlone() = webTest {
+        val small = get("/circles.js") { header(HttpHeaders.AcceptEncoding, "gzip") }
+        assertEquals(null, small.headers[HttpHeaders.ContentEncoding], "too small to be worth it")
+        val health = get("/healthz") { header(HttpHeaders.AcceptEncoding, "gzip") }
+        assertEquals(HttpStatusCode.OK, health.status)
     }
 }

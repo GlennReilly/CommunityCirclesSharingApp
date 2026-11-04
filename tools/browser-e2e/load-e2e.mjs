@@ -1,4 +1,5 @@
 // How long a first visit takes on a slow phone and network (the point of the 250 KB budget, spec section 6).
+// Usage: node load-e2e.mjs   (DIRECT=1 skips the stand-in proxy and talks to the jar itself, which compresses by itself since ADR 0058)
 // Usage: node load-e2e.mjs   (needs the shadow jar and Chrome). Prints seconds until the welcome page is on screen, with the
 // cache cold, for two DevTools network profiles and a 4x slower CPU. No pass/fail: it informs the budget decision.
 import { createServer, request } from 'node:http';
@@ -39,7 +40,7 @@ try {
     await chrome.send('Page.navigate', { url: 'about:blank' });
     await sleep(500);
     const started = Date.now();
-    await chrome.send('Page.navigate', { url: 'http://127.0.0.1:18084/' });
+    await chrome.send('Page.navigate', { url: process.env.DIRECT === '1' ? 'http://127.0.0.1:18083/' : 'http://127.0.0.1:18084/' });
     let ms = null;
     while (Date.now() - started < 120000) {
       if (await chrome.evaluate(`(document.querySelector('main h1') || {}).textContent === 'Welcome to Circles'`) === true) { ms = Date.now() - started; break; }

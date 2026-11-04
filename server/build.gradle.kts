@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.status.pages)
+    implementation(libs.ktor.server.compression)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.bouncycastle)
     implementation(libs.sqlite.jdbc)

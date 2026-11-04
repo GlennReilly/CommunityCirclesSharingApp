@@ -54,6 +54,10 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
+import io.ktor.server.plugins.compression.Compression
+import io.ktor.server.plugins.compression.excludeContentType
+import io.ktor.server.plugins.compression.gzip
+import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.plugins.origin
 import io.ktor.server.response.header
@@ -105,6 +109,13 @@ class Services(
 
 fun Application.module(services: Services) {
     install(RequestLogging) { log = services.log }
+    // Text (the page, scripts, JSON) is sent gzipped to browsers that accept it, so a bare jar needs no proxy for that. The live
+    // event stream must flush every message and blobs are already encrypted (random-looking), so neither is touched.
+    install(Compression) {
+        gzip { priority = 1.0 }
+        excludeContentType(ContentType.Text.EventStream, ContentType.Application.OctetStream)
+        minimumSize(COMPRESSION_MIN_BYTES)
+    }
     install(StatusPages) {
         exception<CancellationException> { _, cause -> throw cause }
         // Ktor raises this for requests it cannot route safely, such as a path with `..` reaching the static client.
@@ -383,3 +394,6 @@ private suspend fun ApplicationCall.refusedByLimit(services: Services, bucket: B
             true
         }
     }
+
+/** Replies smaller than this are not worth compressing. */
+private const val COMPRESSION_MIN_BYTES = 1024L

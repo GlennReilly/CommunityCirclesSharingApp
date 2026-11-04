@@ -9,3 +9,5 @@ Measured 2026-11-04 at 242.8 KB gzipped (by `gz-by-source.mjs`, now grouped by o
 First-visit time (2026-11-04, `node tools/browser-e2e/load-e2e.mjs`, cold cache, service worker bypassed, gzip like Caddy's `encode`): 0.4 s without throttling; 2.0 s on "Fast 3G" (1.6 Mbit/s, 150 ms) with a 4x slower CPU; 6.2 s on "Slow 3G" (400 kbit/s, 400 ms) with a 4x slower CPU; 238 KB sent for 817 KB. On slow 3G each extra 50 KB costs about one second, on first visit and on each release (one file, so no partial updates). The jar alone does not compress responses; the install guides put Caddy in front (needed anyway for HTTPS), which does.
 
 2026-11-04, after ADR 0054 (hand-written wire JSON): 225.5 KB gzipped, from 247.1 KB; first visit 1.9 s on fast 3G and 5.8 s on slow 3G, 221 KB sent for 763 KB.
+
+2026-11-04, ADR 0058: the jar now gzips by itself; `DIRECT=1 node tools/browser-e2e/load-e2e.mjs` (no stand-in proxy) shows 226 KB sent for 787 KB, 2.0 s on fast 3G and 6.0 s on slow 3G.
