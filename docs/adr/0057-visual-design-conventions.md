@@ -25,3 +25,7 @@ The first screens were styled only enough to pass the accessibility checks. The 
 ## Addition (2026-11-04): working buttons
 
 Every click and submit goes through `busyLaunch`: the button gets `aria-busy="true"` while the work runs, which shows a spinner after its text, makes it ignore further clicks, and tells screen readers it is busy. With reduced motion the spinner is a static "…". It matters most for unlocking (Argon2 takes a second or more) and syncing.
+
+## Addition (2026-11-04): icon-only tool buttons
+
+The header's Sync and Lock buttons are square icon buttons with the standard glyphs (circular arrows for sync, a padlock for lock), a spoken name (`aria-label`) and a tooltip (`title`). While syncing the arrows turn. Words are kept for buttons whose meaning is not a universal icon (Add item, Report it back, Let in).

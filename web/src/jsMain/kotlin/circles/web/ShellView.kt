@@ -231,14 +231,8 @@ fun FlowContent.shell(state: AppState) {
             +describe(state.sync)
         }
         if (state.signedIn) {
-            button(type = ButtonType.button) {
-                attributes[ATTR_ACTION] = ACTION_SYNC
-                +"Sync now"
-            }
-            button(type = ButtonType.button) {
-                attributes[ATTR_ACTION] = ACTION_LOCK
-                +"Lock now"
-            }
+            toolButton(ACTION_SYNC, "Sync now", "icon-sync")
+            toolButton(ACTION_LOCK, "Lock now", "icon-lock")
         }
         if (state.updateAvailable) {
             div {
@@ -322,6 +316,20 @@ private fun FlowContent.formSubmit(text: String, ready: Boolean = false) {
         id = SUBMIT_ID
         if (!ready) attributes["hidden"] = "hidden"
         +text
+    }
+}
+
+/** A square icon button for the header (ADR 0057): the standard glyph, a spoken name and a tooltip, no visible words. */
+private fun FlowContent.toolButton(action: String, name: String, iconClass: String) {
+    button(type = ButtonType.button) {
+        classes = setOf("tool-button")
+        attributes[ATTR_ACTION] = action
+        attributes["aria-label"] = name
+        attributes["title"] = name
+        span {
+            classes = setOf("icon", iconClass)
+            attributes["aria-hidden"] = "true"
+        }
     }
 }
 

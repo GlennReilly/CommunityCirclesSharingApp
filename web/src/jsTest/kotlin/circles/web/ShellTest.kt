@@ -1193,4 +1193,14 @@ class ShellViewTest {
         assertFalse("You type it each time" in newcomer(Screen.StartCircle))
         assertTrue("password manager" in newcomer(Screen.StartCircle))
     }
+
+    @Test fun theHeaderHasIconOnlySyncAndLockButtonsWithSpokenNames() {
+        val html = render(open())
+        for ((action, name) in listOf(ACTION_SYNC to "Sync now", ACTION_LOCK to "Lock now")) {
+            assertTrue("""$ATTR_ACTION="$action"""" in html && """aria-label="$name"""" in html && """title="$name"""" in html)
+            assertFalse(">$name<" in html, "an icon, not words")
+        }
+        assertTrue("icon-sync" in html && "icon-lock" in html)
+        assertFalse("tool-button" in render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity)), "nothing to sync or lock before signing in")
+    }
 }
