@@ -7,6 +7,7 @@ import circles.media.ImagePolicy.InputCheck
 import circles.media.ImagePolicy.Size
 import circles.media.ImagePolicy.Step
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -271,5 +272,44 @@ class ImagePolicyTest {
             val scan = ImagePolicy.scanMetadata(prefixed)
             if (scan.isClean) assertTrue(scan.format != ImageFormat.UNKNOWN && scan.wellFormed && scan.found.isEmpty())
         }
+    }
+
+    // ---- removing the colour profile ----
+
+    @Test
+    fun theColourProfileIsRemovedFromAWebpAndNothingElseChanges() {
+        val vp8x = ByteArray(10).also { it[0] = (0x20 + 0x10).toByte() } // ICC flag plus another flag (alpha)
+        val picture = ByteArray(33) { it.toByte() }
+        val withIcc = riff("VP8X" to vp8x, "ICCP" to ByteArray(13) { 7 }, "VP8 " to picture)
+        assertEquals(listOf("ICC"), ImagePolicy.scanMetadata(withIcc).found)
+        val stripped = ImagePolicy.stripIcc(withIcc)
+        assertTrue(ImagePolicy.scanMetadata(stripped).isClean)
+        val expectedVp8x = ByteArray(10).also { it[0] = 0x10.toByte() }
+        assertContentEquals(riff("VP8X" to expectedVp8x, "VP8 " to picture), stripped, "same chunks, the flag cleared, the size field right")
+        // Nothing to remove: the same bytes. A simple file without the extended header stays as it is.
+        val plain = riff("VP8 " to picture)
+        assertContentEquals(plain, ImagePolicy.stripIcc(plain))
+    }
+
+    @Test
+    fun theColourProfileIsRemovedFromAJpegAndTheRestIsKept() {
+        val icc = segment(0xE2, "ICC_PROFILE\u0000\u0001\u0001".encodeToByteArray() + ByteArray(40))
+        val other = segment(0xE2, "MPF\u0000".encodeToByteArray() + ByteArray(8))
+        val withIcc = jpeg(jfif, icc, segment(0xDB, ByteArray(64)))
+        assertEquals(listOf("ICC"), ImagePolicy.scanMetadata(withIcc).found)
+        assertContentEquals(jpeg(jfif, segment(0xDB, ByteArray(64))), ImagePolicy.stripIcc(withIcc))
+        assertEquals(listOf("OTHER"), ImagePolicy.scanMetadata(ImagePolicy.stripIcc(jpeg(jfif, other))).found, "an unknown segment is not ours to remove silently: the scan still refuses it")
+        val clean = jpeg(jfif, segment(0xDB, ByteArray(64)))
+        assertContentEquals(clean, ImagePolicy.stripIcc(clean))
+    }
+
+    @Test
+    fun stripIccLeavesBrokenAndUnknownDataAlone() {
+        val notImage = byteArrayOf(1, 2, 3, 4, 5)
+        assertContentEquals(notImage, ImagePolicy.stripIcc(notImage))
+        val truncated = riff("VP8X" to ByteArray(10), "ICCP" to ByteArray(13)).copyOf(30)
+        assertContentEquals(truncated, ImagePolicy.stripIcc(truncated))
+        val brokenJpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE2.toByte(), 0, 0)
+        assertContentEquals(brokenJpeg, ImagePolicy.stripIcc(brokenJpeg))
     }
 }

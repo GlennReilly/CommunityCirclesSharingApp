@@ -4,6 +4,9 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MIN_RECOVERY_THRESHOLD
 import circles.app.NoteStatus
+import circles.event.ItemPhoto
+import circles.event.MAX_PHOTOS_PER_ITEM
+import circles.event.MAX_PHOTO_ALT_CHARS
 import circles.app.SkillSummary
 import circles.event.MAX_SKILL_DETAILS_CHARS
 import circles.event.MAX_SKILL_NAME_CHARS
@@ -54,6 +57,7 @@ import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
+import kotlinx.html.img
 import kotlinx.html.span
 import kotlinx.html.fieldSet
 import kotlinx.html.legend
@@ -129,6 +133,13 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val FORM_PHOTO_ADD = "photo-add-form"
+const val FIELD_PHOTO_FILE = "photo-file"
+const val FIELD_PHOTO_ALT = "photo-alt"
+const val ACTION_REMOVE_PHOTO = "remove-photo"
+const val ATTR_PHOTO = "data-photo"
+const val ATTR_HASH = "data-hash"
+const val ATTR_EPOCH_OF = "data-photo-epoch"
 const val ACTION_TOGGLE_SECRET = "toggle-secret"
 const val ATTR_TARGET = "data-target"
 const val USERNAME_FOR_PASSWORD_MANAGERS = "Circles on this device"
@@ -316,6 +327,15 @@ private fun FlowContent.formSubmit(text: String, ready: Boolean = false) {
         id = SUBMIT_ID
         if (!ready) attributes["hidden"] = "hidden"
         +text
+    }
+}
+
+/** An image that the page script fills in after fetching and opening it (ADR 0060); until then it shows its description. */
+private fun FlowContent.photoImage(photo: ItemPhoto, thumbnail: Boolean) {
+    img(alt = photo.alt) {
+        classes = setOf("photo", if (thumbnail) "thumb" else "full")
+        attributes[ATTR_HASH] = if (thumbnail) photo.thumb else photo.photo
+        attributes[ATTR_EPOCH_OF] = photo.epoch.toString()
     }
 }
 
@@ -678,6 +698,16 @@ private fun FlowContent.items(home: HomeData) {
         for (item in home.items) {
             li {
                 h2 { +item.name }
+                if (item.photos.isNotEmpty()) {
+                    div {
+                        classes = setOf("photos")
+                        for (photo in item.photos) photoImage(photo, thumbnail = true)
+                    }
+                    details {
+                        summary { +"Larger photos" }
+                        for (photo in item.photos) photoImage(photo, thumbnail = false)
+                    }
+                }
                 p { +itemClassLabel(item.itemClass).substringBefore(":") }
                 p { +(if (item.ownedByMe) "Yours" else "Shared by member ${item.owner.v.take(MEMBER_SHORT_CHARS)}") }
                 item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
@@ -789,6 +819,7 @@ private fun FlowContent.itemForm(existing: ItemSummary?) {
         }
         formSubmit(if (existing == null) "Add item" else "Save changes", ready = existing != null)
     }
+    if (existing != null) photosSection(existing)
     p {
         a(href = Screen.Items.fragment) { +"Back to items" }
     }
@@ -1119,7 +1150,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
     }
     section {
         h2 { +"Export the circle" }
-        p { +"Download a copy of the circle's log as it is on this device, so a new host can be started from it if the old one is lost. It holds only scrambled text and public information: nobody can read the circle's words from it without a member's keys. Keep it private all the same." }
+        p { +"Download a copy of the circle's log as it is on this device, so a new host can be started from it if the old one is lost. It holds only scrambled text and public information: nobody can read the circle's words from it without a member's keys. Photos are not included. Keep it private all the same." }
         button(type = ButtonType.button) {
             attributes[ATTR_ACTION] = ACTION_EXPORT
             +"Download an export"
@@ -2044,4 +2075,55 @@ private fun FlowContent.skillForm(existing: SkillSummary?) {
         formSubmit(if (existing == null) "Offer it" else "Save changes", ready = existing != null)
     }
     p { a(href = Screen.Skills.fragment) { +"Back to skills" } }
+}
+
+/** Photos of an item (ADR 0060): the ones it has, each removable, and a form to add one while there is room. */
+private fun FlowContent.photosSection(item: ItemSummary) {
+    section {
+        h2 { +"Photos" }
+        if (item.photos.isEmpty()) p { +"No photos yet. A photo helps people find the right one." }
+        for (photo in item.photos) {
+            div {
+                photoImage(photo, thumbnail = true)
+                p { +photo.alt }
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_REMOVE_PHOTO
+                    attributes[ATTR_ITEM] = item.item.v
+                    attributes[ATTR_PHOTO] = photo.photo
+                    +"Remove this photo"
+                }
+            }
+        }
+        if (item.photos.size >= MAX_PHOTOS_PER_ITEM) {
+            p { +"An item can have $MAX_PHOTOS_PER_ITEM photos. Remove one to add another." }
+        } else {
+            form {
+                id = FORM_PHOTO_ADD
+                label {
+                    attributes["for"] = FIELD_PHOTO_FILE
+                    +"Photo: "
+                }
+                input(type = InputType.file, name = FIELD_PHOTO_FILE) {
+                    id = FIELD_PHOTO_FILE
+                    attributes["accept"] = "image/*"
+                    required = true
+                    attributes[ATTR_MIN] = "1"
+                }
+                label {
+                    attributes["for"] = FIELD_PHOTO_ALT
+                    +"Description (optional): "
+                }
+                input(type = InputType.text, name = FIELD_PHOTO_ALT) {
+                    id = FIELD_PHOTO_ALT
+                    attributes["maxlength"] = MAX_PHOTO_ALT_CHARS.toString()
+                    attributes["aria-describedby"] = "photo-alt-help"
+                }
+                p {
+                    id = "photo-alt-help"
+                    +"Read out to people who cannot see the photo. Left blank, it is the item's name. The photo is made smaller and stripped of its location before it leaves this device; members of the circle can see it."
+                }
+                formSubmit("Add the photo")
+            }
+        }
+    }
 }

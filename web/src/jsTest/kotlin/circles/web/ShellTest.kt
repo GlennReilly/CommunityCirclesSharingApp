@@ -1241,4 +1241,36 @@ class ShellViewTest {
         assertTrue("1 loan is due back today or past its day" in render(open(home().copy(loans = listOf(active), today = 20_763))))
         assertFalse("due back today" in render(open(home().copy(loans = listOf(active), today = 20_761))))
     }
+
+    // ---- item photos (ADR 0060) ----
+
+    private fun photoOf(n: Int, alt: String = "Front view") = circles.event.ItemPhoto(n.toString(16).padStart(64, 'a'), n.toString(16).padStart(64, 'b'), 1, alt)
+
+    @Test fun theItemListShowsThumbnailsWithDescriptionsAndLargerPhotosBehindADisclosure() {
+        val item = ItemSummary(ladder.item, "Ladder", ItemClass.EVERYDAY, me, true, null, photos = listOf(photoOf(1), photoOf(2, "Hinge")))
+        val html = render(open(home(items = listOf(item))).copy(screen = Screen.Items))
+        assertEquals(2, Regex("""class="photo thumb"""").findAll(html).count())
+        assertTrue("""alt="Front view"""" in html && """alt="Hinge"""" in html)
+        assertTrue("""$ATTR_HASH="${photoOf(1).thumb}"""" in html && """$ATTR_HASH="${photoOf(1).photo}"""" in html)
+        assertTrue("<summary>Larger photos</summary>" in html)
+        assertFalse("src=" in html.substringAfter("class=\"photos\""), "the page script fills the picture in after fetching it")
+        assertFalse("class=\"photos\"" in render(open(home(items = listOf(item.copy(photos = emptyList())))).copy(screen = Screen.Items)))
+    }
+
+    @Test fun theChangePageListsPhotosWithRemoveAndOffersTheAddFormOnlyWhileThereIsRoom() {
+        fun page(count: Int) = render(
+            open(home(items = listOf(ItemSummary(ladder.item, "Ladder", ItemClass.EVERYDAY, me, true, null, photos = List(count) { photoOf(it + 1) })))).copy(screen = Screen.EditItem, editing = ladder.item),
+        )
+        val none = page(0)
+        assertTrue("No photos yet." in none && """id="$FORM_PHOTO_ADD"""" in none && "Description (optional): " in none)
+        assertTrue("""type="file"""" in none && """accept="image/*"""" in none)
+        assertTrue("Left blank, it is the item's name." in none)
+        val two = page(2)
+        assertEquals(2, Regex("""$ATTR_ACTION="$ACTION_REMOVE_PHOTO"""").findAll(two).count())
+        assertTrue("""id="$FORM_PHOTO_ADD"""" in two)
+        val full = page(3)
+        assertFalse(FORM_PHOTO_ADD in full)
+        assertTrue("An item can have 3 photos. Remove one to add another." in full)
+        assertFalse(FORM_PHOTO_ADD in render(open(home()).copy(screen = Screen.AddItem)), "photos are added once the item exists")
+    }
 }

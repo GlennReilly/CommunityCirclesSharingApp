@@ -960,4 +960,28 @@ abstract class MarketContract {
         w.log += w.bea.skillRetire(w.circle, DAY + 1, ids.first())
         assertEquals(emptyList(), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY + 1, newSkillId(w.crypto), "now fits", "", setOf(OpenTo.GIFT, OpenTo.SWAP, OpenTo.THANKS)))))
     }
+
+    // ---- item photos (ADR 0060) ----
+
+    private fun photo(n: Int, alt: String = "Front view") = ItemPhoto(n.toString(16).padStart(64, 'a'), n.toString(16).padStart(64, 'b'), FIRST_EPOCH, alt)
+
+    @Test
+    fun anItemCarriesUpToThreePhotosAndALaterUpsertReplacesThem() = runTest {
+        val w = world()
+        val owner = w.founder.identity.registration
+        fun upsert(photos: List<ItemPhoto>, day: Int = DAY) = w.founder.itemUpsert(w.circle, day, w.item, "Extension ladder", ItemClass.ESSENTIAL, w.keyId, w.itemKey, listOf(owner), null, photos)
+        w.log += upsert(listOf(photo(1), photo(2)))
+        var view = w.foldAs(w.bea)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(listOf(photo(1), photo(2)), view.market.items.getValue(w.item).photos)
+        w.log += upsert(listOf(photo(3)), DAY + 1)
+        assertEquals(listOf(photo(3)), w.foldAs(w.bea).market.items.getValue(w.item).photos, "the newest list replaces the old one")
+        w.log += upsert(emptyList(), DAY + 2)
+        assertEquals(emptyList(), w.foldAs(w.bea).market.items.getValue(w.item).photos)
+        val tooMany = upsert(listOf(photo(1), photo(2), photo(3), photo(4)), DAY + 3)
+        assertTrue(w.reasons(listOf(tooMany)).single().startsWith("photos must list at most 3"))
+        for (bad in listOf(photo(1, alt = ""), photo(1, alt = "x".repeat(141)), photo(1).copy(photo = "XYZ"), photo(1).copy(thumb = "a".repeat(63)), photo(1).copy(epoch = 0))) {
+            assertTrue(w.reasons(listOf(upsert(listOf(bad), DAY + 3))).single().startsWith("photos must list"), "$bad")
+        }
+    }
 }

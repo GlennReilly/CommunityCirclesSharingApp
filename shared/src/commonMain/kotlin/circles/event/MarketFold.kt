@@ -23,6 +23,8 @@ data class ItemState(
     val retired: Boolean,
     val keyWraps: Map<String, Map<DeviceId, ByteString>>,
     val sealedDetails: Map<String, ByteString>,
+    /** The item's photos as of its latest `item.upsert` (ADR 0060). */
+    val photos: List<ItemPhoto> = emptyList(),
 )
 
 data class LoanState(
@@ -248,7 +250,7 @@ internal class MarketFold(
             if (existing.retired) return "item is retired"
         }
         val wraps = (existing?.keyWraps.orEmpty()) + (v.detailKeyId to (existing?.keyWraps?.get(v.detailKeyId).orEmpty() + v.keyWraps.associate { it.device to it.wrapped }))
-        items[v.item] = ItemState(v.item, author, v.name, v.itemClass, v.minTier, v.detailKeyId, false, wraps, existing?.sealedDetails.orEmpty())
+        items[v.item] = ItemState(v.item, author, v.name, v.itemClass, v.minTier, v.detailKeyId, false, wraps, existing?.sealedDetails.orEmpty(), v.photos)
         return null
     }
 

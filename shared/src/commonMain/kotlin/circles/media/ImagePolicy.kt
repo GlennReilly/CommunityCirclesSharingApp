@@ -196,6 +196,72 @@ object ImagePolicy {
         return MetadataScan(ImageFormat.WEBP, found.toList(), wellFormed = true)
     }
 
+    // ---- removing the colour profile ----
+
+    private const val VP8X_ICC_FLAG = 0x20
+    private const val RIFF_SIZE_AT = 4
+
+    /**
+     * Removes an embedded colour profile (ICC) from a JPEG or WebP, as ADR 0028 asks: a browser's encoder adds an sRGB
+     * profile, which says nothing about the person but is still a metadata container, and the scan refuses any. Everything
+     * else is copied byte for byte. Returns [bytes] unchanged if it is not a well-formed JPEG or WebP.
+     */
+    fun stripIcc(bytes: ByteArray): ByteArray =
+        when {
+            bytes.size >= 4 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> stripJpegIcc(bytes)
+            bytes.size >= RIFF_HEADER_BYTES && bytes.startsWith("RIFF") && bytes.matchesAt(8, "WEBP") -> stripWebpIcc(bytes)
+            else -> bytes
+        }
+
+    private fun stripJpegIcc(bytes: ByteArray): ByteArray {
+        val out = ArrayList<Byte>(bytes.size)
+        out += bytes[0]
+        out += bytes[1]
+        var at = 2
+        while (at + 3 < bytes.size) {
+            if ((bytes[at].toInt() and BYTE_MASK) != JPEG_MARKER_PREFIX) return bytes
+            val marker = bytes[at + 1].toInt() and BYTE_MASK
+            if (marker == JPEG_MARKER_PREFIX) return bytes
+            if (marker == JPEG_SOS || marker == JPEG_EOI) {
+                for (i in at until bytes.size) out += bytes[i] // the picture data and the end, untouched
+                return out.toByteArray()
+            }
+            val length = ((bytes[at + 2].toInt() and BYTE_MASK) shl BITS_PER_BYTE) or (bytes[at + 3].toInt() and BYTE_MASK)
+            val end = at + 2 + length
+            if (length < 2 || end > bytes.size) return bytes
+            if (!(marker == JPEG_APP2 && bytes.matchesAt(at + 4, "ICC_PROFILE"))) for (i in at until end) out += bytes[i]
+            at = end
+        }
+        return bytes
+    }
+
+    private fun stripWebpIcc(bytes: ByteArray): ByteArray {
+        // The declared size must match the data we hold, or the file is cut short or padded and is left alone.
+        val declared = (bytes[RIFF_SIZE_AT].toLong() and BYTE_MASK.toLong()) or ((bytes[RIFF_SIZE_AT + 1].toLong() and BYTE_MASK.toLong()) shl 8) or
+            ((bytes[RIFF_SIZE_AT + 2].toLong() and BYTE_MASK.toLong()) shl 16) or ((bytes[RIFF_SIZE_AT + 3].toLong() and BYTE_MASK.toLong()) shl 24)
+        if (declared != (bytes.size - RIFF_CHUNK_HEADER_BYTES).toLong()) return bytes
+        val out = ArrayList<Byte>(bytes.size)
+        for (i in 0 until RIFF_HEADER_BYTES) out += bytes[i]
+        var at = RIFF_HEADER_BYTES
+        while (at < bytes.size) {
+            if (at + RIFF_CHUNK_HEADER_BYTES > bytes.size) return bytes
+            val size = (bytes[at + 4].toLong() and BYTE_MASK.toLong()) or ((bytes[at + 5].toLong() and BYTE_MASK.toLong()) shl 8) or
+                ((bytes[at + 6].toLong() and BYTE_MASK.toLong()) shl 16) or ((bytes[at + 7].toLong() and BYTE_MASK.toLong()) shl 24)
+            val next = at + RIFF_CHUNK_HEADER_BYTES + size + (size and 1)
+            if (next > bytes.size) return bytes
+            if (!bytes.matchesAt(at, "ICCP")) {
+                for (i in at until next.toInt()) out += bytes[i]
+                // The extended header lists what the file holds; the colour profile flag must go with the chunk.
+                if (bytes.matchesAt(at, "VP8X") && size >= 1) out[out.size - (next.toInt() - at) + RIFF_CHUNK_HEADER_BYTES] = (bytes[at + RIFF_CHUNK_HEADER_BYTES].toInt() and VP8X_ICC_FLAG.inv()).toByte()
+            }
+            at = next.toInt()
+        }
+        val result = out.toByteArray()
+        val total = result.size - RIFF_CHUNK_HEADER_BYTES
+        for (i in 0 until 4) result[RIFF_SIZE_AT + i] = (total shr (BITS_PER_BYTE * i)).toByte()
+        return result
+    }
+
     private fun ByteArray.matchesAt(at: Int, text: String): Boolean {
         if (at < 0 || at + text.length > size) return false
         return text.indices.all { this[at + it] == text[it].code.toByte() }

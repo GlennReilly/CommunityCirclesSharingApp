@@ -30,6 +30,13 @@ enum class ReturnOutcome { OK, LATE, DAMAGED_REPORTED, LOST_REPORTED }
 /** An item key sealed to one device (ADR 0025). */
 data class DeviceKeyWrap(val device: DeviceId, val wrapped: ByteString)
 
+/** A photo of an item (ADR 0060): two sealed blobs on the server, opened with the circle key of [epoch], and a description. */
+data class ItemPhoto(val photo: String, val thumb: String, val epoch: Int, val alt: String)
+
+const val MAX_PHOTOS_PER_ITEM = 3
+const val MAX_PHOTO_ALT_CHARS = 140
+private const val BLOB_HASH_CHARS = 64
+
 data class ItemUpsert(
     val item: ItemId,
     val name: String,
@@ -37,6 +44,7 @@ data class ItemUpsert(
     val minTier: Tier?,
     val detailKeyId: String,
     val keyWraps: List<DeviceKeyWrap>,
+    val photos: List<ItemPhoto> = emptyList(),
 )
 
 data class ItemRetire(val item: ItemId)
@@ -138,6 +146,11 @@ private const val K_OUTCOME = "outcome"
 private const val K_CLAIM = "claim"
 private const val K_VOUCHEE = "vouchee"
 private const val K_EXPIRES = "expiresDay"
+private const val K_PHOTO = "photo"
+private const val K_PHOTOS = "photos"
+private const val K_THUMB = "thumb"
+private const val K_EPOCH = "epoch"
+private const val K_ALT = "alt"
 private const val K_NEIGHBOUR = "neighbourTenths"
 private const val K_TRUSTED = "trustedTenths"
 private const val K_STEWARD_TIER = "stewardTenths"
@@ -172,6 +185,9 @@ object MarketPayloads {
             v.minTier?.let { put(K_MIN_TIER, CborText(it.name)) }
             put(K_DETAIL_KEY, CborText(v.detailKeyId))
             put(K_KEY_WRAPS, wraps(v.keyWraps))
+            if (v.photos.isNotEmpty()) {
+                put(K_PHOTOS, CborArray(v.photos.map { CborMap.of(K_PHOTO to CborText(it.photo), K_THUMB to CborText(it.thumb), K_EPOCH to CborInt(it.epoch.toLong()), K_ALT to CborText(it.alt)) }))
+            }
         },
     )
 
@@ -277,7 +293,7 @@ object MarketPayloads {
     fun loanReturn(v: LoanReturn): CborMap = CborMap.of(K_LOAN to CborText(v.loan.v), K_OUTCOME to CborText(v.outcome.name))
 
     fun parseItemUpsert(map: CborMap): Parsed<ItemUpsert> {
-        keys(map, required = setOf(K_ITEM, K_NAME, K_CLASS, K_DETAIL_KEY, K_KEY_WRAPS), optional = setOf(K_MIN_TIER))?.let { return Parsed.Invalid(it) }
+        keys(map, required = setOf(K_ITEM, K_NAME, K_CLASS, K_DETAIL_KEY, K_KEY_WRAPS), optional = setOf(K_MIN_TIER, K_PHOTOS))?.let { return Parsed.Invalid(it) }
         val item = itemId(map) ?: return Parsed.Invalid("item must be 32 lowercase hex characters")
         val name = text(map, K_NAME, MAX_ITEM_NAME_CHARS)?.takeIf { it.isNotBlank() } ?: return Parsed.Invalid("name must be 1 to $MAX_ITEM_NAME_CHARS characters")
         val itemClass = enumOf<ItemClass>(map, K_CLASS) ?: return Parsed.Invalid("class is not a known item class")
@@ -285,7 +301,8 @@ object MarketPayloads {
         if (minTier != null && minTier.rank < itemClass.minTier.rank) return Parsed.Invalid("minTier may not be below the class default")
         val detailKeyId = randomId(map, K_DETAIL_KEY) ?: return Parsed.Invalid("detailKeyId must be 32 lowercase hex characters")
         val keyWraps = readWraps(map) ?: return Parsed.Invalid("keyWraps must list 1 to $MAX_KEY_WRAPS distinct devices with sealed keys")
-        return Parsed.Ok(ItemUpsert(ItemId(item), name, itemClass, minTier, detailKeyId, keyWraps))
+        val photos = readPhotos(map) ?: return Parsed.Invalid("photos must list at most $MAX_PHOTOS_PER_ITEM entries with two blob hashes, an epoch and a description of 1 to $MAX_PHOTO_ALT_CHARS characters")
+        return Parsed.Ok(ItemUpsert(ItemId(item), name, itemClass, minTier, detailKeyId, keyWraps, photos))
     }
 
     fun parseItemRetire(map: CborMap): Parsed<ItemRetire> {
@@ -392,6 +409,20 @@ object MarketPayloads {
         val loan = randomId(map, K_LOAN) ?: return Parsed.Invalid("loan must be 32 lowercase hex characters")
         val outcome = enumOf<ReturnOutcome>(map, K_OUTCOME) ?: return Parsed.Invalid("outcome is not a known outcome")
         return Parsed.Ok(LoanReturn(LoanId(loan), outcome))
+    }
+
+    private fun readPhotos(map: CborMap): List<ItemPhoto>? {
+        val raw = map[K_PHOTOS] ?: return emptyList()
+        val items = (raw as? CborArray)?.items?.takeIf { it.size in 1..MAX_PHOTOS_PER_ITEM } ?: return null
+        return items.map { entry ->
+            val m = entry as? CborMap ?: return null
+            if (m.entries.keys != setOf(K_PHOTO, K_THUMB, K_EPOCH, K_ALT)) return null
+            val photo = (m[K_PHOTO] as? CborText)?.value?.takeIf { isLowerHex(it, BLOB_HASH_CHARS) } ?: return null
+            val thumb = (m[K_THUMB] as? CborText)?.value?.takeIf { isLowerHex(it, BLOB_HASH_CHARS) } ?: return null
+            val epoch = (m[K_EPOCH] as? CborInt)?.value?.takeIf { it in 1..MAX_DAY } ?: return null
+            val alt = (m[K_ALT] as? CborText)?.value?.takeIf { it.isNotBlank() && it.length <= MAX_PHOTO_ALT_CHARS } ?: return null
+            ItemPhoto(photo, thumb, epoch.toInt(), alt)
+        }
     }
 
     private fun wraps(list: List<DeviceKeyWrap>): CborValue =

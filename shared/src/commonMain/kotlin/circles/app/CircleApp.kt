@@ -91,6 +91,8 @@ data class ItemSummary(
     val owner: MemberId,
     val ownedByMe: Boolean,
     val description: String?,
+    /** The item's photos, thumbnails first by blob hash (ADR 0060). */
+    val photos: List<circles.event.ItemPhoto> = emptyList(),
     /** The lowest tier the owner allows, if they raised it above the class default. */
     val ownerMinTier: Tier? = null,
     /** For items that are not mine: may I ask to borrow it? */
@@ -256,6 +258,26 @@ data class SkillSummary(
     val owner: MemberId,
     val ownedByMe: Boolean,
 )
+
+sealed interface PhotoResult {
+    data object Saved : PhotoResult
+
+    /** No connection to upload with; nothing was changed. */
+    data object Offline : PhotoResult
+
+    /** The circle's photo storage is full. */
+    data object Full : PhotoResult
+
+    /** The item already has the most photos it may have. */
+    data object TooMany : PhotoResult
+
+    /** The prepared photo does not fit in one blob (the page prepares it to fit, so this is a safeguard). */
+    data object TooBig : PhotoResult
+
+    data class Refused(val reason: String) : PhotoResult
+
+    data object NotAllowed : PhotoResult
+}
 
 sealed interface SkillResult {
     data class Saved(val skill: circles.event.SkillId) : SkillResult
@@ -427,6 +449,7 @@ private const val EXPORT_NAME_ID_CHARS = 8
 
 /** The smallest number of stewards that must come together (a single steward needs no sharing). */
 private const val MAX_NOTES_SHOWN = 8
+private const val PHOTO_CACHE_ENTRIES = 40
 
 const val MIN_RECOVERY_THRESHOLD = 2
 
@@ -541,6 +564,8 @@ class CircleApp(
     private val random: () -> Double = { kotlin.random.Random.nextDouble() },
     /** The 2048-word list for recovery codes, loaded when needed (the page fetches it as a file; ADR 0047). */
     private val wordlist: suspend () -> List<String> = { emptyList() },
+    /** Binary uploads and downloads for item photos (ADR 0060); without it photos are not offered. */
+    private val blobTransport: circles.sync.BlobTransport? = null,
 ) {
     private var pendingRecovery: Triple<circles.encoding.ByteString, List<Int>, List<String>>? = null
     private val mutableModel = MutableStateFlow<AppModel>(AppModel.Loading)
@@ -551,7 +576,7 @@ class CircleApp(
 
     private var session: Session? = null
 
-    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler, val hints: HintListener?, val pairing: Boolean)
+    private class Session(val identity: DeviceIdentity, val circle: CircleId, val author: EventAuthor, val engine: SyncEngine, val scheduler: SyncScheduler, val hints: HintListener?, val pairing: Boolean, val blobs: circles.sync.HttpBlobApi? = null)
 
     suspend fun open() {
         vault.open()
@@ -740,10 +765,71 @@ class CircleApp(
         var shared = 0
         for (item in view.market.items.values.filter { it.owner == me && !it.retired }) {
             val itemKey = view.market.itemKeys[item.item to item.detailKeyId] ?: continue
-            events += author.itemUpsert(circle, day, item.item, item.name, item.itemClass, item.detailKeyId, itemKey, listOf(registration), item.minTier)
+            events += author.itemUpsert(circle, day, item.item, item.name, item.itemClass, item.detailKeyId, itemKey, listOf(registration), item.minTier, item.photos)
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- item photos (ADR 0060) ----
+
+    private val photoCache = LinkedHashMap<String, ByteArray>()
+
+    /**
+     * Adds a photo to one of this member's items. [photo] and [thumb] are the finished encoded images (the page prepares them
+     * under ADR 0028); they are sealed with the circle key, uploaded, and only then does the item name them. A blank [alt] becomes the item's name.
+     */
+    suspend fun addPhoto(item: ItemId, alt: String, photo: ByteArray, thumb: ByteArray): PhotoResult {
+        val s = session ?: return PhotoResult.NotAllowed
+        val blobs = s.blobs ?: return PhotoResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.items[item]?.takeIf { it.owner == s.identity.member && !it.retired } ?: return PhotoResult.NotAllowed
+        if (state.photos.size >= circles.event.MAX_PHOTOS_PER_ITEM) return PhotoResult.TooMany
+        val epoch = view.currentEpoch
+        val key = view.keys[epoch] ?: return PhotoResult.NotAllowed
+        val sealedPhoto = circles.event.BlobSealing.seal(crypto, cipher, key, s.circle, photo) ?: return PhotoResult.TooBig
+        val sealedThumb = circles.event.BlobSealing.seal(crypto, cipher, key, s.circle, thumb) ?: return PhotoResult.TooBig
+        for (blob in listOf(sealedPhoto, sealedThumb)) {
+            when (val put = blobs.put(s.circle, blob.hash, blob.bytes.toByteArray())) {
+                circles.sync.BlobPut.Stored -> Unit
+                circles.sync.BlobPut.Offline -> return PhotoResult.Offline
+                circles.sync.BlobPut.Full -> return PhotoResult.Full
+                is circles.sync.BlobPut.Refused -> return PhotoResult.Refused("the server refused the photo (${put.status})")
+            }
+        }
+        val description = alt.trim().ifEmpty { state.name }.take(circles.event.MAX_PHOTO_ALT_CHARS)
+        return savePhotos(s, view, state, state.photos + circles.event.ItemPhoto(sealedPhoto.hash, sealedThumb.hash, epoch, description))
+    }
+
+    /** Takes a photo off the item. The sealed file stays on the server until the circle is exported and imported (ADR 0026). */
+    suspend fun removePhoto(item: ItemId, photoHash: String): PhotoResult {
+        val s = session ?: return PhotoResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        val state = view.market.items[item]?.takeIf { it.owner == s.identity.member && !it.retired } ?: return PhotoResult.NotAllowed
+        if (state.photos.none { it.photo == photoHash }) return PhotoResult.NotAllowed
+        return savePhotos(s, view, state, state.photos.filter { it.photo != photoHash })
+    }
+
+    private suspend fun savePhotos(s: Session, view: circles.event.CircleView, state: circles.event.ItemState, photos: List<circles.event.ItemPhoto>): PhotoResult {
+        val key = view.market.itemKeys[state.item to state.detailKeyId] ?: return PhotoResult.NotAllowed
+        val description = ((view.market.details[state.item] as? Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value.orEmpty()
+        s.author.keyRing = view.keys
+        saveItem(s, view, state.item, state.detailKeyId, key, state.name, state.itemClass, description, state.minTier, photos)
+        return PhotoResult.Saved
+    }
+
+    /** The decrypted image bytes of a photo or thumbnail, fetched on demand and remembered; null if offline or unreadable. */
+    suspend fun photoBytes(hash: String, epoch: Int): ByteArray? {
+        photoCache[hash]?.let { return it }
+        val s = session ?: return null
+        val blobs = s.blobs ?: return null
+        val key = s.author.keyRing[epoch] ?: return null // the keys of the last refresh, so a page of thumbnails does not fold the log for each
+        val sealed = circles.encoding.ByteString.of(blobs.get(s.circle, hash) ?: return null)
+        if (!circles.event.BlobSealing.matchesHash(crypto, hash, sealed)) return null
+        val plain = (circles.event.BlobSealing.open(cipher, key, s.circle, sealed) as? Parsed.Ok)?.value ?: return null
+        photoCache[hash] = plain
+        if (photoCache.size > PHOTO_CACHE_ENTRIES) photoCache.remove(photoCache.keys.first())
+        return plain
     }
 
     // ---- skill offers (ADR 0055) ----
@@ -984,7 +1070,7 @@ class CircleApp(
             val keyId = newDetailKeyId(crypto)
             val key = ItemKeys.newKey(crypto)
             s.author.keyRing = view.keys
-            s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item.item, item.name, item.itemClass, keyId, key, holders, item.minTier))
+            s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item.item, item.name, item.itemClass, keyId, key, holders, item.minTier, item.photos))
             s.engine.enqueue(s.circle, s.author.itemDetail(s.circle, day, item.item, keyId, key, CborMap.of(DETAIL_DESCRIPTION to CborText(description))))
             changed = true
         }
@@ -1328,7 +1414,7 @@ class CircleApp(
         val state = view.market.items[item]?.takeIf { it.owner == s.identity.member && !it.retired } ?: return ItemResult.NotAllowed
         val key = view.market.itemKeys[item to state.detailKeyId] ?: return ItemResult.NotAllowed
         s.author.keyRing = view.keys
-        return saveItem(s, view, item, state.detailKeyId, key, name.trim(), itemClass, description.trim(), minTier)
+        return saveItem(s, view, item, state.detailKeyId, key, name.trim(), itemClass, description.trim(), minTier, state.photos)
     }
 
     /** Takes an item off the list (its owner only). Loans already active can still be returned. */
@@ -1511,13 +1597,13 @@ class CircleApp(
 
     private suspend fun saveItem(
         s: Session, view: circles.event.CircleView, item: ItemId, detailKeyId: String, itemKey: circles.encoding.ByteString,
-        name: String, itemClass: ItemClass, description: String, minTier: Tier? = null,
+        name: String, itemClass: ItemClass, description: String, minTier: Tier? = null, photos: List<circles.event.ItemPhoto> = emptyList(),
     ): ItemResult {
         // An owner may raise the lowest tier above the class default, never lower it (ADR 0025).
         val effectiveMin = minTier?.takeIf { it.rank > itemClass.minTier.rank }
         val mine = view.devices.values.filter { !it.revoked && it.registration.member == s.identity.member }.map { it.registration }
         val day = today()
-        s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item, name, itemClass, detailKeyId, itemKey, mine, effectiveMin))
+        s.engine.enqueue(s.circle, s.author.itemUpsert(s.circle, day, item, name, itemClass, detailKeyId, itemKey, mine, effectiveMin, photos))
         s.engine.enqueue(s.circle, s.author.itemDetail(s.circle, day, item, detailKeyId, itemKey, CborMap.of(DETAIL_DESCRIPTION to CborText(description))))
         s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
         refresh()
@@ -1654,6 +1740,7 @@ class CircleApp(
                         owner = state.owner,
                         ownedByMe = state.owner == s.identity.member,
                         ownerMinTier = state.minTier,
+                        photos = state.photos,
                         description = ((view.market.details[state.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
                         access = if (state.owner == me) null else when (val decision = StandingRules.decide(me, state, cfg, loansNow, vouchesNow, view.stewards, now, view.market.livePausesOn(s.circle, now), view.market.contributions)) {
                             is AccessDecision.Eligible -> AccessSummary(true, emptyList(), emptyList())
@@ -1734,7 +1821,8 @@ class CircleApp(
             }
         }
         val author = EventAuthor(crypto, identity, cipher, firstCounter = nextCounter(identity, circle))
-        return Session(identity, circle, author, engine, scheduler, hints, keyStore.load()?.pairing == true).also {
+        val blobs = blobTransport?.let { transport -> (api as? TokenSource)?.let { circles.sync.HttpBlobApi(transport, it) } }
+        return Session(identity, circle, author, engine, scheduler, hints, keyStore.load()?.pairing == true, blobs).also {
             session = it
             scheduler.start()
         }

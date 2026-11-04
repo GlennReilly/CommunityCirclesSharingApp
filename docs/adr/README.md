@@ -63,7 +63,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0057](0057-visual-design-conventions.md) | Visual design conventions | Accepted |
 | [0058](0058-server-compression.md) | The server compresses text itself | Accepted |
 | [0059](0059-return-reminders.md) | Return reminders | Accepted |
-| [0060](0060-item-photos.md) | Item photos | Proposed |
+| [0060](0060-item-photos.md) | Item photos | Accepted |
 
 ## Open decisions still to record
 

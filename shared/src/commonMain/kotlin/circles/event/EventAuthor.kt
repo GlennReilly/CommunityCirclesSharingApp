@@ -112,9 +112,10 @@ class EventAuthor(
         itemKey: ByteString,
         ownerDevices: List<DeviceRegistration>,
         minTier: Tier? = null,
+        photos: List<ItemPhoto> = emptyList(),
     ): Envelope {
         val wraps = ownerDevices.map { DeviceKeyWrap(it.device, ItemKeys.wrap(cipher, it.boxPub, circle, item.v, itemKey)) }
-        return build(circle, EventType.ITEM_UPSERT, day, CborMap.EMPTY, MarketPayloads.itemUpsert(ItemUpsert(item, name, itemClass, minTier, detailKeyId, wraps)))
+        return build(circle, EventType.ITEM_UPSERT, day, CborMap.EMPTY, MarketPayloads.itemUpsert(ItemUpsert(item, name, itemClass, minTier, detailKeyId, wraps, photos)))
     }
 
     fun itemRetire(circle: CircleId, day: Int, item: ItemId): Envelope =

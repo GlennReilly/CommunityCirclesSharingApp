@@ -22,6 +22,7 @@ import circles.app.MAX_DEVICE_NAME_CHARS
 import circles.app.ExportResult
 import circles.event.PauseId
 import circles.app.PauseResult
+import circles.app.PhotoResult
 import circles.app.RulesResult
 import circles.app.SkillResult
 import circles.app.RebuildResult
@@ -40,6 +41,7 @@ import circles.keys.ChangePassphraseResult
 import circles.keys.JsPasswordHasher
 import circles.keys.KeyVault
 import circles.keys.UnlockResult
+import circles.sync.FetchBlobTransport
 import circles.sync.FetchStreamTransport
 import circles.sync.FetchTransport
 import circles.sync.HttpSyncApi
@@ -125,6 +127,28 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         val due = (state.model as? AppModel.Open)?.let { dueCount(it.home) } ?: 0
         document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Circles" else "${state.screen.title} - Circles"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
+        loadImages()
+    }
+
+    private val imageUrls = HashMap<String, String>()
+
+    /** Fills in every photo on the page that is on show: fetch, open with the circle key, show from an object URL on this device (ADR 0060). */
+    fun loadImages() {
+        val images = document.querySelectorAll("img[$ATTR_HASH]")
+        for (index in 0 until images.length) {
+            val image = images.item(index) as? HTMLElement ?: continue
+            if (image.getAttribute("src") != null || image.closest("details:not([open])") != null) continue
+            val hash = image.getAttribute(ATTR_HASH) ?: continue
+            val epoch = image.getAttribute(ATTR_EPOCH_OF)?.toIntOrNull() ?: continue
+            imageUrls[hash]?.let { image.setAttribute("src", it); continue }
+            scope.launch {
+                val bytes = app?.photoBytes(hash, epoch) ?: return@launch
+                val raw = bytes.unsafeCast<Int8Array>()
+                val blob = Blob(arrayOf(Uint8Array(raw.buffer, raw.byteOffset, raw.length)), BlobPropertyBag(type = imageType(bytes)))
+                val url = imageUrls.getOrPut(hash) { URL.createObjectURL(blob) }
+                image.setAttribute("src", url)
+            }
+        }
     }
 
     suspend fun start() {
@@ -146,6 +170,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
         // A device waiting to be added looks again every 15 seconds (the server limits logins, so not faster).
         window.setInterval({ if (state.model is AppModel.AwaitingApproval) app?.syncNow(SyncTrigger.MANUAL) }, PAIRING_CHECK_MILLIS)
+        // A closed "Larger photos" list is not fetched until it is opened (the toggle event does not bubble, so listen while it travels down).
+        root.addEventListener("toggle", { loadImages() }, true)
         window.addEventListener("hashchange", { dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash))) })
         // Until the event stream is read (ADR 0026), look for news once a minute; the scheduler spreads and backs off.
         window.setInterval({ app?.syncNow(SyncTrigger.HINT) }, POLL_MILLIS)
@@ -171,6 +197,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             { (kotlin.js.Date.now() / MILLIS_PER_DAY).toInt() },
             FetchStreamTransport(),
             wordlist = { loadWordlist() },
+            blobTransport = FetchBlobTransport(),
         )
         app = circleApp
         scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }
@@ -313,6 +340,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val recovery = field(FIELD_RECOVERY).toIntOrNull()
                     if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
+                }
+                FORM_PHOTO_ADD -> state.editing?.let { item ->
+                    val file = (form.elements.namedItem(FIELD_PHOTO_FILE) as? HTMLInputElement)?.files?.item(0)
+                    if (file == null) dispatch(AppAction.Notice("Choose a photo first."))
+                    else when (val prepared = prepareImage(file)) {
+                        is PrepareResult.Ready -> reportPhoto(circleApp.addPhoto(item, field(FIELD_PHOTO_ALT), prepared.image.photo, prepared.image.thumb))
+                        PrepareResult.NotAnImage -> dispatch(AppAction.Notice("That file could not be read as a picture."))
+                        PrepareResult.TooLarge -> dispatch(AppAction.Notice("That picture is too large to use. Try a smaller one."))
+                        PrepareResult.CannotShrink -> dispatch(AppAction.Notice("That picture cannot be made small enough. Try another."))
+                        is PrepareResult.NotClean -> dispatch(AppAction.Notice("That picture could not be cleaned of its location details, so it was not used. (${prepared.why})"))
+                    }
                 }
                 FORM_SKILL_ADD, FORM_SKILL_EDIT -> {
                     fun checked(name: String) = (form.elements.namedItem(name) as? HTMLInputElement)?.checked == true
@@ -481,6 +519,22 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             ),
         )
         if (result is SkillResult.Saved) window.location.hash = Screen.Skills.fragment
+    }
+
+    private fun reportPhoto(result: PhotoResult, done: String = "Photo added.") {
+        dispatch(
+            AppAction.Notice(
+                when (result) {
+                    PhotoResult.Saved -> done
+                    PhotoResult.Offline -> "Could not reach the server, so the photo was not added. Try again when you are online."
+                    PhotoResult.Full -> "The circle's photo storage is full."
+                    PhotoResult.TooMany -> "An item can have ${circles.event.MAX_PHOTOS_PER_ITEM} photos. Remove one first."
+                    PhotoResult.TooBig -> "That photo is too large once prepared."
+                    is PhotoResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    PhotoResult.NotAllowed -> "That cannot be done right now."
+                },
+            ),
+        )
     }
 
     private fun reportRules(result: RulesResult) {
@@ -652,6 +706,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.EditItem(ItemId(it)))
                     window.location.hash = Screen.EditItem.fragment
+                }
+                ACTION_REMOVE_PHOTO -> {
+                    val item = target.getAttribute(ATTR_ITEM)
+                    val photo = target.getAttribute(ATTR_PHOTO)
+                    if (item != null && photo != null) reportPhoto(circleApp?.removePhoto(ItemId(item), photo) ?: PhotoResult.NotAllowed, "Removed.")
                 }
                 ACTION_RETIRE_ITEM -> target.getAttribute(ATTR_ITEM)?.let { id ->
                     reportItem(circleApp?.retireItem(ItemId(id)) ?: ItemResult.NotAllowed)

@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { startServer, startChrome, sleep, checkAccessibility, reportAccessibility } from './lib.mjs';
 const PASS = 'correct horse battery staple';
 const PASS_NEW = 'second passphrase for alice';
@@ -82,9 +85,25 @@ try {
   await click(alice, 'edit-item'); await until(alice, 'document.getElementById("item-edit-form") !== null', 'edit page');
   if (await alice.evaluate('document.getElementById("item-edit-form").elements.namedItem("name").value') !== 'Ladder') throw new Error('edit form not prefilled'); ok('change page is prefilled');
   await checkAccessibility(alice, 'change item');
+  // Photos (ADR 0060): attach a real picture through the file input; it is prepared in the page, uploaded sealed, and shown to both people.
+  if (!(await alice.evaluate('document.getElementById("photo-add-form") !== null'))) throw new Error('no photo form on the change page');
+  if (!(await buttonHidden(alice, 'photo-add-form'))) throw new Error('add-photo button visible before a file is chosen');
+  const png = await alice.evaluate('(() => { const c = document.createElement("canvas"); c.width = 2400; c.height = 1800; const g = c.getContext("2d"); const grad = g.createLinearGradient(0, 0, 2400, 1800); grad.addColorStop(0, "#c0392b"); grad.addColorStop(1, "#2980b9"); g.fillStyle = grad; g.fillRect(0, 0, 2400, 1800); g.fillStyle = "#fff"; g.font = "200px sans-serif"; g.fillText("LADDER", 700, 950); return c.toDataURL("image/png"); })()');
+  const photoFile = join(tmpdir(), 'circles-e2e-photo.png'); writeFileSync(photoFile, Buffer.from(png.split(',')[1], 'base64'));
+  const doc = await alice.send('DOM.getDocument', {}); const node = await alice.send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#photo-file' });
+  await alice.send('DOM.setFileInputFiles', { nodeId: node.result.nodeId, files: [photoFile] });
+  await until(alice, '!document.getElementById("photo-add-form").querySelector("#submit").hidden', 'add-photo button after choosing a file'); ok('the add-photo button appears once a picture is chosen');
+  await alice.evaluate('document.getElementById("photo-add-form").requestSubmit()');
+  await until(alice, has(alice, 'Photo added.') + ' && document.querySelector("img.photo[src^=\\"blob:\\"]") !== null', 'photo added and shown', 40000); ok('a 2400 by 1800 picture was prepared, uploaded and shown');
+  const shown = JSON.parse(await alice.evaluate('(() => { const i = document.querySelector("img.photo"); return JSON.stringify({ alt: i.alt, w: i.naturalWidth }); })()'));
+  if (shown.alt !== 'Ladder' || !(shown.w > 0)) throw new Error('photo alt or image wrong: ' + JSON.stringify(shown)); ok('the description defaulted to the item name: "' + shown.alt + '"');
+  await checkAccessibility(alice, 'change item with a photo');
   await setField(alice, 'item-edit-form', 'name', 'Long ladder'); await alice.evaluate('document.getElementById("item-edit-form").requestSubmit()');
   await until(alice, has(alice, 'Long ladder'), 'renamed'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced edit');
   await syncUntil(bea, has(bea, 'Long ladder'), 'bea sees rename'); ok('rename reached bea');
+  await bea.evaluate('location.hash = "#/items"'); await until(bea, 'document.querySelector("img.thumb[src^=\\"blob:\\"]") !== null && document.querySelector("img.thumb").naturalWidth > 0', 'bea sees the thumbnail', 30000); ok('bea sees the photo thumbnail, fetched and opened on her device');
+  await checkAccessibility(bea, 'items with a photo');
+  await bea.evaluate('document.querySelector("details summary").click()'); await until(bea, 'document.querySelector("img.full[src^=\\"blob:\\"]") !== null', 'full photo after opening', 30000); ok('opening "Larger photos" loads the full-size picture');
   // Borrowing: request, answer, hand over, return.
   const iso = n => new Date(Math.floor(Date.now() / 86400000) * 86400000 + n * 86400000).toISOString().slice(0, 10);
   await bea.evaluate('location.hash = "#/items"'); await until(bea, has(bea, 'Long ladder'), 'bea on items');

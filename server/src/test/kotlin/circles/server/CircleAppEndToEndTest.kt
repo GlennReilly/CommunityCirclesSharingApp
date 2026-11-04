@@ -32,6 +32,12 @@ import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
 import circles.app.NoteResult
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.readRawBytes
+import circles.app.PhotoResult
 import circles.app.SkillResult
 import circles.event.OpenTo
 import circles.app.NoteStatus
@@ -86,11 +92,11 @@ class CircleAppEndToEndTest {
 
     private class Browser(val app: CircleApp, val store: KeyStore, val replica: InMemoryReplica)
 
-    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null, today: () -> Int = { TODAY }): Browser {
+    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null, today: () -> Int = { TODAY }, blobs: circles.sync.BlobTransport? = null): Browser {
         val hasher = JvmPasswordHasher()
         val vault = KeyVault(deadScope, crypto, testCipher, hasher, store, AutoLock.UntilTabCloses, FAST)
         val local = replica ?: InMemoryReplica { it.eventId(crypto) }
-        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today, wordlist = { WORDS })
+        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today, wordlist = { WORDS }, blobTransport = blobs)
         return Browser(app, store, local)
     }
 
@@ -1308,6 +1314,60 @@ class CircleAppEndToEndTest {
         // The limit of ten live offers.
         repeat(10) { assertIs<SkillResult.Saved>(alice.app.addSkill("Skill $it", "", emptySet())) }
         assertTrue(assertIs<SkillResult.Refused>(alice.app.addSkill("Eleventh", "", emptySet())).reason.contains("at most 10"))
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun anItemPhotoIsSealedUploadedSeenByMembersAndRemoved() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val blobs = object : circles.sync.BlobTransport {
+            override suspend fun put(path: String, body: ByteArray, token: String): Int =
+                http.put(path) { header("Authorization", "Bearer $token"); setBody(body) }.status.value
+
+            override suspend fun get(path: String, token: String): circles.sync.BlobReply =
+                http.get(path) { header("Authorization", "Bearer $token") }.let { circles.sync.BlobReply(it.status.value, it.readRawBytes()) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto, blobs = blobs)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto, blobs = blobs)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+
+        val photoBytes = ByteArray(5_000) { (it * 7).toByte() }
+        val thumbBytes = ByteArray(800) { (it * 3).toByte() }
+        // Not the owner: refused. The owner adds a photo with no description: the item's name is used.
+        assertEquals(PhotoResult.NotAllowed, bea.app.addPhoto(ladder, "mine", photoBytes, thumbBytes))
+        assertEquals(PhotoResult.Saved, alice.app.addPhoto(ladder, "  ", photoBytes, thumbBytes))
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+        val mine = home(alice.app).items.single().photos.single()
+        assertEquals("Ladder", mine.alt, "a blank description becomes the item's name")
+        assertEquals("Garage at the back", home(alice.app).items.single().description, "editing photos keeps the private details")
+        // Every member sees it and can open it; what the server stores is not the image.
+        val theirs = home(bea.app).items.single().photos.single()
+        assertEquals(mine, theirs)
+        assertTrue(bea.app.photoBytes(theirs.photo, theirs.epoch)!!.contentEquals(photoBytes))
+        assertTrue(bea.app.photoBytes(theirs.thumb, theirs.epoch)!!.contentEquals(thumbBytes))
+        assertEquals(null, bea.app.photoBytes("0".repeat(64), theirs.epoch), "an unknown blob")
+        val stored = assertNotNull(server.services.blobs!!.get(home(alice.app).circle, mine.photo))
+        assertEquals(photoBytes.size + 24 + 16, stored.size, "nonce and tag around the same length")
+        assertFalse(stored.toList().windowed(16).any { w -> w == photoBytes.toList().take(16) }, "the server holds ciphertext, not the image")
+
+        // A description of one's own, at most three photos, then a removal; changing the item keeps the photos.
+        assertEquals(PhotoResult.Saved, alice.app.addPhoto(ladder, "Close-up of the hinge", photoBytes, ByteArray(700) { 1 }))
+        assertEquals(PhotoResult.Saved, alice.app.addPhoto(ladder, "", ByteArray(5_100) { 2 }, ByteArray(710) { 2 }))
+        assertEquals(PhotoResult.TooMany, alice.app.addPhoto(ladder, "x", photoBytes, thumbBytes))
+        assertIs<ItemResult.Saved>(alice.app.editItem(ladder, "Long ladder", ItemClass.EVERYDAY, "Garage at the back", null))
+        assertEquals(3, home(alice.app).items.single().photos.size)
+        assertEquals(PhotoResult.Saved, alice.app.removePhoto(ladder, mine.photo))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(2, home(bea.app).items.single().photos.size)
+        assertEquals(PhotoResult.NotAllowed, alice.app.removePhoto(ladder, mine.photo), "already gone")
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }
