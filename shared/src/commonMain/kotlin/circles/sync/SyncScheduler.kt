@@ -3,7 +3,7 @@ package circles.sync
 import circles.policy.CircleId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,8 +39,8 @@ class SyncScheduler(
     private val circle: CircleId,
     private val random: () -> Double = { Random.nextDouble() },
 ) {
-    private val wake = Channel<SyncTrigger>(Channel.CONFLATED)
-    private val urgent = Channel<Unit>(Channel.CONFLATED)
+    private val wake = Signal<SyncTrigger>()
+    private val urgent = Signal<Unit>()
     private var job: Job? = null
 
     fun start() {
@@ -55,8 +55,8 @@ class SyncScheduler(
 
     /** Asks for a sync. Safe to call from any event handler; it never blocks. */
     fun trigger(reason: SyncTrigger) {
-        wake.trySend(reason)
-        if (reason.urgent) urgent.trySend(Unit)
+        wake.send(reason)
+        if (reason.urgent) urgent.send(Unit)
     }
 
     private suspend fun loop() {
@@ -65,8 +65,8 @@ class SyncScheduler(
         while (true) {
             delay(spread(reason))
             // Anything that arrived while waiting is covered by this run, including the urgent signal that started it.
-            wake.tryReceive()
-            urgent.tryReceive()
+            wake.take()
+            urgent.take()
             val report = syncer.sync(circle)
             when (val state = report.state) {
                 is SyncState.SignedOut -> {
@@ -83,8 +83,8 @@ class SyncScheduler(
                     failures++
                     val interrupted = withTimeoutOrNull(wait) { urgent.receive() } != null
                     if (interrupted) failures = 0
-                    wake.tryReceive()
-                    urgent.tryReceive()
+                    wake.take()
+                    urgent.take()
                     reason = if (interrupted) SyncTrigger.MANUAL else SyncTrigger.OPEN
                 }
             }
@@ -99,5 +99,39 @@ class SyncScheduler(
     companion object {
         const val LOCAL_WRITE_DEBOUNCE_MILLIS = 500L
         const val HINT_SPREAD_MILLIS = 2_000L
+    }
+}
+
+/**
+ * A one-place mailbox for one waiting reader: a later [send] replaces an earlier one that was not read yet, and [receive]
+ * waits for one. It replaces a conflated channel, whose machinery is far bigger than this need (the page is size-limited,
+ * ADR 0009). Used from a single thread, as everything in the page and in the virtual-time tests is.
+ */
+internal class Signal<T : Any> {
+    private var pending: T? = null
+    private var waiter: CompletableDeferred<T>? = null
+
+    fun send(value: T) {
+        val reader = waiter
+        if (reader != null) {
+            waiter = null
+            reader.complete(value)
+        } else {
+            pending = value
+        }
+    }
+
+    /** Takes what is waiting, if anything, without waiting. */
+    fun take(): T? = pending.also { pending = null }
+
+    suspend fun receive(): T {
+        take()?.let { return it }
+        val reader = CompletableDeferred<T>()
+        waiter = reader
+        try {
+            return reader.await()
+        } finally {
+            if (waiter === reader) waiter = null
+        }
     }
 }

@@ -14,7 +14,7 @@ Rules: logic never depends on the DOM (it is tested in Node with `:web:jsNodeTes
 ./gradlew :web:jsNodeTest                 # logic and view tests
 ./gradlew :web:jsBrowserDevelopmentRun    # dev server with reload
 ./gradlew :web:jsBrowserProductionWebpack # bundle in build/kotlin-webpack/js/productionExecutable (+ index.html in build/processedResources/js/main)
-./gradlew :web:checkBundleBudget          # fails if circles.js gzipped is over 250 KB; part of `check`
+./gradlew :web:checkBundleBudget          # fails if circles.js gzipped is over 300 KiB; part of `check`
 ```
 
 The budget check measures what is actually bundled. `shared` is a dependency but unused so far, so the number (about 19 KB gzipped) will grow as the client starts using the fold, the crypto and the sync code; ADR 0009 expects roughly 100 KB for the Kotlin side and 22 KB for noble.

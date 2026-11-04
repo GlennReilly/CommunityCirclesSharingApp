@@ -30,8 +30,8 @@ kotlin {
     }
 }
 
-// The size budget of ADR 0009 / spec section 6: the application script, gzipped, stays under 250 KB.
-val bundleBudgetBytes = 250 * 1024
+// The size budget (ADR 0009, raised by ADR 0064): the application script, gzipped, stays under 300 KiB.
+val bundleBudgetBytes = 300 * 1024
 
 abstract class BundleBudgetTask : DefaultTask() {
     @get:InputFile abstract val script: RegularFileProperty
