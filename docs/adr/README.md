@@ -58,6 +58,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0052](0052-loan-windows.md) | Loan windows: no double booking, and cancelling | Accepted |
 | [0053](0053-contribution-notes.md) | Contribution notes | Accepted |
 | [0054](0054-hand-written-wire-json.md) | Hand-written wire JSON for the browser | Accepted |
+| [0055](0055-skills.md) | Skill offers | Proposed |
 
 ## Open decisions still to record
 
