@@ -966,8 +966,7 @@ class CircleApp(
      * change the item's detail key, sending the new one to this member's devices and to borrowers whose loan is still open,
      * and seal the details again. Does nothing once the key has changed, and nothing after a refused `item.upsert`.
      */
-    private suspend fun rotateItemKeysAfterRemovals(s: Session) {
-        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+    private suspend fun rotateItemKeysAfterRemovals(s: Session, view: circles.event.CircleView) {
         val departed = view.market.departed.keys
         if (departed.isEmpty() || replica.refused(s.circle).any { it.type == EventType.ITEM_UPSERT.wire }) return
         val me = s.identity.member
@@ -997,8 +996,7 @@ class CircleApp(
      * who sorts first sends a fresh set. Only that one steward acts, so two devices do not make competing sets; the
      * "make shares now" button is the way out if they are away. Does nothing after a refused share, so it cannot loop.
      */
-    private suspend fun sendMissingShares(s: Session) {
-        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+    private suspend fun sendMissingShares(s: Session, view: circles.event.CircleView) {
         val epoch = view.currentEpoch
         if (view.stewardSettings.recoveryThreshold == circles.event.NO_RECOVERY_SHARES || epoch < FIRST_EPOCH || view.keys[epoch] == null) return
         if (s.identity.member != view.stewards.minByOrNull { it.v }) return
@@ -1746,7 +1744,12 @@ class CircleApp(
         mutableSync.value = report.state
         // The stream needs a logged-in device, which a new one is only once its first events are accepted.
         if (report.state == SyncState.UpToDate) session?.hints?.start()
-        session?.let { rotateItemKeysAfterRemovals(it); sendMissingShares(it) }
+        session?.let { s ->
+            // One fold serves both checks (a fold is the costly part of a sync).
+            val view = replica.fold(s.circle, crypto, cipher, s.identity)
+            if (view.market.departed.isNotEmpty()) rotateItemKeysAfterRemovals(s, view)
+            sendMissingShares(s, view)
+        }
         refresh()
     }
 

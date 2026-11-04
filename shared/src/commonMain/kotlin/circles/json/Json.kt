@@ -141,7 +141,9 @@ object Json {
                             't' -> out.append('\t')
                             'u' -> {
                                 if (at + UNICODE_ESCAPE_DIGITS > text.length) return null
-                                val code = text.substring(at, at + UNICODE_ESCAPE_DIGITS).toIntOrNull(HEX_RADIX) ?: return null
+                                val digits = text.substring(at, at + UNICODE_ESCAPE_DIGITS)
+                                if (!digits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+                                val code = digits.toInt(HEX_RADIX)
                                 out.append(code.toChar())
                                 at += UNICODE_ESCAPE_DIGITS
                             }

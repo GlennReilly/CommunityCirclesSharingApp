@@ -103,7 +103,7 @@ object StandingRules {
 
     /** May [voucher] vouch on [day]? Their tier must reach `voucherMinTier`. */
     fun mayVouch(voucher: MemberId, cfg: CircleConfig, loans: Collection<LoanState>, vouches: List<Vouch>, stewards: Set<MemberId>, day: Int, contributions: List<ContributionState> = emptyList()): Boolean {
-        val events = eventsFrom(loans, cfg.id, day, contributions = contributions)
+        val events = eventsFrom(loans, cfg.id, day, cfg = cfg, contributions = contributions)
         val base = floored(voucher, StandingCalculator.compute(voucher, cfg, events, emptyList(), { Tier.NEWCOMER }, day).tier, stewards)
         return base.rank >= cfg.voucherMinTier.rank
     }

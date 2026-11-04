@@ -318,6 +318,10 @@ class CircleFold(
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (target.registration.member !in stewards) return "a recovery share may only go to a steward"
             if (terms.epoch !in FIRST_EPOCH..epoch) return "epoch ${terms.epoch} has not been started"
+            // A share this device cannot open is refused without touching the fold's state, so the set is not counted complete.
+            val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys
+            val opened = if (mine == null) null else RecoveryShares.open(cipher, mine, circle, terms.epoch, terms.wrapped)
+            if (opened is Parsed.Invalid) return "the share sent to this device is not usable: ${opened.reason}"
             // A steward's several devices follow each other inside one set; the same steward again after another one starts a new set.
             val previous = shareBatch[terms.epoch]
             val targetMember = target.registration.member
@@ -326,14 +330,8 @@ class CircleFold(
             if (!continues) shareHolders[terms.epoch] = mutableSetOf()
             shareBatch[terms.epoch] = Triple(sender.member, position, targetMember)
             shareHolders.getOrPut(terms.epoch) { mutableSetOf() } += target.registration.member
-            val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys ?: return null
-            return when (val share = RecoveryShares.open(cipher, mine, circle, terms.epoch, terms.wrapped)) {
-                is Parsed.Ok -> {
-                    heldShares[terms.epoch] = HeldShare(terms.epoch, share.value.share, sender.member)
-                    null
-                }
-                is Parsed.Invalid -> "the share sent to this device is not usable: ${share.reason}"
-            }
+            if (opened is Parsed.Ok) heldShares[terms.epoch] = HeldShare(terms.epoch, opened.value.share, sender.member)
+            return null
         }
 
         private fun rotate(e: Envelope, sender: DeviceRegistration): String? {

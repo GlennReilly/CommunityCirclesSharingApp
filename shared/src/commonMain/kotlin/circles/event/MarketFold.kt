@@ -213,7 +213,7 @@ internal class MarketFold(
         EventType.ITEM_RETIRE -> parse(MarketPayloads.parseItemRetire(payload)) { retire(e.author, it) }
         EventType.ITEM_DETAIL -> parse(MarketPayloads.parseItemDetail(payload)) { detail(e.author, it) }
         EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it, e.day, id) }
-        EventType.STANDING_CONFIRM -> if (MarketPayloads.parseReturnConfirmation(payload) is Parsed.Invalid) parse(MarketPayloads.parseNoteConfirmation(payload)) { confirmNote(e.author, it, e.day) } else parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
+        EventType.STANDING_CONFIRM -> if (payload.entries.containsKey("noteId")) parse(MarketPayloads.parseNoteConfirmation(payload)) { confirmNote(e.author, it, e.day) } else parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
         EventType.LOAN_DISPUTE -> parse(MarketPayloads.parseDispute(payload)) { dispute(e.author, it, e.day) }
         EventType.LOAN_RESOLVE -> parse(MarketPayloads.parseResolution(payload)) { resolve(e.author, it, e.day, id) }
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
@@ -291,7 +291,7 @@ internal class MarketFold(
     private fun isReviewer(member: MemberId, day: Int, id: EventId): Boolean =
         StandingRules.standingOf(member, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier.rank >= config(day).pauseReviewerMinTier.rank
 
-    /** Reviewers needed for a pause of [subject]: the configured number, at least two, and never more than the eligible reviewers minus one. */
+    /** Reviewers needed for a pause of [subject]: the configured number capped at the eligible reviewers minus one, but at least two (and never more than the eligible reviewers). */
     private fun reviewersNeeded(subject: MemberId, day: Int, id: EventId): Int {
         val eligible = members().count { it != subject && isReviewer(it, day, id) }
         return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config(day).reviewersForPause, eligible - 1)))
@@ -354,7 +354,8 @@ internal class MarketFold(
         if (v == ConfigSettings.of(config(day))) return "those are already the circle's rules"
         val open = configProposals[v]?.takeIf { day <= it.firstDay + DEFAULT_STEWARD_PROPOSAL_DAYS }
         val proposal = (open ?: PendingConfig(v, emptySet(), day)).let { it.copy(voters = it.voters + author) }
-        if (proposal.voters.size >= minOf(facts.quorum, facts.stewards.size)) {
+        // Only votes from people who are stewards at this moment count: a steward who has since left does not make up a quorum.
+        if (proposal.voters.count { it in facts.stewards } >= minOf(facts.quorum, facts.stewards.size)) {
             configs += ConfigVersion(day, v)
             configs.sortBy { it.fromDay }
             configProposals.remove(v)
