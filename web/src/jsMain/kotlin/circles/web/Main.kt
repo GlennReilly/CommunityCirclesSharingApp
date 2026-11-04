@@ -611,7 +611,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_COPY_FIELD -> target.getAttribute(ATTR_FROM)?.let { id ->
                     (document.getElementById(id) as? HTMLInputElement)?.let {
                         window.navigator.asDynamic().clipboard.writeText(it.value)
-                        dispatch(AppAction.Notice("Copied."))
+                        // Feedback on the button itself (a page-top notice can be off screen, and re-drawing would wipe what is typed).
+                        val original = target.textContent
+                        target.setAttribute("aria-live", "polite")
+                        target.textContent = "Copied"
+                        scope.launch {
+                            delay(COPIED_MILLIS)
+                            target.textContent = original
+                        }
                     }
                 }
                 ACTION_VOUCH -> target.getAttribute(ATTR_MEMBER)?.let { id ->
@@ -696,3 +703,4 @@ private fun rulesOf(n: List<Int>) = circles.event.ConfigSettings(n[0], n[1], n[2
 private fun tierOrNull(name: String): circles.policy.Tier? = circles.policy.Tier.entries.firstOrNull { it.name == name }
 
 private const val NOTICE_MILLIS = 8_000L
+private const val COPIED_MILLIS = 2_000L
