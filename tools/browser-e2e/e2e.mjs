@@ -253,6 +253,19 @@ try {
   if (!(exportSize > 500) || exportType !== 'application/zip') throw new Error('bad export ' + exportSize + ' ' + exportType); ok('bea downloaded a zip export of the circle (' + exportSize + ' bytes)');
   await checkAccessibility(bea, 'settings with export');
 
+  // Skills (ADR 0055): offer one, find it by searching on this device, and see the empty search.
+  await alice.evaluate('location.hash = "#/skills/add"'); await until(alice, 'document.getElementById("skill-add-form") !== null', 'skill form');
+  await checkAccessibility(alice, 'offer a skill');
+  if (!(await buttonHidden(alice, 'skill-add-form'))) throw new Error('offer button visible while the name is empty');
+  await setField(alice, 'skill-add-form', 'skill-name', 'Bike repair'); await setField(alice, 'skill-add-form', 'skill-details', 'Punctures and brakes');
+  await alice.evaluate('document.getElementById("skill-open-gift").checked = true; document.getElementById("skill-add-form").requestSubmit()');
+  await until(alice, has(alice, 'Bike repair') + ' && ' + has(alice, 'Happy to help for nothing') + ' && ' + has(alice, 'Offered by you'), 'skill listed'); ok('alice offered a skill and sees it in the list');
+  await checkAccessibility(alice, 'skills');
+  await alice.evaluate('(() => { const box = document.getElementById("skill-search"); box.value = "plumbing"; box.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
+  await until(alice, has(alice, '0 offers') + ' && document.querySelector("[data-skill-text]").hidden === true', 'search hides the offer'); ok('searching hides offers that do not match, on this device');
+  await alice.evaluate('(() => { const box = document.getElementById("skill-search"); box.value = "BRAKES"; box.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
+  await until(alice, has(alice, '1 offer') + ' && document.querySelector("[data-skill-text]").hidden === false', 'search finds by details, any case'); ok('search matches the details and ignores case');
+
   // Pauses (ADR 0050): nobody is paused; the page explains what a pause is, and passes the accessibility check.
   await alice.evaluate('location.hash = "#/pauses"'); await until(alice, has(alice, 'No pauses are proposed or in force that you can see.'), 'pauses page');
   if (!(await alice.evaluate(has(alice, 'except essentials')))) throw new Error('the pause page does not say essentials stay open'); ok('the pauses page explains that essentials stay open');

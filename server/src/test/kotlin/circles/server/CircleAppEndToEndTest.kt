@@ -32,6 +32,8 @@ import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
 import circles.app.NoteResult
+import circles.app.SkillResult
+import circles.event.OpenTo
 import circles.app.NoteStatus
 import circles.event.ContributionKind
 import circles.app.PauseResult
@@ -1269,6 +1271,43 @@ class CircleAppEndToEndTest {
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(NoteResult.Refused("at most 3 contribution notes in 30 days"), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(0, home(bea.app).contributions.notesLeft)
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun aSkillOfferIsSeenByEveryMemberChangedAndRetiredOnlyByItsAuthor() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea).forEach { it.app.syncOnce() } } }
+
+        assertEquals(SkillResult.Refused("give it a name of 1 to 60 characters"), bea.app.addSkill("  ", "", emptySet()))
+        assertEquals(SkillResult.Refused("keep the details to 500 characters"), bea.app.addSkill("Bikes", "d".repeat(501), emptySet()))
+        val saved = assertIs<SkillResult.Saved>(bea.app.addSkill("Bike repair", "Punctures and brakes", setOf(OpenTo.GIFT, OpenTo.THANKS)))
+        sync()
+        // Everyone in the circle sees it, with who offered it; only the author can change or remove it.
+        val seen = home(alice.app).skills.single()
+        assertEquals("Bike repair", seen.name); assertEquals(setOf(OpenTo.GIFT, OpenTo.THANKS), seen.openTo)
+        assertEquals(home(bea.app).me, seen.owner); assertFalse(seen.ownedByMe)
+        assertTrue(home(bea.app).skills.single().ownedByMe)
+        assertTrue(assertIs<SkillResult.Refused>(alice.app.editSkill(saved.skill, "Mine now", "", emptySet())).reason.contains("only the author"))
+        assertTrue(assertIs<SkillResult.Refused>(alice.app.retireSkill(saved.skill)).reason.contains("only the author"))
+        assertIs<SkillResult.Saved>(bea.app.editSkill(saved.skill, "Bike and trailer repair", "", setOf(OpenTo.SWAP)))
+        sync()
+        assertEquals("Bike and trailer repair", home(alice.app).skills.single().name)
+        assertIs<SkillResult.Saved>(bea.app.retireSkill(saved.skill))
+        sync()
+        assertEquals(emptyList(), home(alice.app).skills)
+        // The limit of ten live offers.
+        repeat(10) { assertIs<SkillResult.Saved>(alice.app.addSkill("Skill $it", "", emptySet())) }
+        assertTrue(assertIs<SkillResult.Refused>(alice.app.addSkill("Eleventh", "", emptySet())).reason.contains("at most 10"))
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }

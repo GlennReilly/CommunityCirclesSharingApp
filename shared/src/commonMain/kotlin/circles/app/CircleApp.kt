@@ -247,6 +247,24 @@ sealed interface LoanResult {
     data object NotAllowed : LoanResult
 }
 
+/** A skill offer as every member sees it (ADR 0055). */
+data class SkillSummary(
+    val skill: circles.event.SkillId,
+    val name: String,
+    val details: String,
+    val openTo: Set<circles.event.OpenTo>,
+    val owner: MemberId,
+    val ownedByMe: Boolean,
+)
+
+sealed interface SkillResult {
+    data class Saved(val skill: circles.event.SkillId) : SkillResult
+
+    data class Refused(val reason: String) : SkillResult
+
+    data object NotAllowed : SkillResult
+}
+
 enum class NoteStatus { WAITING, COUNTED, LAPSED }
 
 /** A contribution note as the people it names see it (ADR 0053). [other] is the other person. */
@@ -363,6 +381,8 @@ data class HomeData(
     val pauses: List<PauseSummary> = emptyList(),
     /** The circle's rules in force today and the proposals for new ones (ADR 0051). */
     val rules: RulesSummary = RulesSummary(circles.event.ConfigSettings.of(circles.policy.CircleConfig(circles.policy.CircleId(""), ""))),
+    /** Skill offers of everyone still in the circle, newest last (ADR 0055). */
+    val skills: List<SkillSummary> = emptyList(),
     /** Contribution notes (ADR 0053). */
     val contributions: ContributionsSummary = ContributionsSummary(),
     val canProposePause: Boolean = false,
@@ -724,6 +744,43 @@ class CircleApp(
             shared++
         }
         return RegistrationBatch(events, wrapped, shared)
+    }
+
+    // ---- skill offers (ADR 0055) ----
+
+    private suspend fun sendSkill(event: circles.event.Envelope, skill: circles.event.SkillId): SkillResult {
+        val (s, _) = pauseSession() ?: return SkillResult.NotAllowed
+        return when (val result = sendPause(s, event)) {
+            PauseResult.Sent -> SkillResult.Saved(skill)
+            is PauseResult.Refused -> SkillResult.Refused(result.reason)
+            PauseResult.NotAllowed -> SkillResult.NotAllowed
+        }
+    }
+
+    private fun skillProblem(name: String, details: String): String? = when {
+        name.isBlank() || name.trim().length > circles.event.MAX_SKILL_NAME_CHARS -> "give it a name of 1 to ${circles.event.MAX_SKILL_NAME_CHARS} characters"
+        details.trim().length > circles.event.MAX_SKILL_DETAILS_CHARS -> "keep the details to ${circles.event.MAX_SKILL_DETAILS_CHARS} characters"
+        else -> null
+    }
+
+    /** Offers a skill to the circle (ADR 0055); [openTo] says what in return would be welcome, and may be empty. */
+    suspend fun addSkill(name: String, details: String, openTo: Set<circles.event.OpenTo>): SkillResult {
+        skillProblem(name, details)?.let { return SkillResult.Refused(it) }
+        val (s, _) = pauseSession() ?: return SkillResult.NotAllowed
+        val id = circles.event.newSkillId(crypto)
+        return sendSkill(s.author.skillUpsert(s.circle, today(), id, name.trim(), details.trim(), openTo), id)
+    }
+
+    /** Replaces the author's own offer. */
+    suspend fun editSkill(skill: circles.event.SkillId, name: String, details: String, openTo: Set<circles.event.OpenTo>): SkillResult {
+        skillProblem(name, details)?.let { return SkillResult.Refused(it) }
+        val (s, _) = pauseSession() ?: return SkillResult.NotAllowed
+        return sendSkill(s.author.skillUpsert(s.circle, today(), skill, name.trim(), details.trim(), openTo), skill)
+    }
+
+    suspend fun retireSkill(skill: circles.event.SkillId): SkillResult {
+        val (s, _) = pauseSession() ?: return SkillResult.NotAllowed
+        return sendSkill(s.author.skillRetire(s.circle, today(), skill), skill)
     }
 
     // ---- contribution notes (ADR 0053) ----
@@ -1519,6 +1576,9 @@ class CircleApp(
                 recoveryShares = recoverySharesOf(view, s.identity.member),
                 pauses = pausesFor(view, me, myStanding.tier, now),
                 rules = rulesFor(view, me, now),
+                skills = view.market.skills.filter { !it.retired && it.owner !in view.market.departed }.map {
+                    SkillSummary(it.skill, it.name, it.details, it.openTo, it.owner, it.owner == me)
+                },
                 contributions = contributionsFor(view, me, now),
                 canProposePause = myStanding.tier.rank >= cfg.pauseReviewerMinTier.rank,
                 pauseCandidates = if (myStanding.tier.rank < cfg.pauseReviewerMinTier.rank) emptyList() else view.devices.values.filter { !it.revoked }

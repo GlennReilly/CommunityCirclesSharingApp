@@ -1,13 +1,13 @@
 # 0055. Skill offers
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-04
 
 ## Context
 
 The design lists a skill offer as "a person offering help (carpentry, plumbing, pottery) with optional open-to terms (barter, gift, money)". The spec names `skill.upsert` and `skill.retire` (author: member) and a Skills screen whose search is local and client-side. Nothing else is defined. Skills are about people, so they raise questions items do not: who may see an offer, how much a member says about what they can do, and how an offer turns into a contact. The money-free ideals of the project (non-goals: currency, credits, payments) shape the "open to" terms.
 
-## Decision (proposed)
+## Decision
 
 1. **Events** (sealed like items; `public` empty): `skill.upsert {skill id, name (1 to 60 chars), details (0 to 500), openTo (set of GIFT, SWAP, THANKS)}` and `skill.retire {skill id}`; only the author may change or retire their own. The skill id is random like an item id.
 2. **Visibility.** Every member of the circle can see every offer, like items. No one outside the circle can; the server sees only sealed events.
@@ -17,7 +17,7 @@ The design lists a skill offer as "a person offering help (carpentry, plumbing, 
 6. **Limits.** At most 10 live offers per member. Retired offers disappear.
 7. **Access and standing.** Skills are open to every member including newcomers; offering a skill earns no standing by itself.
 
-## Decisions for the owner
+## Decisions for the owner (answered 2026-11-04: A1, B1, C1)
 
 **A. Money term. A1 (recommended): no money setting**, as in point 3. **A2: add `PAID`** so a plumber can say they charge; this makes the app a small marketplace and invites the things the project excludes.
 
@@ -29,3 +29,7 @@ The design lists a skill offer as "a person offering help (carpentry, plumbing, 
 
 - Needs two payloads, fold rules, a Skills page (list, add and edit form, retire) and tests; the server accepts the events opaquely. About 3 to 4 KB of bundle, which now fits (225 KB of 250 KB).
 - Without messaging (B1), the screen is a directory; the value is in finding who to ask.
+
+## As built (2026-11-04)
+
+`skill.upsert {skill, name, details, openTo}` (open-to is a bit set stored as a small integer: GIFT 1, SWAP 2, THANKS 4) and `skill.retire {skill}` are sealed events. `MarketFold` keeps `SkillState`; only the author changes or retires an offer, a retired one cannot return, a member has at most 10 live offers, and the author must be a member. The Skills page lists the offers of everyone still in the circle with the offerer's short id and fingerprint, filtered on the device as the search box changes (a hidden attribute on each row, no state). Add and change pages are sub pages. Bundle 230.3 KB gzipped.

@@ -23,6 +23,7 @@ import circles.app.ExportResult
 import circles.event.PauseId
 import circles.app.PauseResult
 import circles.app.RulesResult
+import circles.app.SkillResult
 import circles.app.RebuildResult
 import circles.app.RecoveryCodeResult
 import circles.app.ShareMakingResult
@@ -189,6 +190,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
 
     /** A form's button appears only once every field that needs text has enough of it (`data-min`, in the views). */
     private fun onInput(event: Event) {
+        (event.target as? HTMLInputElement)?.takeIf { it.id == ID_SKILL_SEARCH }?.let { field ->
+            // Filtering happens here, on this device, as you type: nothing is sent anywhere.
+            val query = field.value.trim().lowercase()
+            val rows = document.querySelectorAll("[$ATTR_SKILL_TEXT]")
+            var shown = 0
+            for (index in 0 until rows.length) {
+                val row = rows.item(index) as? HTMLElement ?: continue
+                val match = query.isEmpty() || (row.getAttribute(ATTR_SKILL_TEXT) ?: "").contains(query)
+                row.hidden = !match
+                if (match) shown++
+            }
+            document.getElementById(ID_SKILL_COUNT)?.textContent = if (shown == 1) "1 offer" else "$shown offers"
+        }
         (event.target as? HTMLInputElement)?.takeIf { it.id == FIELD_DEVICE_CODE }?.let { field ->
             val preview = app?.previewDeviceCode(field.value)
             document.getElementById(ID_DEVICE_PREVIEW)?.textContent = when {
@@ -273,6 +287,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val recovery = field(FIELD_RECOVERY).toIntOrNull()
                     if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
+                }
+                FORM_SKILL_ADD, FORM_SKILL_EDIT -> {
+                    fun checked(name: String) = (form.elements.namedItem(name) as? HTMLInputElement)?.checked == true
+                    val openTo = buildSet {
+                        if (checked(FIELD_SKILL_GIFT)) add(circles.event.OpenTo.GIFT)
+                        if (checked(FIELD_SKILL_SWAP)) add(circles.event.OpenTo.SWAP)
+                        if (checked(FIELD_SKILL_THANKS)) add(circles.event.OpenTo.THANKS)
+                    }
+                    val result = if (form.id == FORM_SKILL_ADD) circleApp.addSkill(field(FIELD_SKILL_NAME), field(FIELD_SKILL_DETAILS), openTo)
+                    else state.editingSkill?.let { circleApp.editSkill(it, field(FIELD_SKILL_NAME), field(FIELD_SKILL_DETAILS), openTo) } ?: SkillResult.NotAllowed
+                    reportSkill(result)
                 }
                 FORM_NOTE_ADD -> {
                     val kind = circles.event.ContributionKind.entries.firstOrNull { it.name == field(FIELD_NOTE_KIND) }
@@ -419,6 +444,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    private fun reportSkill(result: SkillResult, done: String = "Saved.") {
+        dispatch(
+            AppAction.Notice(
+                when (result) {
+                    is SkillResult.Saved -> done
+                    is SkillResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    SkillResult.NotAllowed -> "That cannot be done right now."
+                },
+            ),
+        )
+        if (result is SkillResult.Saved) window.location.hash = Screen.Skills.fragment
+    }
+
     private fun reportRules(result: RulesResult) {
         dispatch(
             AppAction.Notice(
@@ -520,6 +558,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         ),
                     )
                 }
+                ACTION_EDIT_SKILL -> target.getAttribute(ATTR_SKILL)?.let {
+                    dispatch(AppAction.EditSkill(circles.event.SkillId(it)))
+                    window.location.hash = Screen.EditSkill.fragment
+                }
+                ACTION_RETIRE_SKILL -> target.getAttribute(ATTR_SKILL)?.let { reportSkill(circleApp?.retireSkill(circles.event.SkillId(it)) ?: SkillResult.NotAllowed, "Removed.") }
                 ACTION_PAUSE_REVIEW -> target.getAttribute(ATTR_PAUSE)?.let { id ->
                     val agree = target.getAttribute(ATTR_AGREE) == "true"
                     dispatch(AppAction.Notice(pauseText(circleApp?.reviewPause(PauseId(id), agree) ?: PauseResult.NotAllowed, if (agree) "You agreed." else "Your answer was recorded.")))

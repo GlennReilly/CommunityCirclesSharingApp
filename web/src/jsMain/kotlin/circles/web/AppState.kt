@@ -22,6 +22,8 @@ data class AppState(
     val newInvite: String? = null,
     /** The item being changed on the Change an item page. */
     val editing: ItemId? = null,
+    /** The skill offer being changed on the Change a skill offer page. */
+    val editingSkill: circles.event.SkillId? = null,
     /** The item being asked for on the Ask to borrow page. */
     val borrowing: ItemId? = null,
     /** A link to add this browser as another device of a member, found in the address (ADR 0046). */
@@ -51,6 +53,7 @@ sealed interface AppAction {
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
+    data class EditSkill(val skill: circles.event.SkillId) : AppAction
     data class BorrowItem(val item: ItemId) : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
@@ -61,12 +64,14 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     is AppAction.Navigate -> state.copy(screen = allowed(state.model, action.screen).let {
         when {
             it == Screen.EditItem && state.editing == null -> Screen.Items
+            it == Screen.EditSkill && state.editingSkill == null -> Screen.Skills
             it == Screen.RequestLoan && state.borrowing == null -> Screen.Items
             it == Screen.RecoveryCode && state.recoveryDraft == null -> Screen.Settings
             else -> it
         }
     })
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
+    is AppAction.EditSkill -> if (state.signedIn) state.copy(editingSkill = action.skill, screen = Screen.EditSkill) else state
     is AppAction.EditItem -> if (state.signedIn) state.copy(editing = action.item, screen = Screen.EditItem) else state
     is AppAction.ModelChanged -> {
         val open = action.model is AppModel.Open

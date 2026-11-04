@@ -71,6 +71,9 @@ data class ContributionState(
     val confirmedDay: Int? = null,
 )
 
+/** A skill offer as the log has shaped it (ADR 0055). */
+data class SkillState(val skill: SkillId, val owner: MemberId, val name: String, val details: String, val openTo: Set<OpenTo>, val retired: Boolean = false)
+
 /** A note may be made at most this many times by one author in any [NOTE_WINDOW_DAYS] days, and is confirmed within that many days (ADR 0053). */
 const val MAX_NOTES_PER_WINDOW = 3
 const val NOTE_WINDOW_DAYS = 30
@@ -132,6 +135,8 @@ class MarketView(
     val baseConfig: circles.policy.CircleConfig? = null,
     /** Contribution notes (ADR 0053), confirmed or not, in the order they were made. */
     val contributions: List<ContributionState> = emptyList(),
+    /** Skill offers (ADR 0055), retired ones included, in the order they were first made. */
+    val skills: List<SkillState> = emptyList(),
 ) {
     /** The circle's rules for a decision dated [day]: the newest version that had taken effect by then (ADR 0051, C1). */
     fun configOn(circle: CircleId, day: Int): circles.policy.CircleConfig {
@@ -156,6 +161,7 @@ private val MARKET_TYPES = setOf(
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.LOAN_CANCEL, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
     EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE, EventType.STANDING_NOTE,
+    EventType.SKILL_UPSERT, EventType.SKILL_RETIRE,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -181,6 +187,7 @@ internal class MarketFold(
     private val pauses = linkedMapOf<PauseId, PauseState>()
     private val configs = mutableListOf<ConfigVersion>()
     private val notes = linkedMapOf<NoteId, ContributionState>()
+    private val skills = linkedMapOf<SkillId, SkillState>()
 
     private fun confirmedNotes(): List<ContributionState> = notes.values.filter { it.confirmedDay != null }
     private val configProposals = linkedMapOf<ConfigSettings, PendingConfig>()
@@ -198,7 +205,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList()), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList(), skills.values.toList()), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -210,6 +217,8 @@ internal class MarketFold(
         EventType.LOAN_DISPUTE -> parse(MarketPayloads.parseDispute(payload)) { dispute(e.author, it, e.day) }
         EventType.LOAN_RESOLVE -> parse(MarketPayloads.parseResolution(payload)) { resolve(e.author, it, e.day, id) }
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
+        EventType.SKILL_UPSERT -> parse(MarketPayloads.parseSkillUpsert(payload)) { offerSkill(e.author, it) }
+        EventType.SKILL_RETIRE -> parse(MarketPayloads.parseSkillRetire(payload)) { retireSkill(e.author, it) }
         EventType.STANDING_NOTE -> parse(MarketPayloads.parseStandingNote(payload)) { noteContribution(e.author, it, e.day, id) }
         EventType.CONFIG_UPDATE -> parse(MarketPayloads.parseConfigUpdate(payload)) { configUpdate(e.author, it, e.day, id) }
         EventType.PAUSE_PROPOSE -> parse(MarketPayloads.parsePausePropose(payload)) { proposePause(e.author, it, e.day, id) }
@@ -286,6 +295,29 @@ internal class MarketFold(
     private fun reviewersNeeded(subject: MemberId, day: Int, id: EventId): Int {
         val eligible = members().count { it != subject && isReviewer(it, day, id) }
         return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config(day).reviewersForPause, eligible - 1)))
+    }
+
+    // ---- skill offers (ADR 0055) ----
+
+    private fun offerSkill(author: MemberId, v: SkillOffer): String? {
+        if (author !in members()) return "only a member may offer a skill"
+        val existing = skills[v.skill]
+        if (existing != null) {
+            if (existing.owner != author) return "only the author may change an offer"
+            if (existing.retired) return "the offer has been retired"
+        } else if (skills.values.count { it.owner == author && !it.retired } >= MAX_LIVE_SKILLS_PER_MEMBER) {
+            return "at most $MAX_LIVE_SKILLS_PER_MEMBER live skill offers"
+        }
+        skills[v.skill] = SkillState(v.skill, author, v.name, v.details, v.openTo)
+        return null
+    }
+
+    private fun retireSkill(author: MemberId, v: SkillRetire): String? {
+        val skill = skills[v.skill] ?: return "unknown skill"
+        if (skill.owner != author) return "only the author may retire an offer"
+        if (skill.retired) return "the offer is already retired"
+        skills[v.skill] = skill.copy(retired = true)
+        return null
     }
 
     // ---- contribution notes (ADR 0053) ----

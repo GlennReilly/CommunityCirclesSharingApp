@@ -921,4 +921,43 @@ abstract class MarketContract {
         w.log += w.carol.confirmNote(w.circle, DAY + 3, id)
         assertEquals(listOf("already confirmed"), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 4, id))))
     }
+
+    // ---- skill offers (ADR 0055) ----
+
+    @Test
+    fun aMemberOffersChangesAndRetiresASkillAndOthersCannot() = runTest {
+        val w = world()
+        val id = newSkillId(w.crypto)
+        w.log += w.bea.skillUpsert(w.circle, DAY, id, "Bike repair", "Punctures and brakes", setOf(OpenTo.GIFT, OpenTo.THANKS))
+        var view = w.foldAs(w.carol)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(SkillState(id, w.bea.identity.member, "Bike repair", "Punctures and brakes", setOf(OpenTo.GIFT, OpenTo.THANKS)), view.market.skills.single())
+        // The author may change it whole; nobody else may change or retire it.
+        w.log += w.bea.skillUpsert(w.circle, DAY + 1, id, "Bike and wheelchair repair", "", setOf(OpenTo.SWAP))
+        assertEquals("Bike and wheelchair repair", w.foldAs(w.carol).market.skills.single().name)
+        assertEquals(listOf("only the author may change an offer"), w.reasons(listOf(w.carol.skillUpsert(w.circle, DAY, id, "Mine now", "", emptySet()))))
+        assertEquals(listOf("only the author may retire an offer"), w.reasons(listOf(w.carol.skillRetire(w.circle, DAY, id))))
+        assertEquals(listOf("unknown skill"), w.reasons(listOf(w.bea.skillRetire(w.circle, DAY, newSkillId(w.crypto)))))
+        w.log += w.bea.skillRetire(w.circle, DAY + 2, id)
+        view = w.foldAs(w.carol)
+        assertEquals(true, view.market.skills.single().retired)
+        assertEquals(listOf("the offer has been retired"), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY + 3, id, "Again", "", emptySet()))))
+        assertEquals(listOf("the offer is already retired"), w.reasons(listOf(w.bea.skillRetire(w.circle, DAY + 3, id))))
+    }
+
+    @Test
+    fun skillTextIsLimitedAndAMemberHasAtMostTenLiveOffers() = runTest {
+        val w = world()
+        assertEquals(listOf("name must be 1 to 60 characters"), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY, newSkillId(w.crypto), "   ", "", emptySet()))))
+        assertEquals(listOf("name must be 1 to 60 characters"), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY, newSkillId(w.crypto), "n".repeat(61), "", emptySet()))))
+        assertEquals(listOf("details must be at most 500 characters"), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY, newSkillId(w.crypto), "ok", "d".repeat(501), emptySet()))))
+        val ids = List(10) { newSkillId(w.crypto) }
+        ids.forEach { w.log += w.bea.skillUpsert(w.circle, DAY, it, "skill", "", emptySet()) }
+        assertEquals(emptyList(), w.foldAs(w.bea).rejected)
+        assertEquals(listOf("at most 10 live skill offers"), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY, newSkillId(w.crypto), "one too many", "", emptySet()))))
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.skillUpsert(w.circle, DAY, newSkillId(w.crypto), "someone else", "", emptySet()))), "the limit is per member")
+        // Retiring one makes room.
+        w.log += w.bea.skillRetire(w.circle, DAY + 1, ids.first())
+        assertEquals(emptyList(), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY + 1, newSkillId(w.crypto), "now fits", "", setOf(OpenTo.GIFT, OpenTo.SWAP, OpenTo.THANKS)))))
+    }
 }

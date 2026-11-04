@@ -86,6 +86,22 @@ data class VouchTerms(val vouchee: MemberId, val expiresDay: Int)
 
 data class LoanReturn(val loan: LoanId, val outcome: ReturnOutcome)
 
+/** A skill offer's id: random 128-bit lowercase hex, made by the member offering (ADR 0055). */
+data class SkillId(val v: String)
+
+/** What a skill is offered for; no money term (ADR 0055, A1). Stored as a bit set, so the order here is part of the format. */
+enum class OpenTo(val bit: Int) { GIFT(1), SWAP(2), THANKS(4) }
+
+/** `skill.upsert`: a member's offer of help, whole and replacing any earlier version of the same id. */
+data class SkillOffer(val skill: SkillId, val name: String, val details: String, val openTo: Set<OpenTo>)
+
+/** `skill.retire`. */
+data class SkillRetire(val skill: SkillId)
+
+const val MAX_SKILL_NAME_CHARS = 60
+const val MAX_SKILL_DETAILS_CHARS = 500
+const val MAX_LIVE_SKILLS_PER_MEMBER = 10
+
 /** A pause's id: random 128-bit lowercase hex, made by the proposer (ADR 0050). */
 data class PauseId(val v: String)
 
@@ -135,6 +151,9 @@ private const val K_NOTE_ID = "noteId"
 private const val K_KIND = "kind"
 private const val K_WITH = "with"
 private const val K_TEXT = "text"
+private const val K_SKILL = "skill"
+private const val K_OPEN_TO = "openTo"
+private const val K_DETAILS = "details"
 private const val K_PAUSE = "pause"
 private const val K_SUBJECT = "subject"
 private const val K_REASON = "reason"
@@ -168,6 +187,26 @@ object MarketPayloads {
         keys(map, required = names.toSet())?.let { return Parsed.Invalid(it) }
         val n = names.map { name -> (map[name] as? CborInt)?.value?.takeIf { it in 0..MAX_DAY } ?: return Parsed.Invalid("$name must be a whole number") }.map { it.toInt() }
         return Parsed.Ok(ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+    }
+
+    fun skillUpsert(v: SkillOffer): CborMap = CborMap.of(
+        K_SKILL to CborText(v.skill.v), K_NAME to CborText(v.name), K_DETAILS to CborText(v.details), K_OPEN_TO to CborInt(v.openTo.sumOf { it.bit }.toLong()),
+    )
+
+    fun skillRetire(v: SkillRetire): CborMap = CborMap.of(K_SKILL to CborText(v.skill.v))
+
+    fun parseSkillUpsert(map: CborMap): Parsed<SkillOffer> {
+        keys(map, required = setOf(K_SKILL, K_NAME, K_DETAILS, K_OPEN_TO))?.let { return Parsed.Invalid(it) }
+        val skill = randomId(map, K_SKILL) ?: return Parsed.Invalid("skill must be 32 lowercase hex characters")
+        val name = text(map, K_NAME, MAX_SKILL_NAME_CHARS)?.takeIf { it.isNotBlank() } ?: return Parsed.Invalid("name must be 1 to $MAX_SKILL_NAME_CHARS characters")
+        val details = text(map, K_DETAILS, MAX_SKILL_DETAILS_CHARS) ?: return Parsed.Invalid("details must be at most $MAX_SKILL_DETAILS_CHARS characters")
+        val bits = (map[K_OPEN_TO] as? CborInt)?.value?.takeIf { it in 0..OpenTo.entries.sumOf { o -> o.bit }.toLong() } ?: return Parsed.Invalid("openTo is not a known set")
+        return Parsed.Ok(SkillOffer(SkillId(skill), name, details, OpenTo.entries.filter { bits.toInt() and it.bit != 0 }.toSet()))
+    }
+
+    fun parseSkillRetire(map: CborMap): Parsed<SkillRetire> {
+        keys(map, required = setOf(K_SKILL))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(SkillRetire(SkillId(randomId(map, K_SKILL) ?: return Parsed.Invalid("skill must be 32 lowercase hex characters"))))
     }
 
     fun standingNote(v: StandingNote): CborMap = CborMap.of(K_NOTE_ID to CborText(v.note.v), K_KIND to CborText(v.kind.name), K_WITH to CborText(v.with.v), K_TEXT to CborText(v.text))

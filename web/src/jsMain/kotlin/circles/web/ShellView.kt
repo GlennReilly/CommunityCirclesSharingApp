@@ -4,6 +4,10 @@ import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MIN_RECOVERY_THRESHOLD
 import circles.app.NoteStatus
+import circles.app.SkillSummary
+import circles.event.MAX_SKILL_DETAILS_CHARS
+import circles.event.MAX_SKILL_NAME_CHARS
+import circles.event.OpenTo
 import circles.app.PauseRole
 import circles.event.ContributionKind
 import circles.event.MAX_NOTE_TEXT_CHARS
@@ -50,6 +54,8 @@ import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
+import kotlinx.html.fieldSet
+import kotlinx.html.legend
 import kotlinx.html.classes
 import kotlinx.html.a
 import kotlinx.html.button
@@ -122,6 +128,19 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val FORM_SKILL_ADD = "skill-add-form"
+const val FORM_SKILL_EDIT = "skill-edit-form"
+const val FIELD_SKILL_NAME = "skill-name"
+const val FIELD_SKILL_DETAILS = "skill-details"
+const val FIELD_SKILL_GIFT = "skill-open-gift"
+const val FIELD_SKILL_SWAP = "skill-open-swap"
+const val FIELD_SKILL_THANKS = "skill-open-thanks"
+const val ID_SKILL_SEARCH = "skill-search"
+const val ID_SKILL_COUNT = "skill-count"
+const val ATTR_SKILL_TEXT = "data-skill-text"
+const val ACTION_EDIT_SKILL = "edit-skill"
+const val ACTION_RETIRE_SKILL = "retire-skill"
+const val ATTR_SKILL = "data-skill"
 const val FORM_NOTE_ADD = "contribution-form"
 const val FIELD_NOTE_KIND = "contribution-kind"
 const val FIELD_NOTE_WITH = "contribution-with"
@@ -277,6 +296,9 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Stewards -> stewards(model.home)
                 Screen.RecoveryShares -> recoverySharesPage(model.home, state)
                 Screen.Items -> items(model.home)
+                Screen.Skills -> skills(model.home)
+                Screen.AddSkill -> skillForm(null)
+                Screen.EditSkill -> skillForm(model.home.skills.firstOrNull { it.skill == state.editingSkill })
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
                 Screen.Borrow -> borrow(model.home)
@@ -1805,4 +1827,117 @@ private fun FlowContent.contributions(home: HomeData) {
             }
         }
     }
+}
+
+private fun openToLabel(term: OpenTo): String = when (term) {
+    OpenTo.GIFT -> "Happy to help for nothing"
+    OpenTo.SWAP -> "Would like a favour or a trade back"
+    OpenTo.THANKS -> "A thank-you is enough"
+}
+
+/** Skill offers (ADR 0055): a directory every member can read, filtered on this device as you type. */
+private fun FlowContent.skills(home: HomeData) {
+    h1 { +Screen.Skills.title }
+    if (!home.canRead) {
+        p {
+            role = "status"
+            +"A steward needs to let you in before you can see or offer skills."
+        }
+        return
+    }
+    p { a(href = Screen.AddSkill.fragment) { +"Offer a skill" } }
+    if (home.skills.isEmpty()) {
+        p { +"Nobody has offered a skill yet." }
+        return
+    }
+    p { +"Find someone to ask. The app does not send messages: check who they are below, then ask them in person or wherever your group talks." }
+    label {
+        attributes["for"] = ID_SKILL_SEARCH
+        +"Search: "
+    }
+    input(type = InputType.text) {
+        id = ID_SKILL_SEARCH
+        attributes["autocomplete"] = "off"
+    }
+    p {
+        id = ID_SKILL_COUNT
+        role = "status"
+        +(if (home.skills.size == 1) "1 offer" else "${home.skills.size} offers")
+    }
+    ul {
+        for (skill in home.skills) {
+            li {
+                attributes[ATTR_SKILL_TEXT] = (skill.name + " " + skill.details).lowercase()
+                h2 { +skill.name }
+                if (skill.details.isNotBlank()) p { +skill.details }
+                if (skill.openTo.isNotEmpty()) p { +(skill.openTo.joinToString(". ") { openToLabel(it) } + ".") }
+                if (skill.ownedByMe) {
+                    p { +"Offered by you" }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_EDIT_SKILL
+                        attributes[ATTR_SKILL] = skill.skill.v
+                        +"Change"
+                    }
+                    details {
+                        summary { +"Remove" }
+                        p { +"This takes the offer off everyone's list." }
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_RETIRE_SKILL
+                            attributes[ATTR_SKILL] = skill.skill.v
+                            +"Remove this offer"
+                        }
+                    }
+                } else {
+                    val person = home.people.firstOrNull { it.member == skill.owner }
+                    p { +"Offered by member ${skill.owner.v.take(MEMBER_SHORT_CHARS)}${person?.let { ". Check who they are: ${it.fingerprint}" } ?: ""}" }
+                }
+            }
+        }
+    }
+}
+
+private fun FlowContent.skillForm(existing: SkillSummary?) {
+    h1 { +(if (existing == null) Screen.AddSkill.title else Screen.EditSkill.title) }
+    form {
+        id = if (existing == null) FORM_SKILL_ADD else FORM_SKILL_EDIT
+        label {
+            attributes["for"] = FIELD_SKILL_NAME
+            +"What you can help with: "
+        }
+        input(type = InputType.text, name = FIELD_SKILL_NAME) {
+            id = FIELD_SKILL_NAME
+            required = true
+            value = existing?.name.orEmpty()
+            attributes["maxlength"] = MAX_SKILL_NAME_CHARS.toString()
+            attributes[ATTR_MIN] = "1"
+            attributes["autocomplete"] = "off"
+        }
+        label {
+            attributes["for"] = FIELD_SKILL_DETAILS
+            +"More about it: "
+        }
+        textArea {
+            id = FIELD_SKILL_DETAILS
+            name = FIELD_SKILL_DETAILS
+            attributes["maxlength"] = MAX_SKILL_DETAILS_CHARS.toString()
+            +existing?.details.orEmpty()
+        }
+        fieldSet {
+            legend { +"What would be welcome in return (optional)" }
+            for ((field, term) in listOf(FIELD_SKILL_GIFT to OpenTo.GIFT, FIELD_SKILL_SWAP to OpenTo.SWAP, FIELD_SKILL_THANKS to OpenTo.THANKS)) {
+                div {
+                    input(type = InputType.checkBox, name = field) {
+                        id = field
+                        checked = existing != null && term in existing.openTo
+                    }
+                    label {
+                        attributes["for"] = field
+                        +openToLabel(term)
+                    }
+                }
+            }
+        }
+        formSubmit(if (existing == null) "Offer it" else "Save changes", ready = existing != null)
+    }
+    p { a(href = Screen.Skills.fragment) { +"Back to skills" } }
 }

@@ -14,7 +14,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | A person who has not seen the code follows the operator guides | S | The definition of done asks for it. **You** to find the person. |
 | Try every screen on a real phone (touch, small screen, slow network, Argon2 time) | S | Argon2 is 1.6 s on the old dev machine; re-tune on the slowest phone in the group. **You.** |
 | Screen-reader pass of the borrow flow, and a reading-level pass of the text | M | Axe is clean, but a person using a screen reader must complete borrowing unaided. |
-| Skills screen (`skill.upsert/retire`) | M | Listed in the core screens; now shows "coming soon". Could be cut from the pilot. |
+| ~~Skills screen~~ | done (ADR 0055) | Offers are a directory: no messaging, people talk outside the app. |
 | ~~Loan windows: block overlapping requests, cancel a request~~ | done (ADR 0052) | The owner changing an agreed window is not built: decline with a note and ask again. |
 | Reminders for returns | M | Needs a decision: in-page only (no push) fits the non-goals. |
 

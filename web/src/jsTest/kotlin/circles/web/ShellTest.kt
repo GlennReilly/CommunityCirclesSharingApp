@@ -314,7 +314,7 @@ class ShellViewTest {
         assertEquals(1, Regex("""aria-current="page"""").findAll(html).count())
         assertTrue("""href="#/skills"""" in html)
         assertFalse("""href="#/sign-in"""" in html)
-        assertTrue("This screen is not built yet." in html)
+        assertTrue("Nobody has offered a skill yet." in html, "every screen in the navigation is built now")
     }
 
     @Test fun homeSaysWhenYouAreNotLetInYet() {
@@ -1139,5 +1139,45 @@ class ShellViewTest {
         assertFalse(FORM_NOTE_ADD in standingPage(circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 0)))
         assertFalse("Log a contribution" in standingPage(circles.app.ContributionsSummary(candidates = emptyList(), notesLeft = 3)))
         assertFalse("Waiting for your confirmation" in standingPage(circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 3)))
+    }
+
+    // ---- skill offers (ADR 0055) ----
+
+    private fun skillLine(name: String, details: String, mine: Boolean, vararg terms: circles.event.OpenTo) =
+        circles.app.SkillSummary(circles.event.SkillId((if (mine) "1" else "2").repeat(32)), name, details, terms.toSet(), if (mine) me else bea, mine)
+
+    private fun skillsPage(vararg skills: circles.app.SkillSummary, canRead: Boolean = true) =
+        render(open(home(canRead = canRead).copy(skills = skills.toList(), people = listOf(MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "ab12 cd34")))).copy(screen = Screen.Skills))
+
+    @Test fun theSkillsPageListsOffersWithSearchWhoToAskAndHowToCheckThem() {
+        val html = skillsPage(skillLine("Bike repair", "Punctures and brakes", false, circles.event.OpenTo.GIFT, circles.event.OpenTo.THANKS), skillLine("Bread baking", "", true))
+        assertTrue("2 offers" in html && """id="$ID_SKILL_SEARCH"""" in html && "Search: " in html)
+        assertTrue("""$ATTR_SKILL_TEXT="bike repair punctures and brakes"""" in html)
+        assertTrue("Happy to help for nothing. A thank-you is enough." in html)
+        assertTrue("Check who they are: ab12 cd34" in html)
+        assertTrue("Offered by you" in html && """$ATTR_ACTION="$ACTION_EDIT_SKILL"""" in html && """$ATTR_ACTION="$ACTION_RETIRE_SKILL"""" in html)
+        assertTrue("The app does not send messages" in html)
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EDIT_SKILL"""").findAll(html).count(), "only on my own offer")
+    }
+
+    @Test fun theSkillsPageHasEmptyAndNotYetLetInStates() {
+        assertTrue("Nobody has offered a skill yet." in skillsPage())
+        assertFalse(ID_SKILL_SEARCH in skillsPage())
+        assertTrue("A steward needs to let you in" in skillsPage(canRead = false))
+        assertTrue(Screen.AddSkill.fragment in skillsPage())
+        assertFalse(Screen.AddSkill in Screen.navigation || Screen.EditSkill in Screen.navigation)
+        assertTrue(Screen.Skills in Screen.navigation)
+    }
+
+    @Test fun theSkillFormWaitsForANameAndPreselectsWhatWasChosen() {
+        val add = render(open(home()).copy(screen = Screen.AddSkill))
+        assertTrue("""id="$FORM_SKILL_ADD"""" in add && "What you can help with: " in add)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(add.substringAfter(FORM_SKILL_ADD))?.value ?: error("no button")
+        assertTrue("hidden" in button)
+        assertFalse(Regex("""\schecked""").containsMatchIn(add.substringAfter("What would be welcome")))
+        val edit = render(open(home().copy(skills = listOf(skillLine("Bike repair", "x", true, circles.event.OpenTo.SWAP)))).copy(screen = Screen.EditSkill, editingSkill = circles.event.SkillId("1".repeat(32))))
+        assertTrue("""id="$FORM_SKILL_EDIT"""" in edit && """value="Bike repair"""" in edit)
+        assertEquals(1, Regex("""\schecked""").findAll(edit.substringAfter("What would be welcome")).count())
+        assertEquals(Screen.Skills, reduce(open(), AppAction.Navigate(Screen.EditSkill)).screen, "no offer chosen, so back to the list")
     }
 }

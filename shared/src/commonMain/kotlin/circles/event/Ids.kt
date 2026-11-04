@@ -32,6 +32,8 @@ fun newItemId(crypto: Crypto): circles.policy.ItemId = circles.policy.ItemId(cry
 
 fun newLoanId(crypto: Crypto): LoanId = LoanId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())
 
+fun newSkillId(crypto: Crypto): SkillId = SkillId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())
+
 fun newNoteId(crypto: Crypto): NoteId = NoteId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())
 
 fun newPauseId(crypto: Crypto): PauseId = PauseId(crypto.randomBytes(RANDOM_ID_BYTES).toHex())

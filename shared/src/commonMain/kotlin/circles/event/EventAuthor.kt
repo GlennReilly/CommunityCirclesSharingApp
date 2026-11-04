@@ -156,6 +156,12 @@ class EventAuthor(
     fun configUpdate(circle: CircleId, day: Int, settings: ConfigSettings): Envelope =
         build(circle, EventType.CONFIG_UPDATE, day, CborMap.EMPTY, MarketPayloads.configUpdate(settings))
 
+    fun skillUpsert(circle: CircleId, day: Int, skill: SkillId, name: String, details: String, openTo: Set<OpenTo>): Envelope =
+        build(circle, EventType.SKILL_UPSERT, day, CborMap.EMPTY, MarketPayloads.skillUpsert(SkillOffer(skill, name, details, openTo)))
+
+    fun skillRetire(circle: CircleId, day: Int, skill: SkillId): Envelope =
+        build(circle, EventType.SKILL_RETIRE, day, CborMap.EMPTY, MarketPayloads.skillRetire(SkillRetire(skill)))
+
     fun standingNote(circle: CircleId, day: Int, note: NoteId, kind: ContributionKind, with: MemberId, text: String): Envelope =
         build(circle, EventType.STANDING_NOTE, day, CborMap.EMPTY, MarketPayloads.standingNote(StandingNote(note, kind, with, text)))
 
