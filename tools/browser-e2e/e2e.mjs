@@ -118,6 +118,7 @@ try {
   await bea.evaluate('document.getElementById("loan-request-form").requestSubmit()');
   await until(bea, has(bea, 'Waiting for an answer') + ' && ' + has(bea, 'Long ladder'), 'bea waiting'); ok('bea asked to borrow the ladder');
   await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Requests to answer') + ' && ' + has(alice, 'Note: for the fence'), 'alice sees the request'); ok('alice sees the request and its note');
+  await checkAccessibility(alice, 'borrow, a request to answer');
   await click(alice, 'approve-loan'); await until(alice, has(alice, 'Ready to hand over'), 'alice approved'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced approval');
   await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Ready to hand over') + ' && ' + has(bea, 'Details: Garage at the back, ring first'), 'bea sees approval and the details'); ok('approval gave bea the private details');
   await click(bea, 'handover-loan'); await until(bea, has(bea, 'You have confirmed'), 'bea confirmed'); await sleep(1500); await click(bea, 'sync'); await until(bea, has(bea, 'Up to date'), 'bea synced handover');

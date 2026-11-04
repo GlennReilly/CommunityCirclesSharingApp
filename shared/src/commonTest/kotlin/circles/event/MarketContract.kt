@@ -984,4 +984,32 @@ abstract class MarketContract {
             assertTrue(w.reasons(listOf(upsert(listOf(bad), DAY + 3))).single().startsWith("photos must list"), "$bad")
         }
     }
+
+    // ---- approving other dates (ADR 0061) ----
+
+    @Test
+    fun anOwnerMayApproveOtherDatesAndTheBookingUsesTheNewOnes() = runTest {
+        val w = world()
+        w.shareItem()
+        val (first, firstRequest) = w.request(by = w.bea)
+        val (second, secondRequest) = w.request(by = w.carol)
+        w.log += firstRequest; w.log += secondRequest
+        // Bea asked for FROM..TO; the owner approves two days later.
+        w.log += w.founder.loanApprove(w.circle, DAY, first, w.item, TO + 1, TO + 3, w.itemKey, listOf(w.bea.identity.registration))
+        val loan = w.foldAs(w.bea).market.loans.getValue(first)
+        assertEquals(LoanStatus.APPROVED, loan.status)
+        assertEquals(TO + 1 to TO + 3, loan.fromDay to loan.toDay)
+        assertEquals(FROM to TO, loan.requestedFromDay to loan.requestedToDay, "what was asked for is kept")
+        // Carol's request for FROM..TO is free now (Bea's booking moved), and one for the new days is not.
+        assertEquals(emptyList(), w.reasons(listOf(w.founder.loanApprove(w.circle, DAY, second, w.item, FROM, TO, w.itemKey, listOf(w.carol.identity.registration)))))
+        assertEquals(
+            listOf("the item is already promised for some of those days"),
+            w.reasons(listOf(w.founder.loanApprove(w.circle, DAY, second, w.item, TO + 2, TO + 4, w.itemKey, listOf(w.carol.identity.registration)))),
+        )
+        // An approval with the same dates is an unchanged loan.
+        w.log += w.founder.loanApprove(w.circle, DAY, second, w.item, FROM, TO, w.itemKey, listOf(w.carol.identity.registration))
+        val same = w.foldAs(w.carol).market.loans.getValue(second)
+        assertEquals(FROM to TO, same.requestedFromDay to same.requestedToDay)
+        assertEquals(same.fromDay, same.requestedFromDay)
+    }
 }

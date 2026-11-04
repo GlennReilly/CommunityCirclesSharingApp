@@ -64,6 +64,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0058](0058-server-compression.md) | The server compresses text itself | Accepted |
 | [0059](0059-return-reminders.md) | Return reminders | Accepted |
 | [0060](0060-item-photos.md) | Item photos | Accepted |
+| [0061](0061-approving-other-dates.md) | Approving other dates | Accepted |
 
 ## Open decisions still to record
 

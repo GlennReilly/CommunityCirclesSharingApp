@@ -1273,4 +1273,16 @@ class ShellViewTest {
         assertTrue("An item can have 3 photos. Remove one to add another." in full)
         assertFalse(FORM_PHOTO_ADD in render(open(home()).copy(screen = Screen.AddItem)), "photos are added once the item exists")
     }
+
+    // ---- approving other dates (ADR 0061) ----
+
+    @Test fun theOwnerCanApproveOtherDatesAndTheBorrowerIsToldWhenTheyWereChanged() {
+        val request = loan("a", LoanRole.OWNER, LoanStatus.REQUESTED)
+        val html = render(open(home().copy(loans = listOf(request))).copy(screen = Screen.Borrow))
+        assertTrue("Approve with different dates" in html && """id="$FORM_LOAN_CHANGE_PREFIX${request.loan.v}"""" in html)
+        assertTrue("""value="${circles.app.CalendarDay.format(request.fromDay)}"""" in html && "Approve with these dates" in html)
+        val changed = loan("b", LoanRole.BORROWER, LoanStatus.APPROVED).copy(datesChanged = true)
+        assertTrue("The owner approved other dates than you asked for" in render(open(home().copy(loans = listOf(changed))).copy(screen = Screen.Borrow)))
+        assertFalse("other dates than you asked" in render(open(home().copy(loans = listOf(changed.copy(datesChanged = false)))).copy(screen = Screen.Borrow)))
+    }
 }

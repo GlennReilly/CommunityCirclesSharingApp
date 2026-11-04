@@ -296,6 +296,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 if (loan != null && claim != null) reportLoan(circleApp.disputeReturn(loan, claim, field(FIELD_NOTE)), "Reported. A steward who is not part of this loan will decide.", null)
                 return@busyLaunch
             }
+            if (form.id.startsWith(FORM_LOAN_CHANGE_PREFIX)) {
+                val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
+                val from = CalendarDay.parse(field(FIELD_FROM))
+                val to = CalendarDay.parse(field(FIELD_TO))
+                if (loan == null || from == null || to == null) dispatch(AppAction.Notice("Choose both dates."))
+                else reportLoan(circleApp.respondToLoan(loan, true, "", from, to), "Approved with the new dates. They can now read the details.", null)
+                return@busyLaunch
+            }
             if (form.id.startsWith(FORM_RETURN_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val outcome = ReturnOutcome.entries.firstOrNull { it.name == field(FIELD_OUTCOME) }

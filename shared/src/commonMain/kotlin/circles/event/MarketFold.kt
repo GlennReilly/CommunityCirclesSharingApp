@@ -48,6 +48,9 @@ data class LoanState(
     /** The day the owner confirmed the return, if they did (ADR 0043). */
     val confirmedDay: Int? = null,
     val dispute: DisputeState? = null,
+    /** The dates the borrower asked for; [fromDay] and [toDay] are the agreed ones, which the owner may have changed (ADR 0061). */
+    val requestedFromDay: Int = fromDay,
+    val requestedToDay: Int = toDay,
 )
 
 /** An owner's dispute of a return, and how it ended. [resolvedDay] and [outcome] are null while it is pending. */
@@ -461,7 +464,7 @@ internal class MarketFold(
             loans[v.loan] = loan.copy(status = LoanStatus.DECLINED)
             return null
         }
-        if (loan.status == LoanStatus.REQUESTED && bookedOver(loan.item, loan.fromDay, loan.toDay, except = loan.loan)) return "the item is already promised for some of those days"
+        if (loan.status == LoanStatus.REQUESTED && bookedOver(loan.item, v.fromDay, v.toDay, except = loan.loan)) return "the item is already promised for some of those days"
         if (v.keyWraps.any { devices[it.device]?.registration?.member != loan.borrower }) return "keyWraps must go to the borrower's devices"
         val keyId = loan.detailKeyId ?: item.detailKeyId
         loans[v.loan] = loan.copy(

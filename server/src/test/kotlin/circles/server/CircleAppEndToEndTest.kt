@@ -1370,4 +1370,34 @@ class CircleAppEndToEndTest {
         assertEquals(PhotoResult.NotAllowed, alice.app.removePhoto(ladder, mine.photo), "already gone")
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
+
+    @Test
+    fun anOwnerApprovesOtherDatesAndTheBorrowerIsToldAndMayCancel() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.ESSENTIAL, "") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+        val loan = (bea.app.requestLoan(ladder, TODAY + 1, TODAY + 3, "") as LoanResult.Done).loan
+        bea.app.syncOnce(); alice.app.syncOnce()
+        // Dates in the past or the wrong way round are refused before anything is sent.
+        assertEquals(LoanResult.BadDates(MAX_LOAN_DAYS), alice.app.respondToLoan(loan, true, "", TODAY - 1, TODAY + 2))
+        assertEquals(LoanResult.BadDates(MAX_LOAN_DAYS), alice.app.respondToLoan(loan, true, "", TODAY + 5, TODAY + 4))
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(loan, true, "", TODAY + 4, TODAY + 6))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        val mine = home(bea.app).loans.single()
+        assertEquals(LoanStatus.APPROVED, mine.status)
+        assertEquals(TODAY + 4 to TODAY + 6, mine.fromDay to mine.toDay)
+        assertTrue(mine.datesChanged)
+        assertFalse(home(alice.app).loans.single().datesChanged.not(), "the owner sees it as changed too")
+        assertIs<LoanResult.Done>(bea.app.cancelLoan(loan))
+        listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
 }

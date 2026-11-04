@@ -224,6 +224,8 @@ data class LoanSummary(
     val canConfirm: Boolean = false,
     val canDispute: Boolean = false,
     val canResolve: Boolean = false,
+    /** The owner approved other dates than the borrower asked for (ADR 0061). */
+    val datesChanged: Boolean = false,
 )
 
 sealed interface LoanResult {
@@ -1469,19 +1471,23 @@ class CircleApp(
     }
 
     /** The owner answers a request. Approving wraps the item's key to the borrower's devices, so they can read its details. */
-    suspend fun respondToLoan(loan: LoanId, approve: Boolean, note: String): LoanResult {
+    suspend fun respondToLoan(loan: LoanId, approve: Boolean, note: String, fromDay: Int? = null, toDay: Int? = null): LoanResult {
         val s = session ?: return LoanResult.NotAllowed
         if (note.trim().length > MAX_LOAN_NOTE_CHARS) return LoanResult.NoteTooLong(MAX_LOAN_NOTE_CHARS)
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
         val state = view.market.loans[loan]?.takeIf { it.owner == s.identity.member && it.status == LoanStatus.REQUESTED } ?: return LoanResult.NotAllowed
-        if (approve && view.market.loans.values.any { it.item == state.item && it.loan != loan && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) && it.fromDay <= state.toDay && state.fromDay <= it.toDay }) return LoanResult.AlreadyBooked
+        // The owner may approve other dates than the ones asked for (ADR 0061); the borrower can cancel if they do not suit.
+        val from = fromDay ?: state.fromDay
+        val to = toDay ?: state.toDay
+        if (approve && (fromDay != null || toDay != null)) windowProblem(from, to, mustStartTodayOrLater = true)?.let { return it }
+        if (approve && view.market.loans.values.any { it.item == state.item && it.loan != loan && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) && it.fromDay <= to && from <= it.toDay }) return LoanResult.AlreadyBooked
         s.author.keyRing = view.keys
         val reply = note.trim().ifEmpty { null }
         val event = if (approve) {
             val item = view.market.items[state.item] ?: return LoanResult.NotAllowed
             val key = view.market.itemKeys[state.item to item.detailKeyId] ?: return LoanResult.NotAllowed
             val borrowerDevices = view.devices.values.filter { !it.revoked && it.registration.member == state.borrower }.map { it.registration }
-            s.author.loanApprove(s.circle, today(), loan, state.item, state.fromDay, state.toDay, key, borrowerDevices, reply)
+            s.author.loanApprove(s.circle, today(), loan, state.item, from, to, key, borrowerDevices, reply)
         } else {
             s.author.loanDecline(s.circle, today(), loan, state.fromDay, state.toDay, reply)
         }
@@ -1717,6 +1723,7 @@ class CircleApp(
                             description = ((view.market.details[loan.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
                             reported = loan.outcome,
                             confirmed = loan.confirmedDay != null,
+                            datesChanged = loan.fromDay != loan.requestedFromDay || loan.toDay != loan.requestedToDay,
                             dispute = dispute?.let {
                                 DisputeSummary(
                                     it.claim, it.note, it.day,

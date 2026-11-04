@@ -133,6 +133,7 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val FORM_LOAN_CHANGE_PREFIX = "loan-change-form-"
 const val FORM_PHOTO_ADD = "photo-add-form"
 const val FIELD_PHOTO_FILE = "photo-file"
 const val FIELD_PHOTO_ALT = "photo-alt"
@@ -908,6 +909,28 @@ private fun FlowContent.borrow(home: HomeData) {
                     loanHeading(loan)
                     loanButton(ACTION_APPROVE_LOAN, loan, "Approve and share the details")
                     loanButton(ACTION_DECLINE_LOAN, loan, "Decline")
+                    details {
+                        summary { +"Approve with different dates" }
+                        p { +"If the dates asked for do not suit you, approve others. They can cancel if the new dates do not suit them." }
+                        form {
+                            id = FORM_LOAN_CHANGE_PREFIX + loan.loan.v
+                            attributes[ATTR_LOAN] = loan.loan.v
+                            for ((field, text, day) in listOf(Triple(FIELD_FROM, "From: ", loan.fromDay), Triple(FIELD_TO, "To: ", loan.toDay))) {
+                                label {
+                                    attributes["for"] = "$field-${loan.loan.v}"
+                                    +text
+                                }
+                                input(type = InputType.date, name = field) {
+                                    id = "$field-${loan.loan.v}"
+                                    required = true
+                                    value = CalendarDay.format(day)
+                                    attributes["min"] = CalendarDay.format(home.today)
+                                    attributes[ATTR_MIN] = ISO_DATE_CHARS.toString()
+                                }
+                            }
+                            formSubmit("Approve with these dates", ready = true)
+                        }
+                    }
                 }
             }
         }
@@ -919,6 +942,7 @@ private fun FlowContent.borrow(home: HomeData) {
                 div {
                     loanHeading(loan)
                     loan.description?.takeIf { loan.role == LoanRole.BORROWER && it.isNotBlank() }?.let { p { +"Details: $it" } }
+                    if (loan.datesChanged && loan.role == LoanRole.BORROWER) p { +"The owner approved other dates than you asked for. If they do not suit you, cancel and ask again." }
                     if (loan.role == LoanRole.BORROWER && !loan.iConfirmedHandover) loanButton(ACTION_CANCEL_LOAN, loan, "Cancel this loan")
                     if (loan.iConfirmedHandover) {
                         p { +"You have confirmed. Waiting for ${who(loan)} to confirm too." }

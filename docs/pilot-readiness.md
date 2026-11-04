@@ -15,7 +15,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | Try every screen on a real phone (touch, small screen, slow network, Argon2 time) | S | Argon2 is 1.6 s on the old dev machine; re-tune on the slowest phone in the group. **You.** |
 | Screen-reader pass of the borrow flow, and a reading-level pass of the text | M | Axe is clean, but a person using a screen reader must complete borrowing unaided. |
 | ~~Skills screen~~ | done (ADR 0055) | Offers are a directory: no messaging, people talk outside the app. |
-| ~~Loan windows: block overlapping requests, cancel a request~~ | done (ADR 0052) | The owner changing an agreed window is not built: decline with a note and ask again. |
+| ~~Loan windows: block overlapping requests, cancel a request~~ | done (ADR 0052) | The owner may approve other dates (ADR 0061); changing dates after approving is not built: the borrower cancels and asks again. |
 | ~~Reminders for returns~~ | done (ADR 0059) | In the app only; email is left until the pilot shows it is needed. |
 
 ## Should do
