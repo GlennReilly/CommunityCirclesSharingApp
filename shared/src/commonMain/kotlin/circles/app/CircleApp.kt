@@ -1004,6 +1004,8 @@ class CircleApp(
         return view.market.pauses.mapNotNull { pause ->
             val status = pause.statusOn(now)
             if (status == circles.event.PauseStatus.PROPOSED || status == circles.event.PauseStatus.LIVE) return@mapNotNull null
+            // A proposal that never took effect leaves no mark on the member: it is not kept in the history.
+            if (pause.liveFrom == null) return@mapNotNull null
             val isSubject = pause.subject == me
             if (!isSubject && !mayReview) return@mapNotNull null
             val endedDay = when (status) {
@@ -1090,8 +1092,13 @@ class CircleApp(
         }
         val refs = held.map { (hash, bytes) -> circles.export.ExportBlobRef(hash, bytes.size.toLong()) }
         val built = circles.export.CircleExport.build(crypto, s.circle, entries.map { it.envelope.toDto() }, refs)
-        val bytes = circles.export.ZipStore.write(built.entries(held)) ?: return ExportResult.Incomplete
-        return ExportResult.Ready("circles-export-${s.circle.v.take(EXPORT_NAME_ID_CHARS)}-${CalendarDay.format(today())}.zip", bytes, entries.size, held.size, missing)
+        val name = "circles-export-${s.circle.v.take(EXPORT_NAME_ID_CHARS)}-${CalendarDay.format(today())}.zip"
+        val bytes = circles.export.ZipStore.write(built.entries(held))
+        if (bytes != null) return ExportResult.Ready(name, bytes, entries.size, held.size, missing)
+        // Too big for the zip format with photos: send the log alone rather than nothing, and say the photos are out.
+        val bare = circles.export.CircleExport.build(crypto, s.circle, entries.map { it.envelope.toDto() }, emptyList())
+        val logOnly = circles.export.ZipStore.write(bare.entries(emptyMap())) ?: return ExportResult.Incomplete
+        return ExportResult.Ready(name, logOnly, entries.size, 0, wanted.size)
     }
 
     // ---- recovery shares (ADR 0048) ----

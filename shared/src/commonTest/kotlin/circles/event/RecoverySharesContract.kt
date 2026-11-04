@@ -252,4 +252,17 @@ abstract class RecoverySharesContract {
         assertTrue("share set" in reasons.getValue(wrapWithSet.eventId(circle.crypto)))
         assertEquals(setOf(circle.a.identity.member, circle.b.identity.member, circle.c.identity.member), view.shareHolders.getValue(FIRST_EPOCH))
     }
+
+    @Test
+    fun twoStewardsSetsInterleavedInTheLogEachKeepTheirOwnHolders() = runTest {
+        val circle = Circle(newCrypto(), newCipher())
+        circle.b.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, circle.key)
+        val fromA = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
+        val fromB = circle.b.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices.take(2), 2, circle.day)!!
+        // a's set is cut in two by one of b's shares: a's set was touched last, and all three of its stewards still count.
+        circle.log += listOf(fromA[0], fromB[0], fromA[1], fromA[2], fromA[3])
+        val view = circle.fold(circle.a.identity)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(setOf(circle.a.identity.member, circle.b.identity.member, circle.c.identity.member), view.shareHolders.getValue(FIRST_EPOCH))
+    }
 }

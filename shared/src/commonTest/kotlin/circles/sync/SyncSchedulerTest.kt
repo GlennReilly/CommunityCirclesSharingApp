@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -172,5 +173,23 @@ class SyncSchedulerTest {
         scheduler.trigger(SyncTrigger.OPEN)
         advanceTimeBy(1_000)
         assertEquals(1, script.runs.size)
+    }
+
+    @Test
+    fun aSignalSentAfterAReaderWasCancelledIsKeptNotHandedToNobody() = runTest {
+        val signal = Signal<Int>()
+        val reader = launch { signal.receive() }
+        runCurrent()
+        reader.cancel()
+        signal.send(7) // before the cancelled reader has run any clean-up
+        assertEquals(7, signal.take())
+        // And a waiting reader still gets the newest value at once.
+        var got = 0
+        val waiting = launch { got = signal.receive() }
+        runCurrent()
+        signal.send(9)
+        runCurrent()
+        assertEquals(9, got)
+        waiting.join()
     }
 }

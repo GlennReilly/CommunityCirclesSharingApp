@@ -162,6 +162,7 @@ class CircleFold(
          */
         private val shareBatch = mutableMapOf<Int, ShareBatch>()
         private val shareSets = mutableMapOf<Pair<Int, String>, MemberId>()
+        private val namedHolders = mutableMapOf<Pair<Int, String>, MutableSet<MemberId>>()
         fun commitmentsSnapshot(): Map<Int, ByteString> = commitments.toMap()
 
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
@@ -335,7 +336,9 @@ class CircleFold(
                 val owner = shareSets[terms.epoch to named]
                 if (owner != null && owner != sender.member) return "that share set belongs to another steward"
                 shareSets[terms.epoch to named] = sender.member
-                previous != null && previous.set == named
+                // The holders are those of the set touched last; a set keeps its own holders even if another set's share lands in between.
+                shareHolders[terms.epoch] = namedHolders.getOrPut(terms.epoch to named) { mutableSetOf() }
+                true
             } else {
                 // Earlier circles named no set: a steward's several devices follow each other; the same steward again after another one starts a new set.
                 previous != null && previous.set == null && previous.sender == sender.member && previous.position == position - 1 &&

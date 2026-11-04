@@ -3,7 +3,9 @@ package circles.sync
 import circles.policy.CircleId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CompletableDeferred
+import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -109,16 +111,13 @@ class SyncScheduler(
  */
 internal class Signal<T : Any> {
     private var pending: T? = null
-    private var waiter: CompletableDeferred<T>? = null
+    private var waiter: CancellableContinuation<T>? = null
 
     fun send(value: T) {
         val reader = waiter
-        if (reader != null) {
-            waiter = null
-            reader.complete(value)
-        } else {
-            pending = value
-        }
+        waiter = null
+        // A reader that was cancelled has already removed itself (invokeOnCancellation runs at once), so a signal is never handed to nobody.
+        if (reader == null) pending = value else reader.resume(value)
     }
 
     /** Takes what is waiting, if anything, without waiting. */
@@ -126,12 +125,9 @@ internal class Signal<T : Any> {
 
     suspend fun receive(): T {
         take()?.let { return it }
-        val reader = CompletableDeferred<T>()
-        waiter = reader
-        try {
-            return reader.await()
-        } finally {
-            if (waiter === reader) waiter = null
+        return suspendCancellableCoroutine { reader ->
+            waiter = reader
+            reader.invokeOnCancellation { if (waiter === reader) waiter = null }
         }
     }
 }
