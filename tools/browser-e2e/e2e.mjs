@@ -295,6 +295,26 @@ try {
   await alice.evaluate('(() => { const box = document.getElementById("skill-search"); box.value = "BRAKES"; box.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
   await until(alice, has(alice, '1 offer') + ' && document.querySelector("[data-skill-text]").hidden === false', 'search finds by details, any case'); ok('search matches the details and ignores case');
 
+  // QR codes (ADR 0062): bea shows her code (a link), alice opens it and is told it matches; a doctored fingerprint does not.
+  await bea.evaluate('location.hash = "#/members"'); await until(bea, 'document.getElementById("verify-link") !== null', 'bea qr code section');
+  await bea.evaluate('document.querySelector("details summary").click()'); await sleep(300);
+  await checkAccessibility(bea, 'members with my qr code');
+  const verifyLink = await bea.evaluate('document.getElementById("verify-link").value');
+  if (!/#\/verify\/[0-9a-f]{32}\/[0-9a-f]{32}\/[0-9a-f]{20}$/.test(verifyLink)) throw new Error('bad verify link ' + verifyLink);
+  const qrBox = await bea.evaluate('(() => { const s = document.querySelector("svg.qr"); const r = s.getBoundingClientRect(); return JSON.stringify([r.width, r.height, s.querySelector("path").getAttribute("d").length]); })()');
+  const [qrW, qrH, qrPath] = JSON.parse(qrBox); if (!(qrW > 100 && Math.abs(qrW - qrH) < 1 && qrPath > 500)) throw new Error('QR code not drawn: ' + qrBox); ok('bea shows a QR code of her verify link (' + Math.round(qrW) + ' px square)');
+  const hashOf = link => link.slice(link.indexOf('#'));
+  await alice.evaluate('location.hash = ' + JSON.stringify(hashOf(verifyLink))); await until(alice, has(alice, 'Matches. This is member'), 'alice told it matches'); ok('opening bea\'s code on alice\'s side says it matches');
+  await checkAccessibility(alice, 'check a member, matches');
+  if (!(await alice.evaluate('location.hash')).endsWith('#/verify')) throw new Error('the address still holds the link');
+  const forged = verifyLink.replace(/[0-9a-f]{20}$/, '0'.repeat(20));
+  await alice.evaluate('location.hash = ' + JSON.stringify(hashOf(forged))); await until(alice, has(alice, 'Does not match'), 'alice told it does not match'); ok('a doctored fingerprint is reported as not matching');
+  await checkAccessibility(alice, 'check a member, does not match');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, 'document.querySelector("[data-action=tag-item]") !== null', 'tag button');
+  await click(alice, 'tag-item'); await until(alice, has(alice, 'Print this tag') + ' && document.querySelector("svg.qr") !== null', 'tag page'); ok('an item has a printable tag page with a QR code');
+  await checkAccessibility(alice, 'item tag');
+  await alice.evaluate('location.hash = "#/items"'); await sleep(300);
+
   // Pauses (ADR 0050): nobody is paused; the page explains what a pause is, and passes the accessibility check.
   await alice.evaluate('location.hash = "#/pauses"'); await until(alice, has(alice, 'No pauses are proposed or in force that you can see.'), 'pauses page');
   if (!(await alice.evaluate(has(alice, 'except essentials')))) throw new Error('the pause page does not say essentials stay open'); ok('the pauses page explains that essentials stay open');

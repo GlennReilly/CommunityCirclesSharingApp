@@ -9,6 +9,8 @@ import circles.policy.MemberId
 
 private const val DEVICE_PREFIX = "#/device/"
 private const val RESTORE_PREFIX = "#/restore/"
+private const val VERIFY_PREFIX = "#/verify/"
+private const val ITEM_PREFIX = "#/item/"
 private const val KEY_BYTES = 32
 private const val FINGERPRINT_HEX_CHARS = 20
 private const val FINGERPRINT_GROUP = 4
@@ -17,6 +19,9 @@ private const val FINGERPRINT_GROUP = 4
 object Fingerprint {
     fun of(crypto: Crypto, signPub: ByteString): String =
         crypto.hash256(signPub.toByteArray()).toHex().take(FINGERPRINT_HEX_CHARS).chunked(FINGERPRINT_GROUP).joinToString(" ")
+
+    /** The same fingerprint without the spaces, as it goes in a link. */
+    fun compact(fingerprint: String): String = fingerprint.filter { it != ' ' }
 }
 
 /**
@@ -65,6 +70,40 @@ class RestoreLink(val circle: CircleId, val member: MemberId) {
             val parts = trimmed.substring(start + RESTORE_PREFIX.length).split('/')
             if (parts.size != 2 || !parts.all { isValidRandomId(it) }) return null
             return RestoreLink(CircleId(parts[0]), MemberId(parts[1]))
+        }
+    }
+}
+
+/**
+ * The link a member's QR code holds (ADR 0062): `{origin}/#/verify/{circle}/{member}/{fingerprint}`. Public information only.
+ * The page never trusts the fingerprint in the link: it works out the member's own and compares.
+ */
+class VerifyLink(val circle: CircleId, val member: MemberId, val fingerprint: String) {
+    fun format(origin: String): String = "${origin.trimEnd('/')}/$VERIFY_PREFIX${circle.v}/${member.v}/$fingerprint"
+
+    companion object {
+        fun parse(text: String): VerifyLink? {
+            val trimmed = text.trim()
+            val start = trimmed.indexOf(VERIFY_PREFIX).takeIf { it >= 0 } ?: return null
+            if (start != 0 && trimmed[start - 1] != '/') return null
+            val parts = trimmed.substring(start + VERIFY_PREFIX.length).split('/')
+            if (parts.size != 3 || !isValidRandomId(parts[0]) || !isValidRandomId(parts[1]) || !circles.event.isLowerHex(parts[2], FINGERPRINT_HEX_CHARS)) return null
+            return VerifyLink(CircleId(parts[0]), MemberId(parts[1]), parts[2])
+        }
+    }
+}
+
+/** The link on an item's printed tag (ADR 0062): `{origin}/#/item/{item}`; opening it shows that item to a signed-in member. */
+class ItemLink(val item: circles.policy.ItemId) {
+    fun format(origin: String): String = "${origin.trimEnd('/')}/$ITEM_PREFIX${item.v}"
+
+    companion object {
+        fun parse(text: String): ItemLink? {
+            val trimmed = text.trim()
+            val start = trimmed.indexOf(ITEM_PREFIX).takeIf { it >= 0 } ?: return null
+            if (start != 0 && trimmed[start - 1] != '/') return null
+            val id = trimmed.substring(start + ITEM_PREFIX.length)
+            return if (isValidRandomId(id)) ItemLink(circles.policy.ItemId(id)) else null
         }
     }
 }

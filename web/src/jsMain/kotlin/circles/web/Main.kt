@@ -3,6 +3,8 @@ package circles.web
 import circles.app.AppModel
 import circles.app.CircleApp
 import circles.app.InviteLink
+import circles.app.ItemLink
+import circles.app.VerifyLink
 import circles.app.AddDeviceResult
 import circles.app.CalendarDay
 import circles.app.DeviceLink
@@ -130,6 +132,21 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         loadImages()
     }
 
+    /** True if the address held a verify or item link: it is dispatched and the address is replaced by the page's own (ADR 0062). */
+    private fun openLink(): Boolean {
+        VerifyLink.parse(window.location.hash)?.let { link ->
+            dispatch(AppAction.VerifyLinkSeen(link))
+            window.history.replaceState(null, "", window.location.pathname + window.location.search + Screen.Verify.fragment)
+            return true
+        }
+        ItemLink.parse(window.location.hash)?.let { link ->
+            dispatch(AppAction.ItemLinkSeen(link.item))
+            window.history.replaceState(null, "", window.location.pathname + window.location.search + Screen.Items.fragment)
+            return true
+        }
+        return false
+    }
+
     private val imageUrls = HashMap<String, String>()
 
     /** Fills in every photo on the page that is on show: fetch, open with the circle key, show from an object URL on this device (ADR 0060). */
@@ -155,6 +172,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         render(screenChanged = false)
         dispatch(AppAction.OriginKnown(window.location.origin))
         registerServiceWorker()
+        openLink()
         InviteLink.parse(window.location.hash)?.let { link ->
             dispatch(AppAction.InviteSeen(link))
             // The secret in the link must not stay in the address bar or the history entry (ADR 0040).
@@ -172,7 +190,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         window.setInterval({ if (state.model is AppModel.AwaitingApproval) app?.syncNow(SyncTrigger.MANUAL) }, PAIRING_CHECK_MILLIS)
         // A closed "Larger photos" list is not fetched until it is opened (the toggle event does not bubble, so listen while it travels down).
         root.addEventListener("toggle", { loadImages() }, true)
-        window.addEventListener("hashchange", { dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash))) })
+        // A QR code's link (a member to check, an item's tag) is handled where it lands, and the address is tidied to its page.
+        window.addEventListener("hashchange", { if (!openLink()) dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash))) })
         // Until the event stream is read (ADR 0026), look for news once a minute; the scheduler spreads and backs off.
         window.setInterval({ app?.syncNow(SyncTrigger.HINT) }, POLL_MILLIS)
         window.addEventListener("online", { app?.syncNow(SyncTrigger.ONLINE) })
@@ -715,6 +734,12 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.EditItem(ItemId(it)))
                     window.location.hash = Screen.EditItem.fragment
                 }
+                ACTION_TAG_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
+                    dispatch(AppAction.TagItem(ItemId(it)))
+                    window.location.hash = Screen.ItemTag.fragment
+                }
+                ACTION_SHOW_ALL_ITEMS -> dispatch(AppAction.ShowAllItems)
+                ACTION_PRINT -> window.print()
                 ACTION_REMOVE_PHOTO -> {
                     val item = target.getAttribute(ATTR_ITEM)
                     val photo = target.getAttribute(ATTR_PHOTO)

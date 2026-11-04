@@ -1285,4 +1285,66 @@ class ShellViewTest {
         assertTrue("The owner approved other dates than you asked for" in render(open(home().copy(loans = listOf(changed))).copy(screen = Screen.Borrow)))
         assertFalse("other dates than you asked" in render(open(home().copy(loans = listOf(changed.copy(datesChanged = false)))).copy(screen = Screen.Borrow)))
     }
+
+    // ---- QR codes (ADR 0062) ----
+
+    private val peopleForQr = listOf(
+        MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "0123 4567 89ab cdef 0123"),
+        MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "aaaa bbbb cccc dddd eeee"),
+    )
+    private fun verifyHtml(link: circles.app.VerifyLink?, circleId: CircleId = circle) =
+        render(open(home(people = peopleForQr).copy(circle = circleId)).copy(screen = Screen.Verify, verifying = link))
+    private fun linkFor(member: circles.policy.MemberId, fingerprint: String, circleId: CircleId = circle) = circles.app.VerifyLink(circleId, member, fingerprint)
+
+    @Test fun myMemberCardShowsAQrCodeOfMyVerifyLinkAndTheFingerprintInWords() {
+        val html = render(open(home(people = peopleForQr)).copy(screen = Screen.Members, origin = "https://circles.example"))
+        assertTrue("<summary>Show my QR code</summary>" in html)
+        assertEquals(1, Regex("""<svg class="qr"""").findAll(html).count(), "only mine")
+        assertTrue("""role="img"""" in html && "QR code of the link that checks member" in html && """fill="#ffffff"""" in html && """fill="#000000"""" in html)
+        assertTrue("Or read your fingerprint out: 0123 4567 89ab cdef 0123" in html)
+    }
+
+    @Test fun openingAMembersCodeSaysMatchesOrDoesNotMatchAfterWorkingOutTheFingerprintItself() {
+        assertTrue("Matches. This is member" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee")))
+        val wrong = verifyHtml(linkFor(bea, "ffffffffffffffffffff"))
+        assertTrue("Does not match" in wrong && """role="alert"""" in wrong && "aaaa bbbb cccc dddd eeee" in wrong && "ffff ffff ffff ffff ffff" in wrong)
+        assertTrue("That is your own code." in verifyHtml(linkFor(me, "0123456789abcdef0123")))
+        assertTrue("not in your circle" in verifyHtml(linkFor(circles.policy.MemberId("9".repeat(32)), "aaaabbbbccccddddeeee")))
+        assertTrue("different circle" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee", CircleId("8".repeat(32)))))
+        assertTrue("Nothing to check." in verifyHtml(null))
+    }
+
+    @Test fun anItemTagHasTheNameAQrCodeAPrintButtonAndNoPrintedControls() {
+        val item = ItemSummary(ladder.item, "Ladder", ItemClass.EVERYDAY, me, true, null)
+        val html = render(open(home(items = listOf(item))).copy(screen = Screen.ItemTag, tagging = ladder.item, origin = "https://circles.example"))
+        assertTrue("""<div class="tag">""" in html && "<h2>Ladder</h2>" in html && "QR code that opens Ladder in Circles" in html)
+        assertTrue("""$ATTR_ACTION="$ACTION_PRINT"""" in html && """class="no-print"""" in html)
+        assertTrue("not on the list any more" in render(open(home()).copy(screen = Screen.ItemTag, tagging = ladder.item)))
+        assertTrue("""$ATTR_ACTION="$ACTION_TAG_ITEM"""" in render(open(home(items = listOf(item))).copy(screen = Screen.Items)), "owners can print a tag")
+    }
+
+    @Test fun anItemOpenedFromATagShowsOnlyThatItemUntilAllAreAsked() {
+        val one = ItemSummary(ladder.item, "Ladder", ItemClass.EVERYDAY, me, true, null)
+        val other = ItemSummary(circles.policy.ItemId("7".repeat(32)), "Drill", ItemClass.VALUABLE, bea, false, null)
+        val focused = render(open(home(items = listOf(one, other))).copy(screen = Screen.Items, focusItem = other.item))
+        assertTrue("Showing the item from the tag." in focused && "Drill" in focused && "<h2>Ladder</h2>" !in focused && """$ATTR_ACTION="$ACTION_SHOW_ALL_ITEMS"""" in focused)
+        assertTrue("<h2>Ladder</h2>" in render(open(home(items = listOf(one, other))).copy(screen = Screen.Items)))
+        assertEquals(null, reduce(open().copy(screen = Screen.Items, focusItem = other.item), AppAction.ShowAllItems).focusItem)
+    }
+
+    @Test fun linksSurviveSigningInAndAreForgottenWhenYouLeaveTheirPage() {
+        val link = linkFor(bea, "aaaabbbbccccddddeeee")
+        val locked = AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))
+        val seen = reduce(locked, AppAction.VerifyLinkSeen(link))
+        assertEquals(link, seen.verifying)
+        assertEquals(link, reduce(seen, AppAction.Navigate(Screen.SignIn)).verifying, "signed out, a hash change does not forget it")
+        val signedIn = reduce(seen, AppAction.ModelChanged(AppModel.Open(home())))
+        assertEquals(Screen.Verify, signedIn.screen)
+        assertEquals(null, reduce(signedIn, AppAction.Navigate(Screen.Members)).verifying)
+        assertEquals(Screen.Members, reduce(open(), AppAction.Navigate(Screen.Verify)).screen, "no link, back to members")
+        val item = reduce(locked, AppAction.ItemLinkSeen(ladder.item))
+        assertEquals(Screen.Items, reduce(item, AppAction.ModelChanged(AppModel.Open(home()))).screen)
+        assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.ItemTag)).screen, "no item chosen, back to items")
+        assertFalse(Screen.Verify in Screen.navigation || Screen.ItemTag in Screen.navigation)
+    }
 }

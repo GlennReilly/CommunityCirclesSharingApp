@@ -22,6 +22,12 @@ data class AppState(
     val newInvite: String? = null,
     /** The item being changed on the Change an item page. */
     val editing: ItemId? = null,
+    /** A member to check, from a QR code the phone's camera opened (ADR 0062). */
+    val verifying: circles.app.VerifyLink? = null,
+    /** An item opened from its printed tag: the Items page shows just this one until told otherwise. */
+    val focusItem: ItemId? = null,
+    /** The item whose tag is being shown for printing. */
+    val tagging: ItemId? = null,
     /** The skill offer being changed on the Change a skill offer page. */
     val editingSkill: circles.event.SkillId? = null,
     /** The item being asked for on the Ask to borrow page. */
@@ -53,6 +59,10 @@ sealed interface AppAction {
     data class Notice(val text: String?) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
+    data class VerifyLinkSeen(val link: circles.app.VerifyLink) : AppAction
+    data class ItemLinkSeen(val item: ItemId) : AppAction
+    data class TagItem(val item: ItemId) : AppAction
+    data object ShowAllItems : AppAction
     data class EditSkill(val skill: circles.event.SkillId) : AppAction
     data class BorrowItem(val item: ItemId) : AppAction
     data object UpdateReady : AppAction
@@ -61,15 +71,22 @@ sealed interface AppAction {
 
 /** Pure state transition. Signed-out users never leave the sign-in pages; signed-in users never land on them. */
 fun reduce(state: AppState, action: AppAction): AppState = when (action) {
-    is AppAction.Navigate -> state.copy(screen = allowed(state.model, action.screen).let {
+    is AppAction.Navigate -> state.copy(
+        // A link's target only lives while its page is on show.
+        verifying = if (!state.signedIn || action.screen == Screen.Verify) state.verifying else null,
+        focusItem = if (!state.signedIn || action.screen == Screen.Items) state.focusItem else null,
+        screen = allowed(state.model, action.screen).let {
         when {
+            it == Screen.Verify && state.verifying == null -> Screen.Members
+            it == Screen.ItemTag && state.tagging == null -> Screen.Items
             it == Screen.EditItem && state.editing == null -> Screen.Items
             it == Screen.EditSkill && state.editingSkill == null -> Screen.Skills
             it == Screen.RequestLoan && state.borrowing == null -> Screen.Items
             it == Screen.RecoveryCode && state.recoveryDraft == null -> Screen.Settings
             else -> it
         }
-    })
+    },
+    )
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
     is AppAction.EditSkill -> if (state.signedIn) state.copy(editingSkill = action.skill, screen = Screen.EditSkill) else state
     is AppAction.EditItem -> if (state.signedIn) state.copy(editing = action.item, screen = Screen.EditItem) else state
@@ -77,7 +94,12 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         val open = action.model is AppModel.Open
         state.copy(
             model = action.model,
-            screen = allowed(action.model, state.screen),
+            screen = when {
+                // Signing in after a link was opened lands on what the link was for.
+                open && state.model !is AppModel.Open && state.verifying != null -> Screen.Verify
+                open && state.model !is AppModel.Open && state.focusItem != null -> Screen.Items
+                else -> allowed(action.model, state.screen)
+            },
             // Leaving the open state forgets anything that was only meant for the open screens.
             newInvite = if (open) state.newInvite else null,
             // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
@@ -98,6 +120,10 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         pendingDevice = action.link,
         screen = if (action.link != null && (state.model is AppModel.NoIdentity || state.model is AppModel.Loading)) Screen.PairDevice else state.screen,
     )
+    is AppAction.VerifyLinkSeen -> state.copy(verifying = action.link, screen = if (state.signedIn) Screen.Verify else state.screen)
+    is AppAction.ItemLinkSeen -> state.copy(focusItem = action.item, screen = if (state.signedIn) Screen.Items else state.screen)
+    is AppAction.TagItem -> if (state.signedIn) state.copy(tagging = action.item, screen = Screen.ItemTag) else state
+    AppAction.ShowAllItems -> state.copy(focusItem = null)
     is AppAction.OriginKnown -> state.copy(origin = action.origin)
     is AppAction.RestoreLinkSeen -> state.copy(
         pendingRestore = action.link,

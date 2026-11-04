@@ -40,4 +40,22 @@ class DeviceCodesTest {
             assertNull(DeviceLink.parse(bad), bad)
         }
     }
+
+    @Test
+    fun verifyAndItemLinksRoundTripAndRefuseAnythingElse() {
+        val circle = circles.policy.CircleId("a".repeat(32)); val member = circles.policy.MemberId("b".repeat(32)); val fp = "0123456789abcdef0123"
+        val link = VerifyLink(circle, member, fp).format("https://circles.example/")
+        assertEquals("https://circles.example/#/verify/${circle.v}/${member.v}/$fp", link)
+        val parsed = assertNotNull(VerifyLink.parse(link))
+        assertEquals(Triple(circle, member, fp), Triple(parsed.circle, parsed.member, parsed.fingerprint))
+        assertNotNull(VerifyLink.parse("#/verify/${circle.v}/${member.v}/$fp"))
+        for (bad in listOf("", "#/verify/${circle.v}/${member.v}", "#/verify/${circle.v}/${member.v}/${fp}0", "#/verify/${circle.v}/${member.v}/${fp.uppercase()}", "#/verify/${circle.v}/short/$fp", "x#/verify/${circle.v}/${member.v}/$fp", "#/verify/${circle.v}/${member.v}/$fp/extra")) {
+            assertNull(VerifyLink.parse(bad), bad)
+        }
+        val item = circles.policy.ItemId("c".repeat(32))
+        assertEquals("https://x.example/#/item/${item.v}", ItemLink(item).format("https://x.example"))
+        assertEquals(item, ItemLink.parse("https://x.example/#/item/${item.v}")!!.item)
+        assertNull(ItemLink.parse("#/item/${item.v}/more")); assertNull(ItemLink.parse("#/item/nope")); assertNull(ItemLink.parse("#/items"))
+        assertEquals("ab12cd34", Fingerprint.compact("ab12 cd34"))
+    }
 }

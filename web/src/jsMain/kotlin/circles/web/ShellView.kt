@@ -3,7 +3,11 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MIN_RECOVERY_THRESHOLD
+import circles.app.Fingerprint
+import circles.app.ItemLink
 import circles.app.NoteStatus
+import circles.app.VerifyLink
+import circles.qr.QrCode
 import circles.event.ItemPhoto
 import circles.event.MAX_PHOTOS_PER_ITEM
 import circles.event.MAX_PHOTO_ALT_CHARS
@@ -57,6 +61,7 @@ import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
+import kotlinx.html.unsafe
 import kotlinx.html.img
 import kotlinx.html.span
 import kotlinx.html.fieldSet
@@ -133,6 +138,10 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_TAG_ITEM = "tag-item"
+const val ACTION_PRINT = "print-page"
+const val ACTION_SHOW_ALL_ITEMS = "show-all-items"
+const val ID_VERIFY_LINK = "verify-link"
 const val FORM_LOAN_CHANGE_PREFIX = "loan-change-form-"
 const val FORM_PHOTO_ADD = "photo-add-form"
 const val FIELD_PHOTO_FILE = "photo-file"
@@ -305,7 +314,9 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Pauses -> pausesPage(model.home)
                 Screen.Stewards -> stewards(model.home)
                 Screen.RecoveryShares -> recoverySharesPage(model.home, state)
-                Screen.Items -> items(model.home)
+                Screen.Items -> items(model.home, state)
+                Screen.Verify -> verifyPage(model.home, state)
+                Screen.ItemTag -> itemTagPage(model.home, state)
                 Screen.Skills -> skills(model.home)
                 Screen.AddSkill -> skillForm(null)
                 Screen.EditSkill -> skillForm(model.home.skills.firstOrNull { it.skill == state.editingSkill })
@@ -580,6 +591,29 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                     }.joinToString(", ")
                 }
                 p { +"Key fingerprint: ${person.fingerprint}" }
+                if (person.isMe) {
+                    details {
+                        summary { +"Show my QR code" }
+                        p { +"Let the other person point their phone's camera at this. The link opens in Circles on their phone, where they must be signed in, and it checks your key fingerprint for them." }
+                        val link = VerifyLink(home.circle, person.member, Fingerprint.compact(person.fingerprint)).format(state.origin)
+                        qrImage(link, "QR code of the link that checks member ${person.member.v.take(MEMBER_SHORT_CHARS)}'s key fingerprint")
+                        label {
+                            attributes["for"] = ID_VERIFY_LINK
+                            +"Or send them this link: "
+                        }
+                        input(type = InputType.text) {
+                            id = ID_VERIFY_LINK
+                            value = link
+                            readonly = true
+                        }
+                        button(type = ButtonType.button) {
+                            attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+                            attributes[ATTR_FROM] = ID_VERIFY_LINK
+                            +"Copy"
+                        }
+                        p { +"Or read your fingerprint out: ${person.fingerprint}" }
+                    }
+                }
                 if (!person.isMe) {
                     val vouchedUntil = person.vouchedByMeUntil
                     if (vouchedUntil != null) {
@@ -675,7 +709,7 @@ private fun itemClassLabel(itemClass: ItemClass): String = when (itemClass) {
     ItemClass.HIGH_VALUE -> "High value: a trailer, a chainsaw"
 }
 
-private fun FlowContent.items(home: HomeData) {
+private fun FlowContent.items(home: HomeData, state: AppState) {
     h1 { +Screen.Items.title }
     if (!home.canRead) {
         p {
@@ -690,13 +724,24 @@ private fun FlowContent.items(home: HomeData) {
             +"Add an item"
         }
     }
+    val shown = state.focusItem?.let { focus -> home.items.filter { it.item == focus } } ?: home.items
+    if (state.focusItem != null) {
+        p {
+            role = "status"
+            +(if (shown.isEmpty()) "That item is not on the list any more. " else "Showing the item from the tag. ")
+            button(type = ButtonType.button) {
+                attributes[ATTR_ACTION] = ACTION_SHOW_ALL_ITEMS
+                +"Show all items"
+            }
+        }
+    }
     if (home.items.isEmpty()) {
         p { +"Nothing has been shared yet." }
         return
     }
     ul {
         classes = setOf("cards")
-        for (item in home.items) {
+        for (item in shown) {
             li {
                 h2 { +item.name }
                 if (item.photos.isNotEmpty()) {
@@ -737,6 +782,11 @@ private fun FlowContent.items(home: HomeData) {
                         attributes[ATTR_ACTION] = ACTION_EDIT_ITEM
                         attributes[ATTR_ITEM] = item.item.v
                         +"Change"
+                    }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_TAG_ITEM
+                        attributes[ATTR_ITEM] = item.item.v
+                        +"Print a tag"
                     }
                     details {
                         summary { +"Remove" }
@@ -2149,5 +2199,91 @@ private fun FlowContent.photosSection(item: ItemSummary) {
                 formSubmit("Add the photo")
             }
         }
+    }
+}
+
+/** A QR code of [text] drawn as an inline SVG (ADR 0062): black on white with a four-module quiet zone, so it reads in dark mode too. */
+private fun FlowContent.qrImage(text: String, description: String) {
+    val code = QrCode.of(text)
+    if (code == null) {
+        p { +"This link is too long for a QR code. Use the text instead: $text" }
+        return
+    }
+    val quiet = QR_QUIET_MODULES
+    val path = buildString {
+        for (y in 0 until code.size) {
+            var x = 0
+            while (x < code.size) {
+                if (!code.module(x, y)) { x++; continue }
+                val start = x
+                while (x < code.size && code.module(x, y)) x++
+                append("M${start + quiet} ${y + quiet}h${x - start}v1h-${x - start}z")
+            }
+        }
+    }
+    val side = code.size + 2 * quiet
+    div {
+        classes = setOf("qr-frame")
+        unsafe {
+            +"""<svg class="qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $side $side" role="img" aria-label="${description.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")}" shape-rendering="crispEdges"><rect width="$side" height="$side" fill="#ffffff"/><path d="$path" fill="#000000"/></svg>"""
+        }
+    }
+}
+
+private const val QR_QUIET_MODULES = 4
+
+/** What opening a member's QR code link says (ADR 0062): the page works out the member's fingerprint itself and compares. */
+private fun FlowContent.verifyPage(home: HomeData, state: AppState) {
+    h1 { +Screen.Verify.title }
+    val link = state.verifying
+    val person = link?.let { l -> home.people.firstOrNull { it.member == l.member } }
+    when {
+        link == null -> p { +"Nothing to check." }
+        link.circle != home.circle -> p { +"This code is for a different circle." }
+        person == null -> p { +"This person is not in your circle, or has left it. Do not trust the code." }
+        person.isMe -> p { +"That is your own code." }
+        Fingerprint.compact(person.fingerprint) == link.fingerprint -> {
+            p {
+                role = "status"
+                +"Matches. This is member ${person.member.v.take(MEMBER_SHORT_CHARS)}: the key you hold for them is the one in their code."
+            }
+            p { +"Their key fingerprint: ${person.fingerprint}" }
+            if (person.vouchedByMeUntil == null && home.canVouch) p { +"If you know them, you can vouch for them on the Members page." }
+        }
+        else -> {
+            p {
+                role = "alert"
+                +"Does not match. The code says this key fingerprint is ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for member ${person.member.v.take(MEMBER_SHORT_CHARS)} is ${person.fingerprint}. Do not trust this person until you have compared fingerprints in person."
+            }
+        }
+    }
+    p { a(href = Screen.Members.fragment) { +"Back to members" } }
+}
+
+private const val FINGERPRINT_GROUP = 4
+
+/** A printable tag for an item (ADR 0062): its name, a QR code of its link and a line saying what to do. */
+private fun FlowContent.itemTagPage(home: HomeData, state: AppState) {
+    val item = home.items.firstOrNull { it.item == state.tagging }
+    h1 { +Screen.ItemTag.title }
+    if (item == null) {
+        p { +"That item is not on the list any more." }
+        p { a(href = Screen.Items.fragment) { +"Back to items" } }
+        return
+    }
+    div {
+        classes = setOf("tag")
+        h2 { +item.name }
+        qrImage(ItemLink(item.item).format(state.origin), "QR code that opens ${item.name} in Circles")
+        p { +"Point a phone camera here to see this item in Circles (you need to be signed in)." }
+    }
+    button(type = ButtonType.button) {
+        classes = setOf("no-print")
+        attributes[ATTR_ACTION] = ACTION_PRINT
+        +"Print this tag"
+    }
+    p {
+        classes = setOf("no-print")
+        a(href = Screen.Items.fragment) { +"Back to items" }
     }
 }
