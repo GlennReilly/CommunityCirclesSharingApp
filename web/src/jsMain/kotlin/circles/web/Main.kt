@@ -122,7 +122,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     private fun render(screenChanged: Boolean) {
         root.clear()
         root.append { div { shell(state) } }
-        document.title = if (state.model is AppModel.Loading) "Circles" else "${state.screen.title} - Circles"
+        val due = (state.model as? AppModel.Open)?.let { dueCount(it.home) } ?: 0
+        document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Circles" else "${state.screen.title} - Circles"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
     }
 

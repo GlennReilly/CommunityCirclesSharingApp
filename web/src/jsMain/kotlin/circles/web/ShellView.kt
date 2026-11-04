@@ -524,6 +524,10 @@ private fun FlowContent.home(home: HomeData) {
         if (toReview > 0) {
             li { a(href = Screen.Pauses.fragment) { +(if (toReview == 1) "1 pause proposal waiting for your answer" else "$toReview pause proposals waiting for your answer") } }
         }
+        val due = dueCount(home)
+        if (due > 0) {
+            li { a(href = Screen.Borrow.fragment) { +(if (due == 1) "1 loan is due back today or past its day" else "$due loans are due back today or past their day") } }
+        }
         if (home.isSteward && home.waiting.isNotEmpty()) {
             li {
                 a(href = Screen.Members.fragment) { +(if (home.waiting.size == 1) "1 person waiting to be let in" else "${home.waiting.size} people waiting to be let in") }
@@ -801,6 +805,20 @@ private fun window(loan: LoanSummary): String = "${CalendarDay.format(loan.fromD
 
 private fun who(loan: LoanSummary): String = "member ${loan.other.v.take(MEMBER_SHORT_CHARS)}"
 
+/** How a loan's end day reads today (ADR 0059): plain, kind words with the date; it changes nothing about standing. */
+fun dueLine(toDay: Int, today: Int): String {
+    val left = toDay - today
+    val date = CalendarDay.format(toDay)
+    return when {
+        left == 0 -> "Due back today ($date)."
+        left > 0 -> "Due back in $left ${if (left == 1) "day" else "days"}, on $date."
+        else -> "Back was expected ${-left} ${if (-left == 1) "day" else "days"} ago, on $date."
+    }
+}
+
+/** Loans that are out and due back today or past their day, for either side; shown on Home and in the page title (ADR 0059). */
+fun dueCount(home: HomeData): Int = home.loans.count { it.status == LoanStatus.ACTIVE && it.role != LoanRole.STEWARD && it.toDay <= home.today }
+
 private fun FlowContent.loanHeading(loan: LoanSummary) {
     h3 { +loan.itemName }
     p { +"${if (loan.role == LoanRole.OWNER) "Asked by" else "Owned by"} ${who(loan)}, ${window(loan)}" }
@@ -887,6 +905,16 @@ private fun FlowContent.borrow(home: HomeData) {
             for (loan in out) {
                 div {
                     loanHeading(loan)
+                    p { +dueLine(loan.toDay, home.today) }
+                    if (loan.role == LoanRole.OWNER && loan.toDay < home.today) {
+                        details {
+                            summary { +"Ask them to return it" }
+                            p {
+                                val fingerprint = home.people.firstOrNull { it.member == loan.other }?.fingerprint ?: "not known yet"
+                                +"Ask ${who(loan)} in person, or wherever your group talks: Circles sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
+                            }
+                        }
+                    }
                     if (loan.role == LoanRole.BORROWER) {
                         loan.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
                         form {

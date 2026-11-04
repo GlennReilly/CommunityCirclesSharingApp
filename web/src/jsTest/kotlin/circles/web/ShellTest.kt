@@ -1210,4 +1210,35 @@ class ShellViewTest {
         assertFalse("<ul>" in welcome.substringAfter("<main"))
         assertTrue("""class="button primary"""" in render(open(home()).copy(screen = Screen.Items)))
     }
+
+    // ---- return reminders (ADR 0059) ----
+
+    @Test fun dueLinesUseKindPlainWords() {
+        assertEquals("Due back today (2026-11-04).", dueLine(20_761, 20_761))
+        assertEquals("Due back in 1 day, on 2026-11-05.", dueLine(20_762, 20_761))
+        assertEquals("Due back in 3 days, on 2026-11-07.", dueLine(20_764, 20_761))
+        assertEquals("Back was expected 2 days ago, on 2026-11-02.", dueLine(20_759, 20_761))
+        assertEquals("Back was expected 1 day ago, on 2026-11-03.", dueLine(20_760, 20_761))
+    }
+
+    @Test fun theBorrowPageShowsWhenThingsAreDueAndTheOwnerGetsAnInPersonNudgeOnlyWhenLate() {
+        val late = loan("a", LoanRole.OWNER, LoanStatus.ACTIVE, mine = true, theirs = true)
+        val html = render(open(home(people = listOf(MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "ab12 cd34"))).copy(loans = listOf(late), today = 20_763)).copy(screen = Screen.Borrow))
+        assertTrue("Back was expected 1 day ago" in html && "Ask them to return it" in html && "ab12 cd34" in html && "Circles sends nothing" in html)
+        val notYet = render(open(home().copy(loans = listOf(late), today = 20_761)).copy(screen = Screen.Borrow))
+        assertTrue("Due back in 1 day" in notYet)
+        assertFalse("Ask them to return it" in notYet)
+        val borrowerLate = render(open(home().copy(loans = listOf(loan("b", LoanRole.BORROWER, LoanStatus.ACTIVE, mine = true, theirs = true)), today = 20_763)).copy(screen = Screen.Borrow))
+        assertFalse("Ask them to return it" in borrowerLate, "the borrower is not nudged")
+    }
+
+    @Test fun homeCountsLoansDueTodayOrPastTheirDayAndTheTitleSaysSo() {
+        val active = loan("a", LoanRole.BORROWER, LoanStatus.ACTIVE, mine = true, theirs = true)
+        val pending = loan("b", LoanRole.BORROWER, LoanStatus.APPROVED)
+        assertEquals(0, dueCount(home().copy(loans = listOf(active, pending), today = 20_761)))
+        assertEquals(1, dueCount(home().copy(loans = listOf(active, pending), today = 20_762)))
+        assertEquals(1, dueCount(home().copy(loans = listOf(active, pending), today = 20_800)))
+        assertTrue("1 loan is due back today or past its day" in render(open(home().copy(loans = listOf(active), today = 20_763))))
+        assertFalse("due back today" in render(open(home().copy(loans = listOf(active), today = 20_761))))
+    }
 }

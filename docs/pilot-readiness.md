@@ -16,7 +16,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | Screen-reader pass of the borrow flow, and a reading-level pass of the text | M | Axe is clean, but a person using a screen reader must complete borrowing unaided. |
 | ~~Skills screen~~ | done (ADR 0055) | Offers are a directory: no messaging, people talk outside the app. |
 | ~~Loan windows: block overlapping requests, cancel a request~~ | done (ADR 0052) | The owner changing an agreed window is not built: decline with a note and ask again. |
-| Reminders for returns | M | Needs a decision: in-page only (no push) fits the non-goals. |
+| ~~Reminders for returns~~ | done (ADR 0059) | In the app only; email is left until the pilot shows it is needed. |
 
 ## Should do
 
