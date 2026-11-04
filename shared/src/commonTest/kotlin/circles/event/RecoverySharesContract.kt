@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertNotEquals
 
 /** `recovery.share`: split the circle key over stewards and rebuild it from k of them (ADR 0020), on every Crypto/Cipher pair. */
 abstract class RecoverySharesContract {
@@ -200,5 +201,35 @@ abstract class RecoverySharesContract {
         // Two sets whose events are interleaved with another event are still two sets.
         circle.log += circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, everyone, 3, circle.day)!!
         assertEquals(3, circle.fold(circle.a.identity).shareHolders.getValue(FIRST_EPOCH).size)
+    }
+
+    @Test
+    fun everyShareNamesItsSetAndOtherEventsInBetweenDoNotSplitIt() = runTest {
+        val circle = Circle(newCrypto(), newCipher())
+        val first = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
+        val second = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices.take(2), 2, circle.day)!!
+        fun setOf(e: Envelope) = (CircleKeys.keyWrap(e.public) as Parsed.Ok).value.set
+        assertEquals(1, first.map(::setOf).toSet().size)
+        assertEquals(1, second.map(::setOf).toSet().size)
+        assertNotEquals(setOf(first[0]), setOf(second[0]))
+        assertTrue(setOf(first[0])!!.length == 32)
+        // Other members' events land between the shares of one set (the server numbers events as they arrive): still one set of three stewards.
+        first.forEachIndexed { index, event ->
+            circle.log += event
+            if (index < first.size - 1) circle.log += circle.a.keyWrap(circle.id, circle.c.identity.registration, FIRST_EPOCH, circle.key, circle.day)
+        }
+        val view = circle.fold(circle.a.identity)
+        assertEquals(emptyList(), view.rejected.filter { it.type == EventType.RECOVERY_SHARE.wire })
+        assertEquals(setOf(circle.a.identity.member, circle.b.identity.member, circle.c.identity.member), view.shareHolders.getValue(FIRST_EPOCH))
+    }
+
+    @Test
+    fun aShareSetNameMustBeThirtyTwoLowercaseHexCharactersAndKeyWrapsHaveNone() = runTest {
+        val circle = Circle(newCrypto(), newCipher())
+        val event = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!.first()
+        val terms = (CircleKeys.keyWrap(event.public) as Parsed.Ok).value
+        assertIs<Parsed.Ok<KeyWrapTerms>>(CircleKeys.keyWrap(terms.copy(set = null).toPublic()))
+        assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "ABC").toPublic()))
+        assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "g".repeat(32)).toPublic()))
     }
 }

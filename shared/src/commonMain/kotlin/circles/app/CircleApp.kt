@@ -337,6 +337,22 @@ data class PauseSummary(
     val canLift: Boolean,
 )
 
+/** A pause that is over (ended, lifted or lapsed), for the history on the Pauses page; visible to the same people as a live one. */
+data class PauseHistoryEntry(
+    val pause: circles.event.PauseId,
+    val role: PauseRole,
+    val subject: MemberId,
+    val reason: String,
+    val days: Int,
+    val status: circles.event.PauseStatus,
+    val proposedDay: Int,
+    /** The day it took effect, or null if it never did (lapsed, or cancelled while only proposed). */
+    val startedDay: Int?,
+    /** The day it stopped: its last day, the day it was lifted, or the end of the proposal window. */
+    val endedDay: Int,
+    val appeal: String?,
+)
+
 sealed interface PauseResult {
     data object Sent : PauseResult
 
@@ -409,6 +425,8 @@ data class HomeData(
     val skills: List<SkillSummary> = emptyList(),
     /** Contribution notes (ADR 0053). */
     val contributions: ContributionsSummary = ContributionsSummary(),
+    /** Pauses that are over, newest first (same visibility as [pauses]). */
+    val pauseHistory: List<PauseHistoryEntry> = emptyList(),
     val canProposePause: Boolean = false,
     val pauseCandidates: List<MemberId> = emptyList(),
     val stewardList: List<StewardInfo> = emptyList(),
@@ -442,7 +460,8 @@ data class RecoverySharesSummary(
 
 /** The circle exported from this device's copy of the log (ADR 0030, point 4). */
 sealed interface ExportResult {
-    class Ready(val fileName: String, val bytes: ByteArray, val events: Int) : ExportResult
+    /** [photos] sealed photo files went in; [photosMissing] could not be fetched (offline, gone) or did not fit [EXPORT_PHOTO_BYTES], and are not in the file. */
+    class Ready(val fileName: String, val bytes: ByteArray, val events: Int, val photos: Int = 0, val photosMissing: Int = 0) : ExportResult
 
     /** This device does not hold the whole log from the start (or none of it) yet; sync first. */
     data object Incomplete : ExportResult
@@ -977,6 +996,27 @@ class CircleApp(
         }
     }
 
+    private fun pauseHistoryFor(view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseHistoryEntry> {
+        val cfg = view.market.configOn(circles.policy.CircleId(""), now)
+        val mayReview = myTier.rank >= cfg.pauseReviewerMinTier.rank
+        return view.market.pauses.mapNotNull { pause ->
+            val status = pause.statusOn(now)
+            if (status == circles.event.PauseStatus.PROPOSED || status == circles.event.PauseStatus.LIVE) return@mapNotNull null
+            val isSubject = pause.subject == me
+            if (!isSubject && !mayReview) return@mapNotNull null
+            val endedDay = when (status) {
+                circles.event.PauseStatus.LIFTED -> pause.liftedDay ?: pause.proposedDay
+                circles.event.PauseStatus.ENDED -> (pause.untilDay ?: pause.proposedDay) - 1
+                else -> pause.proposedDay + circles.event.PAUSE_PROPOSAL_WINDOW_DAYS
+            }
+            PauseHistoryEntry(
+                pause = pause.pause, role = if (isSubject) PauseRole.SUBJECT else PauseRole.REVIEWER, subject = pause.subject,
+                reason = pause.reason, days = pause.days, status = status, proposedDay = pause.proposedDay,
+                startedDay = pause.liveFrom, endedDay = endedDay, appeal = pause.appealNote,
+            )
+        }.sortedByDescending { it.endedDay }
+    }
+
     /** Sends a pause event if the circle's rules would accept it; otherwise takes it back out of the outbox and says why. */
     private suspend fun sendPause(s: Session, event: circles.event.Envelope): PauseResult {
         val id = event.eventId(crypto)
@@ -1036,9 +1076,20 @@ class CircleApp(
         val s = session ?: return ExportResult.NotAllowed
         val entries = replica.entries(s.circle, 0).sortedBy { it.serverSeq }
         if (entries.isEmpty() || entries.withIndex().any { (index, entry) -> entry.serverSeq != index + 1L }) return ExportResult.Incomplete
-        val built = circles.export.CircleExport.build(crypto, s.circle, entries.map { it.envelope.toDto() }, emptyList())
-        val bytes = circles.export.ZipStore.write(built.entries(emptyMap())) ?: return ExportResult.Incomplete
-        return ExportResult.Ready("circles-export-${s.circle.v.take(EXPORT_NAME_ID_CHARS)}-${CalendarDay.format(today())}.zip", bytes, entries.size)
+        // Photos (ADR 0060): the sealed files the items now show, as the server holds them (still sealed; the export never holds a plain image).
+        val wanted = replica.fold(s.circle, crypto, cipher, s.identity).market.items.values.filter { !it.retired }.flatMap { item -> item.photos.flatMap { listOf(it.photo, it.thumb) } }.distinct()
+        val held = linkedMapOf<String, ByteArray>()
+        var used = 0L
+        var missing = 0
+        for (hash in wanted) {
+            val sealed = s.blobs?.get(s.circle, hash)
+            val ok = sealed != null && circles.event.BlobSealing.matchesHash(crypto, hash, circles.encoding.ByteString.of(sealed)) && used + sealed.size <= EXPORT_PHOTO_BYTES
+            if (ok && sealed != null) { held[hash] = sealed; used += sealed.size } else missing++
+        }
+        val refs = held.map { (hash, bytes) -> circles.export.ExportBlobRef(hash, bytes.size.toLong()) }
+        val built = circles.export.CircleExport.build(crypto, s.circle, entries.map { it.envelope.toDto() }, refs)
+        val bytes = circles.export.ZipStore.write(built.entries(held)) ?: return ExportResult.Incomplete
+        return ExportResult.Ready("circles-export-${s.circle.v.take(EXPORT_NAME_ID_CHARS)}-${CalendarDay.format(today())}.zip", bytes, entries.size, held.size, missing)
     }
 
     // ---- recovery shares (ADR 0048) ----
@@ -1693,6 +1744,7 @@ class CircleApp(
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 recoveryShares = recoverySharesOf(view, s.identity.member),
                 pauses = pausesFor(view, me, myStanding.tier, now),
+                pauseHistory = pauseHistoryFor(view, me, myStanding.tier, now),
                 rules = rulesFor(view, me, now),
                 skills = view.market.skills.filter { !it.retired && it.owner !in view.market.departed }.map {
                     SkillSummary(it.skill, it.name, it.details, it.openTo, it.owner, it.owner == me)
@@ -1885,3 +1937,6 @@ class CircleApp(
         return maxOf(logged ?: -1L, queued ?: -1L) + 1
     }
 }
+
+/** How many bytes of sealed photos a browser export holds at most, so the file is built in memory without trouble. */
+const val EXPORT_PHOTO_BYTES = 200L * 1024 * 1024

@@ -43,6 +43,9 @@ class CircleView(
     val commitments: Map<Int, ByteString> = emptyMap(),
 )
 
+/** The last `recovery.share` of an epoch, to tell whether the next one continues its set (ADR 0048, ADR 0065). */
+private class ShareBatch(val sender: MemberId, val position: Long, val target: MemberId, val set: String?)
+
 /** One recovery share opened by this device: [share] for [epoch], sent by [from]. */
 class HeldShare(val epoch: Int, val share: ByteString, val from: MemberId)
 
@@ -157,7 +160,8 @@ class CircleFold(
          * The author and log position of the newest share event of each epoch: shares sent one right after another by the
          * same author are one set, and a set that starts later replaces the holders of the old one.
          */
-        private val shareBatch = mutableMapOf<Int, Triple<MemberId, Long, MemberId>>()
+        private val shareBatch = mutableMapOf<Int, ShareBatch>()
+        private val shareSets = mutableMapOf<Pair<Int, String>, MemberId>()
         fun commitmentsSnapshot(): Map<Int, ByteString> = commitments.toMap()
 
         /** Returns null if the event is valid and has been applied, otherwise why it was refused. */
@@ -284,6 +288,7 @@ class CircleFold(
 
         private fun wrap(e: Envelope, sender: DeviceRegistration): String? {
             val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad key.wrap"
+            if (terms.set != null) return "a key.wrap has no share set"
             if (terms.epoch != e.epoch) return "public epoch differs from the envelope epoch"
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (epoch == 0) {
@@ -322,13 +327,22 @@ class CircleFold(
             val mine = me?.takeIf { it.device == target.registration.device }?.boxKeys
             val opened = if (mine == null) null else RecoveryShares.open(cipher, mine, circle, terms.epoch, terms.wrapped)
             if (opened is Parsed.Invalid) return "the share sent to this device is not usable: ${opened.reason}"
-            // A steward's several devices follow each other inside one set; the same steward again after another one starts a new set.
             val previous = shareBatch[terms.epoch]
             val targetMember = target.registration.member
-            val continues = previous != null && previous.first == sender.member && previous.second == position - 1 &&
-                (targetMember == previous.third || targetMember !in shareHolders[terms.epoch].orEmpty())
+            val named = terms.set
+            val continues = if (named != null) {
+                // ADR 0065: the sender names the set, so other events in between cannot split it. Only the steward who started a set adds to it.
+                val owner = shareSets[terms.epoch to named]
+                if (owner != null && owner != sender.member) return "that share set belongs to another steward"
+                shareSets[terms.epoch to named] = sender.member
+                previous != null && previous.set == named
+            } else {
+                // Earlier circles named no set: a steward's several devices follow each other; the same steward again after another one starts a new set.
+                previous != null && previous.set == null && previous.sender == sender.member && previous.position == position - 1 &&
+                    (targetMember == previous.target || targetMember !in shareHolders[terms.epoch].orEmpty())
+            }
             if (!continues) shareHolders[terms.epoch] = mutableSetOf()
-            shareBatch[terms.epoch] = Triple(sender.member, position, targetMember)
+            shareBatch[terms.epoch] = ShareBatch(sender.member, position, targetMember, named)
             shareHolders.getOrPut(terms.epoch) { mutableSetOf() } += target.registration.member
             if (opened is Parsed.Ok) heldShares[terms.epoch] = HeldShare(terms.epoch, opened.value.share, sender.member)
             return null

@@ -24,6 +24,7 @@ private const val KEY_KEY = "key"
 private const val KEY_DEVICE = "device"
 private const val KEY_WRAPPED = "wrapped"
 private const val KEY_HASH = "keyHash"
+private const val KEY_SET = "set"
 
 /** Domain of the key commitment (ADR 0045). */
 const val KEY_COMMITMENT_DOMAIN = "circles/key-commitment/v1"
@@ -54,13 +55,21 @@ class KeyRing private constructor(private val keys: Map<Int, ByteString>) {
  * `public` of `key.wrap`: whom the key is for, the epoch, and the sealed key. The wrap that starts epoch 1 also carries
  * the [keyHash] commitment to that epoch's key (ADR 0045); later wraps of the epoch may omit it.
  */
-data class KeyWrapTerms(val device: DeviceId, val epoch: Int, val wrapped: ByteString, val keyHash: ByteString? = null) {
+data class KeyWrapTerms(
+    val device: DeviceId,
+    val epoch: Int,
+    val wrapped: ByteString,
+    val keyHash: ByteString? = null,
+    /** Only on `recovery.share` (ADR 0065): names the set of shares this one belongs to (32 lowercase hex characters). */
+    val set: String? = null,
+) {
     fun toPublic(): CborMap = CborMap(
         buildMap {
             put(KEY_DEVICE, CborText(device.v))
             put(KEY_EPOCH, CborInt(epoch.toLong()))
             put(KEY_WRAPPED, CborBytes(wrapped))
             keyHash?.let { put(KEY_HASH, CborBytes(it)) }
+            set?.let { put(KEY_SET, CborText(it)) }
         },
     )
 }
@@ -83,7 +92,8 @@ object CircleKeys {
 
     fun keyWrap(map: CborMap): Parsed<KeyWrapTerms> {
         val required = setOf(KEY_DEVICE, KEY_EPOCH, KEY_WRAPPED)
-        if (map.entries.keys != required && map.entries.keys != required + KEY_HASH) return Parsed.Invalid("expected the keys [device, epoch, wrapped] and optionally keyHash")
+        val keys = map.entries.keys
+        if (!keys.containsAll(required) || !(required + KEY_HASH + KEY_SET).containsAll(keys)) return Parsed.Invalid("expected the keys [device, epoch, wrapped] and optionally keyHash and set")
         val device = (map[KEY_DEVICE] as? CborText)?.value?.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("device must be 32 lowercase hex characters")
         val epoch = epochOf(map) ?: return Parsed.Invalid("epoch must be at least $FIRST_EPOCH")
         val wrapped = (map[KEY_WRAPPED] as? CborBytes)?.value?.takeIf { it.size in 1..MAX_WRAPPED_BYTES } ?: return Parsed.Invalid("wrapped must be 1 to $MAX_WRAPPED_BYTES bytes")
@@ -91,7 +101,12 @@ object CircleKeys {
             is Parsed.Ok -> h.value
             is Parsed.Invalid -> return h
         }
-        return Parsed.Ok(KeyWrapTerms(DeviceId(device), epoch, wrapped, hash))
+        val set = when (val raw = map[KEY_SET]) {
+            null -> null
+            is CborText -> raw.value.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("set must be 32 lowercase hex characters")
+            else -> return Parsed.Invalid("set must be 32 lowercase hex characters")
+        }
+        return Parsed.Ok(KeyWrapTerms(DeviceId(device), epoch, wrapped, hash, set))
     }
 
     /** `public` of `key.rotate`: the new epoch, and its key commitment (ADR 0045). */

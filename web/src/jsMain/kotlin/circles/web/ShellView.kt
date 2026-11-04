@@ -2,6 +2,7 @@ package circles.web
 
 import circles.app.AppModel
 import circles.app.HomeData
+import circles.app.PauseHistoryEntry
 import circles.app.MIN_RECOVERY_THRESHOLD
 import circles.app.Fingerprint
 import circles.app.ItemLink
@@ -1301,7 +1302,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
     }
     section {
         h2 { +"Export the circle" }
-        p { +"Download a copy of the circle's log as it is on this device, so a new host can be started from it if the old one is lost. It holds only scrambled text and public information: nobody can read the circle's words from it without a member's keys. Photos are not included. Keep it private all the same." }
+        p { +"Download a copy of the circle's log as it is on this device, so a new host can be started from it if the old one is lost. It holds only scrambled text and public information: nobody can read the circle's words from it without a member's keys. Item photos are included, still scrambled. Keep it private all the same." }
         button(type = ButtonType.button) {
             attributes[ATTR_ACTION] = ACTION_EXPORT
             +"Download an export"
@@ -1962,6 +1963,20 @@ private fun FlowContent.pausesPage(home: HomeData) {
             }
         }
     }
+    if (home.pauseHistory.isNotEmpty()) {
+        section {
+            h2 { +"Earlier pauses" }
+            ul {
+                for (entry in home.pauseHistory) {
+                    li {
+                        val who = if (entry.role == PauseRole.SUBJECT) "You" else "Member ${entry.subject.v.take(MEMBER_SHORT_CHARS)}"
+                        +"$who: ${pauseHistoryLine(entry)} Reason: ${entry.reason}"
+                        if (entry.appeal != null) +" Appeal: ${entry.appeal}"
+                    }
+                }
+            }
+        }
+    }
     if (home.canProposePause && home.pauseCandidates.isNotEmpty()) {
         section {
             h2 { +"Propose a pause" }
@@ -2363,4 +2378,13 @@ private fun FlowContent.itemTagPage(home: HomeData, state: AppState) {
         classes = setOf("no-print")
         a(href = Screen.Items.fragment) { +"Back to items" }
     }
+}
+
+/** One line saying how an earlier pause went, with its dates. Public so the wording is tested. */
+fun pauseHistoryLine(entry: PauseHistoryEntry): String = when (entry.status) {
+    PauseStatus.LIFTED ->
+        if (entry.startedDay != null) "paused from ${CalendarDay.format(entry.startedDay ?: 0)}, lifted on ${CalendarDay.format(entry.endedDay)}."
+        else "proposed on ${CalendarDay.format(entry.proposedDay)}, cancelled on ${CalendarDay.format(entry.endedDay)}."
+    PauseStatus.ENDED -> "paused from ${CalendarDay.format(entry.startedDay ?: entry.proposedDay)} to ${CalendarDay.format(entry.endedDay)}, and ended on its date."
+    else -> "proposed on ${CalendarDay.format(entry.proposedDay)}, not agreed in time, so nothing happened."
 }

@@ -2,6 +2,7 @@ package circles.web
 
 import circles.app.AppModel
 import circles.app.HomeData
+import circles.app.PauseHistoryEntry
 import circles.app.InviteLink
 import circles.app.LoanRole
 import circles.app.MemberSummary
@@ -420,6 +421,28 @@ class ShellViewTest {
     @Test fun anAppearanceChangeIsKeptByTheReducer() {
         val chosen = Appearance(TextSize.LARGE)
         assertEquals(chosen, reduce(AppState(), AppAction.AppearanceChanged(chosen)).appearance)
+    }
+
+    private fun earlier(status: circles.event.PauseStatus, started: Int?, ended: Int, role: circles.app.PauseRole = circles.app.PauseRole.REVIEWER) = PauseHistoryEntry(
+        circles.event.PauseId("p1"), role, circles.policy.MemberId("0123456789abcdef"), "left things damaged", 30, status, proposedDay = 20_000, startedDay = started, endedDay = ended, appeal = null,
+    )
+
+    @Test fun earlierPausesAreListedWithTheirDatesAndHowTheyEnded() {
+        val lifted = pauseHistoryLine(earlier(circles.event.PauseStatus.LIFTED, 20_001, 20_005))
+        assertTrue("lifted on" in lifted && "paused from" in lifted, lifted)
+        assertTrue("cancelled on" in pauseHistoryLine(earlier(circles.event.PauseStatus.LIFTED, null, 20_002)))
+        assertTrue("ended on its date" in pauseHistoryLine(earlier(circles.event.PauseStatus.ENDED, 20_001, 20_030)))
+        assertTrue("nothing happened" in pauseHistoryLine(earlier(circles.event.PauseStatus.LAPSED, null, 20_014)))
+        val html = render(open(home().copy(pauseHistory = listOf(earlier(circles.event.PauseStatus.ENDED, 20_001, 20_030)))).copy(screen = Screen.Pauses))
+        assertTrue("Earlier pauses" in html && "left things damaged" in html && "Member 01234567" in html)
+        assertFalse("Earlier pauses" in render(open(home()).copy(screen = Screen.Pauses)), "no heading when there is no history")
+    }
+
+    @Test fun theExportNoticeCountsPhotosAndSaysWhenSomeWereMissing() {
+        fun ready(photos: Int, missing: Int) = circles.app.ExportResult.Ready("f.zip", ByteArray(0), 12, photos, missing)
+        assertEquals("Downloaded f.zip with 12 events.", exportNotice(ready(0, 0)))
+        assertEquals("Downloaded f.zip with 12 events and 4 photo files.", exportNotice(ready(4, 0)))
+        assertTrue("2 photo files could not be fetched" in exportNotice(ready(4, 2)))
     }
 
     @Test fun theLockingChoicesIncludeTheCurrentOneAsSelected() {

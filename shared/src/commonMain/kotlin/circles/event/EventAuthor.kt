@@ -96,8 +96,9 @@ class EventAuthor(
     fun recoverySharesPerSteward(circle: CircleId, epoch: Int, stewards: List<List<DeviceRegistration>>, threshold: Int, day: Int): List<Envelope>? {
         val key = checkNotNull(keyRing[epoch]) { "no circle key for epoch $epoch" }
         val sealed = RecoveryShares.splitPerSteward(crypto, cipher, circle, epoch, key, stewards, threshold) ?: return null
+        val set = newShareSetId(crypto)
         return sealed.map { (device, wrapped) ->
-            build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped).toPublic(), CborMap.EMPTY, epoch)
+            build(circle, EventType.RECOVERY_SHARE, day, KeyWrapTerms(device.device, epoch, wrapped, set = set).toPublic(), CborMap.EMPTY, epoch)
         }
     }
 

@@ -681,7 +681,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_EXPORT -> when (val result = circleApp?.exportCircle()) {
                     is ExportResult.Ready -> {
                         download(result.fileName, result.bytes)
-                        dispatch(AppAction.Notice("Downloaded ${result.fileName} with ${result.events} events."))
+                        dispatch(AppAction.Notice(exportNotice(result)))
                     }
                     ExportResult.Incomplete -> dispatch(AppAction.Notice("This device does not have the whole log yet. Press Sync now, then try again."))
                     ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Open the circle first."))
@@ -845,6 +845,13 @@ private fun download(fileName: String, bytes: ByteArray) {
 }
 
 private const val DOWNLOAD_URL_LIFETIME_MILLIS = 10_000
+
+/** What to tell the user after an export: the events, the photos that went in, and any that could not be fetched. */
+internal fun exportNotice(result: ExportResult.Ready): String {
+    val photos = if (result.photos > 0) " and ${result.photos} photo files" else ""
+    val missing = if (result.photosMissing > 0) " ${result.photosMissing} photo files could not be fetched, so they are not in it; try again when online." else ""
+    return "Downloaded ${result.fileName} with ${result.events} events$photos.$missing"
+}
 
 private fun pauseText(result: PauseResult, done: String): String = when (result) {
     PauseResult.Sent -> done

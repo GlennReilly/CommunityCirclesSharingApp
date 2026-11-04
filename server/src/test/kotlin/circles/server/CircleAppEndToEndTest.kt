@@ -1145,6 +1145,15 @@ class CircleAppEndToEndTest {
         assertTrue(home(carol.app).pauses.single().canLift)
         assertEquals(PauseResult.Sent, carol.app.liftPause(forDave.pause))
         sync()
+        // The lifted pause moves to the history of the subject and the reviewers; the member who is neither (none here) would not see it.
+        assertEquals(emptyList(), home(carol.app).pauses)
+        val earlier = home(dave.app).pauseHistory.single()
+        assertEquals(PauseRole.SUBJECT, earlier.role)
+        assertEquals(circles.event.PauseStatus.LIFTED, earlier.status)
+        assertEquals("keeps returning things damaged", earlier.reason)
+        assertEquals("I was away and a friend returned it", earlier.appeal)
+        assertEquals(TODAY, earlier.startedDay); assertEquals(TODAY, earlier.endedDay)
+        assertEquals(PauseRole.REVIEWER, home(carol.app).pauseHistory.single().role)
         assertEquals(emptyList(), home(dave.app).pauses)
         assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""), "no longer paused, though still a newcomer")
         listOf(alice, bea, carol, dave).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
@@ -1315,6 +1324,53 @@ class CircleAppEndToEndTest {
         repeat(10) { assertIs<SkillResult.Saved>(alice.app.addSkill("Skill $it", "", emptySet())) }
         assertTrue(assertIs<SkillResult.Refused>(alice.app.addSkill("Eleventh", "", emptySet())).reason.contains("at most 10"))
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun aBrowserExportCarriesTheSealedPhotosAndANewHostGetsThemBack() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val blobs = object : circles.sync.BlobTransport {
+            override suspend fun put(path: String, body: ByteArray, token: String): Int =
+                http.put(path) { header("Authorization", "Bearer $token"); setBody(body) }.status.value
+
+            override suspend fun get(path: String, token: String): circles.sync.BlobReply =
+                http.get(path) { header("Authorization", "Bearer $token") }.let { circles.sync.BlobReply(it.status.value, it.readRawBytes()) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto, blobs = blobs)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage") as ItemResult.Saved).item
+        alice.app.syncOnce()
+        val photoBytes = ByteArray(5_000) { (it * 7).toByte() }
+        val thumbBytes = ByteArray(800) { (it * 3).toByte() }
+        assertEquals(PhotoResult.Saved, alice.app.addPhoto(ladder, "Ladder in the garage", photoBytes, thumbBytes))
+        alice.app.syncOnce(); alice.app.syncOnce()
+        val photo = home(alice.app).items.single().photos.single()
+
+        val ready = assertIs<circles.app.ExportResult.Ready>(alice.app.exportCircle())
+        assertEquals(2, ready.photos); assertEquals(0, ready.photosMissing)
+        // Only the sealed files are in it: the image bytes are not.
+        assertFalse(ready.bytes.toList().windowed(16).any { w -> w == photoBytes.toList().take(16) })
+        val dir = java.nio.file.Files.createTempDirectory("browser-export-photos")
+        try {
+            val file = dir.resolve(ready.fileName)
+            java.nio.file.Files.write(file, ready.bytes)
+            assertEquals(emptyList(), circles.server.backup.ZipExportSource(file).use { circles.export.ExportVerifier.verify(it, crypto) }.problems)
+            val fresh = circles.server.support.TestServer()
+            try {
+                val importer = circles.server.backup.CircleImporter(fresh.services.sync, fresh.services.blobs!!, fresh.crypto)
+                assertIs<circles.server.backup.ImportResult.Done>(circles.server.backup.ZipExportSource(file).use { importer.import(it) })
+                val circle = home(alice.app).circle
+                assertEquals(server.services.blobs!!.get(circle, photo.photo)?.toList(), fresh.services.blobs!!.get(circle, photo.photo)?.toList())
+                assertEquals(server.services.blobs!!.get(circle, photo.thumb)?.toList(), fresh.services.blobs!!.get(circle, photo.thumb)?.toList())
+            } finally {
+                fresh.close()
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
     }
 
     @Test

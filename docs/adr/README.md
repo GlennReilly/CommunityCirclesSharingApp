@@ -68,6 +68,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0062](0062-qr-codes.md) | QR codes | Accepted |
 | [0063](0063-passkey-unlock.md) | Unlocking with a passkey | Accepted |
 | [0064](0064-bundle-budget-300-kib.md) | Script budget raised to 300 KiB | Accepted |
+| [0065](0065-recovery-share-set-id.md) | A recovery share names its set | Accepted |
 
 ## Open decisions still to record
 
