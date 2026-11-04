@@ -92,11 +92,11 @@ class CircleAppEndToEndTest {
 
     private class Browser(val app: CircleApp, val store: KeyStore, val replica: InMemoryReplica)
 
-    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null, today: () -> Int = { TODAY }, blobs: circles.sync.BlobTransport? = null): Browser {
+    private fun browser(transport: HttpTransport, crypto: JvmCrypto = JvmCrypto(), store: KeyStore = InMemoryKeyStore(), replica: InMemoryReplica? = null, today: () -> Int = { TODAY }, blobs: circles.sync.BlobTransport? = null, exportPhotoBytes: Long = circles.app.EXPORT_PHOTO_BYTES): Browser {
         val hasher = JvmPasswordHasher()
         val vault = KeyVault(deadScope, crypto, testCipher, hasher, store, AutoLock.UntilTabCloses, FAST)
         val local = replica ?: InMemoryReplica { it.eventId(crypto) }
-        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today, wordlist = { WORDS }, blobTransport = blobs)
+        val app = CircleApp(deadScope, crypto, testCipher, vault, store, local, { identity -> HttpSyncApi(transport, crypto, identity) }, today, wordlist = { WORDS }, blobTransport = blobs, exportPhotoBytes = exportPhotoBytes)
         return Browser(app, store, local)
     }
 
@@ -1368,6 +1368,50 @@ class CircleAppEndToEndTest {
             } finally {
                 fresh.close()
             }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anExportCountsPhotosItCouldNotFetchOrFitAndStillComes() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        var failing: String? = null
+        val blobs = object : circles.sync.BlobTransport {
+            override suspend fun put(path: String, body: ByteArray, token: String): Int =
+                http.put(path) { header("Authorization", "Bearer $token"); setBody(body) }.status.value
+
+            override suspend fun get(path: String, token: String): circles.sync.BlobReply =
+                if (failing != null && path.endsWith(failing!!)) circles.sync.BlobReply(404, ByteArray(0))
+                else http.get(path) { header("Authorization", "Bearer $token") }.let { circles.sync.BlobReply(it.status.value, it.readRawBytes()) }
+        }
+        val crypto = JvmCrypto()
+        // A cap of 4,000 bytes: the 800-byte thumbnail (sealed, 840) fits, the 5,000-byte photo does not.
+        val alice = browser(transport, crypto, blobs = blobs, exportPhotoBytes = 4_000)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
+        alice.app.syncOnce()
+        assertEquals(PhotoResult.Saved, alice.app.addPhoto(ladder, "", ByteArray(5_000) { (it * 7).toByte() }, ByteArray(800) { (it * 3).toByte() }))
+        alice.app.syncOnce(); alice.app.syncOnce()
+        val photo = home(alice.app).items.single().photos.single()
+
+        val capped = assertIs<circles.app.ExportResult.Ready>(alice.app.exportCircle())
+        assertEquals(1, capped.photos, "only the thumbnail fits under the cap"); assertEquals(1, capped.photosMissing)
+        // One file the server cannot give: counted as missing, and the export still verifies.
+        val roomy = browser(transport, crypto, blobs = blobs, replica = alice.replica, store = alice.store, exportPhotoBytes = circles.app.EXPORT_PHOTO_BYTES)
+        failing = photo.thumb
+        roomy.app.open()
+        assertEquals(UnlockResult.Unlocked, roomy.app.unlock(PASSPHRASE))
+        roomy.app.syncOnce()
+        val missing = assertIs<circles.app.ExportResult.Ready>(roomy.app.exportCircle())
+        assertEquals(1, missing.photos); assertEquals(1, missing.photosMissing)
+        val dir = java.nio.file.Files.createTempDirectory("browser-export-missing")
+        try {
+            val file = dir.resolve(missing.fileName)
+            java.nio.file.Files.write(file, missing.bytes)
+            assertEquals(emptyList(), circles.server.backup.ZipExportSource(file).use { circles.export.ExportVerifier.verify(it, crypto) }.problems)
         } finally {
             dir.toFile().deleteRecursively()
         }

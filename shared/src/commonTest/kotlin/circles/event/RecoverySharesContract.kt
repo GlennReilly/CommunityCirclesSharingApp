@@ -232,4 +232,24 @@ abstract class RecoverySharesContract {
         assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "ABC").toPublic()))
         assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "g".repeat(32)).toPublic()))
     }
+
+    @Test
+    fun aShareSetBelongsToTheStewardWhoStartedItAndAKeyWrapMayNotNameOne() = runTest {
+        val circle = Circle(newCrypto(), newCipher())
+        val real = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
+        circle.log += real
+        val name = (CircleKeys.keyWrap(real.first().public) as Parsed.Ok).value.set!!
+        val someShare = (CircleKeys.keyWrap(real.first().public) as Parsed.Ok).value.wrapped
+        // Steward b reuses a's set name to add a share to it: refused, and the holders stay as a's set made them.
+        val stolen = circle.b.rawEvent(circle.id, EventType.RECOVERY_SHARE, circle.day, KeyWrapTerms(circle.a.identity.device, FIRST_EPOCH, someShare, set = name).toPublic(), FIRST_EPOCH)
+        circle.log += stolen
+        // A key.wrap naming a set is refused too.
+        val wrapWithSet = circle.a.rawEvent(circle.id, EventType.KEY_WRAP, circle.day, KeyWrapTerms(circle.c.identity.device, FIRST_EPOCH, someShare, set = name).toPublic(), FIRST_EPOCH)
+        circle.log += wrapWithSet
+        val view = circle.fold(circle.a.identity)
+        val reasons = view.rejected.associate { it.id to it.reason }
+        assertTrue("another steward" in reasons.getValue(stolen.eventId(circle.crypto)))
+        assertTrue("share set" in reasons.getValue(wrapWithSet.eventId(circle.crypto)))
+        assertEquals(setOf(circle.a.identity.member, circle.b.identity.member, circle.c.identity.member), view.shareHolders.getValue(FIRST_EPOCH))
+    }
 }

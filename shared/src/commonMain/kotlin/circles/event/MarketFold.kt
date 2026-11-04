@@ -293,12 +293,25 @@ internal class MarketFold(
 
     private fun members(): Set<MemberId> = devices.values.filter { !it.revoked }.map { it.registration.member }.toSet()
 
-    private fun isReviewer(member: MemberId, day: Int, id: EventId): Boolean =
-        StandingRules.standingOf(member, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier.rank >= config(day).pauseReviewerMinTier.rank
+    /**
+     * Who may propose or review a pause on [day]: the members whose standing reaches the configured tier. The inputs that
+     * do not depend on the member (rules, counted vouches, stewards, confirmed notes) are worked out once, not per member,
+     * so a pause event costs one pass over the circle instead of one per member.
+     */
+    private fun reviewers(day: Int, id: EventId): Set<MemberId> {
+        val cfg = config(day)
+        val counted = vouchesCounting(day)
+        val stewards = stewardsAt(id)
+        val notes = confirmedNotes()
+        val loansNow = loans.values
+        return members().filterTo(mutableSetOf()) { member ->
+            StandingRules.standingOf(member, cfg, loansNow, counted, stewards, day, notes).tier.rank >= cfg.pauseReviewerMinTier.rank
+        }
+    }
 
     /** Reviewers needed for a pause of [subject]: the configured number capped at the eligible reviewers minus one, but at least two (and never more than the eligible reviewers). */
-    private fun reviewersNeeded(subject: MemberId, day: Int, id: EventId): Int {
-        val eligible = members().count { it != subject && isReviewer(it, day, id) }
+    private fun reviewersNeeded(subject: MemberId, day: Int, reviewers: Set<MemberId>): Int {
+        val eligible = reviewers.count { it != subject }
         return minOf(eligible, maxOf(MIN_PAUSE_REVIEWERS, minOf(config(day).reviewersForPause, eligible - 1)))
     }
 
@@ -372,12 +385,13 @@ internal class MarketFold(
 
     private fun proposePause(author: MemberId, v: PauseProposal, day: Int, id: EventId): String? {
         if (pauses.containsKey(v.pause)) return "pause id already used"
-        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may propose a pause"
+        val eligible = reviewers(day, id)
+        if (author !in eligible) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may propose a pause"
         if (v.subject == author) return "a member cannot propose pausing themselves"
         if (v.subject !in members()) return "the subject is not in the circle"
         if (v.subject in stewardsAt(id)) return "a steward is not paused: the steward rules apply"
         if (pauses.values.any { it.subject == v.subject && it.statusOn(day).let { s -> s == PauseStatus.PROPOSED || s == PauseStatus.LIVE } }) return "that member already has a pause or a proposal"
-        val needed = reviewersNeeded(v.subject, day, id)
+        val needed = reviewersNeeded(v.subject, day, eligible)
         if (needed < MIN_PAUSE_REVIEWERS) return "the circle has too few trusted members to review a pause"
         pauses[v.pause] = PauseState(v.pause, v.subject, author, v.reason, v.days, day, mapOf(author to true), needed)
         return null
@@ -389,7 +403,8 @@ internal class MarketFold(
         if (pause.liftedDay != null) return "the pause has been lifted"
         val status = pause.statusOn(day)
         if (status == PauseStatus.LAPSED || status == PauseStatus.ENDED) return "the pause is over"
-        if (author !in members() || !isReviewer(author, day, id)) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may review"
+        val eligible = reviewers(day, id)
+        if (author !in eligible) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may review"
         if (pause.liveFrom != null) {
             // Once in force, only a reviewer who agreed may step back; stepping back below the number needed ends the pause.
             if (v.agree || author !in pause.agreeing) return "the pause is already in force"
@@ -399,7 +414,7 @@ internal class MarketFold(
             return null
         }
         val reviews = pause.reviews + (author to v.agree)
-        val needed = reviewersNeeded(pause.subject, day, id)
+        val needed = reviewersNeeded(pause.subject, day, eligible)
         val live = needed >= MIN_PAUSE_REVIEWERS && reviews.count { it.value } >= needed
         pauses[v.pause] = pause.copy(reviews = reviews, needed = needed, liveFrom = if (live) day else null)
         return null

@@ -253,6 +253,9 @@ class EventAuthor(
 
     private fun textPayload(name: String, text: String?): CborMap = if (text == null) CborMap.EMPTY else CborMap.of(name to CborText(text))
 
+    /** An event with exactly the given public part, signed as usual. Only for tests that need a shape the builders refuse to make. */
+    internal fun rawEvent(circle: CircleId, type: EventType, day: Int, public: CborMap, epoch: Int): Envelope = build(circle, type, day, public, CborMap.EMPTY, epoch)
+
     private fun build(circle: CircleId, type: EventType, day: Int, public: CborMap, payload: CborMap, epoch: Int = 0): Envelope {
         val secret = payload.entries.isNotEmpty()
         val eventEpoch = if (secret) keyRing.latestEpoch.also { check(it >= FIRST_EPOCH) { "no circle key yet: wrap one to this device first" } } else epoch

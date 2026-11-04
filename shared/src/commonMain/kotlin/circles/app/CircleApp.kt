@@ -593,6 +593,8 @@ class CircleApp(
     private val blobTransport: circles.sync.BlobTransport? = null,
     /** The browser's passkeys for unlocking without typing (ADR 0063); null where there are none. */
     private val passkeys: circles.keys.PasskeyProvider? = null,
+    /** How many bytes of sealed photos an export holds at most; tests lower it. */
+    private val exportPhotoBytes: Long = EXPORT_PHOTO_BYTES,
 ) {
     private var pendingRecovery: Triple<circles.encoding.ByteString, List<Int>, List<String>>? = null
     private val mutableModel = MutableStateFlow<AppModel>(AppModel.Loading)
@@ -941,12 +943,12 @@ class CircleApp(
 
     // ---- circle rules (ADR 0051) ----
 
-    private fun rulesFor(view: circles.event.CircleView, me: MemberId, now: Int): RulesSummary {
+    private fun rulesFor(circle: circles.policy.CircleId, view: circles.event.CircleView, me: MemberId, now: Int): RulesSummary {
         val needed = minOf(view.stewardSettings.quorum, view.stewards.size).coerceAtLeast(1)
         val since = view.stewardSince[me]
         val coolingOff = view.stewardSettings.quorum > 1 && since != null && since != circles.event.FOUNDING_STEWARD_DAY && now < since + circles.event.DEFAULT_STEWARD_COOL_OFF_DAYS
         return RulesSummary(
-            circles.event.ConfigSettings.of(view.market.configOn(circles.policy.CircleId(""), now)),
+            circles.event.ConfigSettings.of(view.market.configOn(circle, now)),
             view.market.pendingConfigs.filter { now <= it.firstDay + circles.event.DEFAULT_STEWARD_PROPOSAL_DAYS }.map {
                 RulesProposal(it.settings, it.voters.size, needed, me in it.voters, me in view.stewards && me !in it.voters && !coolingOff)
             },
@@ -973,8 +975,8 @@ class CircleApp(
 
     // ---- pauses (ADR 0050) ----
 
-    private fun pausesFor(view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseSummary> {
-        val cfg = view.market.configOn(circles.policy.CircleId(""), now)
+    private fun pausesFor(circle: circles.policy.CircleId, view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseSummary> {
+        val cfg = view.market.configOn(circle, now)
         val mayReview = myTier.rank >= cfg.pauseReviewerMinTier.rank
         return view.market.pauses.mapNotNull { pause ->
             val status = pause.statusOn(now)
@@ -996,8 +998,8 @@ class CircleApp(
         }
     }
 
-    private fun pauseHistoryFor(view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseHistoryEntry> {
-        val cfg = view.market.configOn(circles.policy.CircleId(""), now)
+    private fun pauseHistoryFor(circle: circles.policy.CircleId, view: circles.event.CircleView, me: MemberId, myTier: circles.policy.Tier, now: Int): List<PauseHistoryEntry> {
+        val cfg = view.market.configOn(circle, now)
         val mayReview = myTier.rank >= cfg.pauseReviewerMinTier.rank
         return view.market.pauses.mapNotNull { pause ->
             val status = pause.statusOn(now)
@@ -1083,7 +1085,7 @@ class CircleApp(
         var missing = 0
         for (hash in wanted) {
             val sealed = s.blobs?.get(s.circle, hash)
-            val ok = sealed != null && circles.event.BlobSealing.matchesHash(crypto, hash, circles.encoding.ByteString.of(sealed)) && used + sealed.size <= EXPORT_PHOTO_BYTES
+            val ok = sealed != null && circles.event.BlobSealing.matchesHash(crypto, hash, circles.encoding.ByteString.of(sealed)) && used + sealed.size <= exportPhotoBytes
             if (ok && sealed != null) { held[hash] = sealed; used += sealed.size } else missing++
         }
         val refs = held.map { (hash, bytes) -> circles.export.ExportBlobRef(hash, bytes.size.toLong()) }
@@ -1743,9 +1745,9 @@ class CircleApp(
                 stewardCount = view.stewards.size,
                 needsRotation = me in view.stewards && view.unrotatedRemovals.isNotEmpty(),
                 recoveryShares = recoverySharesOf(view, s.identity.member),
-                pauses = pausesFor(view, me, myStanding.tier, now),
-                pauseHistory = pauseHistoryFor(view, me, myStanding.tier, now),
-                rules = rulesFor(view, me, now),
+                pauses = pausesFor(s.circle, view, me, myStanding.tier, now),
+                pauseHistory = pauseHistoryFor(s.circle, view, me, myStanding.tier, now),
+                rules = rulesFor(s.circle, view, me, now),
                 skills = view.market.skills.filter { !it.retired && it.owner !in view.market.departed }.map {
                     SkillSummary(it.skill, it.name, it.details, it.openTo, it.owner, it.owner == me)
                 },
