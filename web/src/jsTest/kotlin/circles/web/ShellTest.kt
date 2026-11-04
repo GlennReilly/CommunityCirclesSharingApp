@@ -885,7 +885,7 @@ class ShellViewTest {
 
     @Test fun theRecoveryPageShowsTwelveNumberedWordsTheLinkAndAThreeWordCheck() {
         val html = render(open().copy(screen = Screen.RecoveryCode, recoveryDraft = draft))
-        assertTrue("<ol>" in html)
+        assertTrue("""<ol class="words">""" in html)
         assertEquals(12, Regex("<li>(abandon|ability|able|about|above|absent|absorb|abstract|absurd|abuse|access|accident)</li>").findAll(html).count())
         assertTrue("""value="${draft.restoreLink}"""" in html && "readonly" in html)
         assertTrue("like a house key" in html)
@@ -1202,5 +1202,12 @@ class ShellViewTest {
         }
         assertTrue("icon-sync" in html && "icon-lock" in html)
         assertFalse("tool-button" in render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity)), "nothing to sync or lock before signing in")
+    }
+
+    @Test fun theWelcomePageOffersTwoButtonsAndMainActionsAreButtons() {
+        val welcome = render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity))
+        assertTrue("""class="button primary"""" in welcome && "Start a circle" in welcome && "Join a circle" in welcome)
+        assertFalse("<ul>" in welcome.substringAfter("<main"))
+        assertTrue("""class="button primary"""" in render(open(home()).copy(screen = Screen.Items)))
     }
 }

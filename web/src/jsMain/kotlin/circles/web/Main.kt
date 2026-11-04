@@ -50,6 +50,7 @@ import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.await
 import kotlinx.dom.clear
@@ -99,6 +100,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     private var registration: dynamic = null
 
     fun dispatch(action: AppAction) {
+        // A message goes away by itself after a while (Dismiss is still there), so it never lingers on another page.
+        if (action is AppAction.Notice && action.text != null) {
+            val text = action.text
+            scope.launch {
+                delay(NOTICE_MILLIS)
+                if (state.notice == text) dispatch(AppAction.Notice(null))
+            }
+        }
         val before = state
         state = reduce(state, action)
         if (state == before) return
@@ -685,3 +694,5 @@ private fun pauseText(result: PauseResult, done: String): String = when (result)
 private fun rulesOf(n: List<Int>) = circles.event.ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8])
 
 private fun tierOrNull(name: String): circles.policy.Tier? = circles.policy.Tier.entries.firstOrNull { it.name == name }
+
+private const val NOTICE_MILLIS = 8_000L

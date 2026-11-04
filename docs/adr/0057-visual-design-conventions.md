@@ -29,3 +29,7 @@ Every click and submit goes through `busyLaunch`: the button gets `aria-busy="tr
 ## Addition (2026-11-04): icon-only tool buttons
 
 The header's Sync and Lock buttons are square icon buttons with the standard glyphs (circular arrows for sync, a padlock for lock), a spoken name (`aria-label`) and a tooltip (`title`). While syncing the arrows turn. Words are kept for buttons whose meaning is not a universal icon (Add item, Report it back, Let in).
+
+## Addition (2026-11-04): calls to action, word grid, fading notices
+
+The main thing to do on a page is a filled button-styled link (Add an item, Offer a skill, Start a circle); an equal alternative is an outlined one (Join a circle). Recovery words are a numbered grid of chips. A notice fades away by itself after 8 seconds (Dismiss stays), so a message never lingers on another page.

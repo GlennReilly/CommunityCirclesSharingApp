@@ -416,14 +416,22 @@ private fun FlowContent.newcomer(state: AppState) {
 private fun FlowContent.welcome() {
     h1 { +Screen.Welcome.title }
     p { +"Circles is a way for neighbours to share things and skills. Everything is encrypted on your own device." }
-    ul {
-        li {
-            a(href = Screen.StartCircle.fragment) { +"Start a circle" }
-            +" if you are the first."
+    // Two clear choices, each a button with a line saying who it is for.
+    div {
+        classes = setOf("choices")
+        div {
+            a(href = Screen.StartCircle.fragment) {
+                classes = setOf("button", "primary")
+                +"Start a circle"
+            }
+            p { +"You are the first: you become the circle's first steward." }
         }
-        li {
-            a(href = Screen.JoinCircle.fragment) { +"Join a circle" }
-            +" if someone sent you an invite link."
+        div {
+            a(href = Screen.JoinCircle.fragment) {
+                classes = setOf("button")
+                +"Join a circle"
+            }
+            p { +"Someone sent you an invite link." }
         }
     }
 }
@@ -652,7 +660,10 @@ private fun FlowContent.items(home: HomeData) {
         return
     }
     p {
-        a(href = Screen.AddItem.fragment) { +"Add an item" }
+        a(href = Screen.AddItem.fragment) {
+            classes = setOf("button", "primary")
+            +"Add an item"
+        }
     }
     if (home.items.isEmpty()) {
         p { +"Nothing has been shared yet." }
@@ -1506,6 +1517,7 @@ private fun FlowContent.recoveryCodePage(state: AppState) {
     }
     p { +"Write these 12 words on paper, in this order. Keep the paper somewhere safe, like a house key. Anyone who has them can act as you, and nobody can look them up for you." }
     ol {
+        classes = setOf("words")
         for (word in draft.words) li { +word }
     }
     label {
@@ -1903,7 +1915,12 @@ private fun FlowContent.skills(home: HomeData) {
         }
         return
     }
-    p { a(href = Screen.AddSkill.fragment) { +"Offer a skill" } }
+    p {
+        a(href = Screen.AddSkill.fragment) {
+            classes = setOf("button", "primary")
+            +"Offer a skill"
+        }
+    }
     if (home.skills.isEmpty()) {
         p { +"Nobody has offered a skill yet." }
         return
