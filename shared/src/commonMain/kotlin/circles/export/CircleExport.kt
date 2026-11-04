@@ -71,7 +71,7 @@ class BuiltExport(val manifest: ExportManifest, val eventsBytes: ByteArray) {
     /** The whole export as named entries, with the blob bytes the caller holds. */
     fun entries(blobBytes: Map<String, ByteArray>): Map<String, ByteArray> =
         buildMap {
-            put(MANIFEST_ENTRY, ApiJson.encodeToString(ExportManifest.serializer(), manifest).encodeToByteArray())
+            put(MANIFEST_ENTRY, circles.api.Wire.encode(manifest).encodeToByteArray())
             put(EVENTS_ENTRY, eventsBytes)
             manifest.blobs.forEach { put(BLOB_ENTRY_PREFIX + it.hash, blobBytes.getValue(it.hash)) }
         }
@@ -80,7 +80,7 @@ class BuiltExport(val manifest: ExportManifest, val eventsBytes: ByteArray) {
 object CircleExport {
     /** [events] must be in `serverSeq` order starting at 1 with no gaps. */
     fun build(crypto: Crypto, circle: CircleId, events: List<EnvelopeDto>, blobs: List<ExportBlobRef>): BuiltExport {
-        val bytes = events.joinToString(separator = "") { ApiJson.encodeToString(EnvelopeDto.serializer(), it) + "\n" }.encodeToByteArray()
+        val bytes = events.joinToString(separator = "") { circles.api.Wire.encode(it) + "\n" }.encodeToByteArray()
         val manifest = ExportManifest(EXPORT_FORMAT, circle.v, events.size, events.size.toLong(), crypto.hash256(bytes).toHex(), blobs.sortedBy { it.hash })
         return BuiltExport(manifest, bytes)
     }

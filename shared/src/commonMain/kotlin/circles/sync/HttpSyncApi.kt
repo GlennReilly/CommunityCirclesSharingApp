@@ -1,7 +1,7 @@
 package circles.sync
 
 import circles.api.API_PREFIX
-import circles.api.ApiJson
+import circles.api.Wire
 import circles.api.ChallengeRequest
 import circles.api.ChallengeResponse
 import circles.api.MAX_PUSH_EVENTS
@@ -85,7 +85,7 @@ class HttpSyncApi(
     override suspend fun pull(circle: CircleId, after: Long, limit: Int): ApiOutcome<PullResponse> {
         val path = "$API_PREFIX/circles/${circle.v}/events?after=$after&limit=$limit"
         return when (val reply = authorised("GET", path, null)) {
-            is ApiOutcome.Ok -> decode(reply.value, PullResponse.serializer())
+            is ApiOutcome.Ok -> decode(reply.value) { Wire.decodePull(it) }
             else -> reply.failure()
         }
     }
@@ -93,10 +93,10 @@ class HttpSyncApi(
     private fun isPublicEndpointEvent(e: Envelope): Boolean = EventType.fromWire(e.type).let { it == EventType.CIRCLE_CREATE || it == EventType.MEMBER_JOIN }
 
     private suspend fun single(path: String, event: Envelope): ApiOutcome<List<PushResult>> {
-        val body = ApiJson.encodeToString(SingleEventRequest.serializer(), SingleEventRequest(event.toDto()))
+        val body = Wire.encode(SingleEventRequest(event.toDto()))
         val reply = transport.send("POST", path, body, null) ?: return ApiOutcome.Offline
         return when (reply.status) {
-            HTTP_OK, HTTP_CREATED, HTTP_UNPROCESSABLE -> decode(reply, PushResult.serializer()).map { listOf(it) }
+            HTTP_OK, HTTP_CREATED, HTTP_UNPROCESSABLE -> decode(reply) { Wire.decodePushResult(it) }.map { listOf(it) }
             // Any other answer is about this one event (creation disabled, malformed, too large): refuse it, keep going.
             in HTTP_UNAUTHORIZED + 1 until HTTP_TOO_MANY_REQUESTS -> ApiOutcome.Ok(listOf(PushResult(event.eventId(crypto).v, PushStatus.REJECTED, reason = "http_${reply.status}")))
             else -> reply.failure()
@@ -104,9 +104,9 @@ class HttpSyncApi(
     }
 
     private suspend fun batch(circle: CircleId, events: List<Envelope>): ApiOutcome<List<PushResult>> {
-        val body = ApiJson.encodeToString(PushRequest.serializer(), PushRequest(events.map { it.toDto() }))
+        val body = Wire.encode(PushRequest(events.map { it.toDto() }))
         return when (val reply = authorised("POST", "$API_PREFIX/circles/${circle.v}/events", body)) {
-            is ApiOutcome.Ok -> decode(reply.value, ListSerializer(PushResult.serializer()))
+            is ApiOutcome.Ok -> decode(reply.value) { Wire.decodePushResults(it) }
             else -> reply.failure()
         }
     }
@@ -130,27 +130,22 @@ class HttpSyncApi(
     }
 
     private suspend fun login(): ApiOutcome<String> {
-        val challenge = transport.send("POST", "$API_PREFIX/auth/challenge", ApiJson.encodeToString(ChallengeRequest.serializer(), ChallengeRequest(identity.device.v)), null)
+        val challenge = transport.send("POST", "$API_PREFIX/auth/challenge", Wire.encode(ChallengeRequest(identity.device.v)), null)
             ?: return ApiOutcome.Offline
         if (challenge.status != HTTP_OK) return challenge.failure(loginFailure = true)
-        val nonce = (decode(challenge, ChallengeResponse.serializer()) as? ApiOutcome.Ok)?.value?.nonce ?: return ApiOutcome.Refused(challenge.status, "bad challenge answer")
+        val nonce = (decode(challenge) { Wire.decodeChallenge(it) } as? ApiOutcome.Ok)?.value?.nonce ?: return ApiOutcome.Refused(challenge.status, "bad challenge answer")
         val nonceBytes = ByteString.fromBase64Url(nonce) ?: return ApiOutcome.Refused(challenge.status, "bad challenge nonce")
         val signature = crypto.sign(identity.signing.secretSeed, authMessage(identity.device, nonceBytes))
         val request = SessionRequest(identity.device.v, nonce, signature.toBase64Url())
-        val session = transport.send("POST", "$API_PREFIX/auth/session", ApiJson.encodeToString(SessionRequest.serializer(), request), null)
+        val session = transport.send("POST", "$API_PREFIX/auth/session", Wire.encode(request), null)
             ?: return ApiOutcome.Offline
         if (session.status != HTTP_OK) return session.failure(loginFailure = true)
-        return decode(session, SessionResponse.serializer()).map { it.token }
+        return decode(session) { Wire.decodeSession(it) }.map { it.token }
     }
 
-    private fun <T> decode(reply: HttpReply, serializer: kotlinx.serialization.KSerializer<T>): ApiOutcome<T> =
-        try {
-            ApiOutcome.Ok(ApiJson.decodeFromString(serializer, reply.body))
-        } catch (_: SerializationException) {
-            ApiOutcome.Refused(reply.status, "the server's answer was not understood")
-        } catch (_: IllegalArgumentException) {
-            ApiOutcome.Refused(reply.status, "the server's answer was not understood")
-        }
+    /** Reads the body with [parse]; a body that does not fit is a refusal, never a crash. */
+    private fun <T : Any> decode(reply: HttpReply, parse: (String) -> T?): ApiOutcome<T> =
+        parse(reply.body)?.let { ApiOutcome.Ok(it) } ?: ApiOutcome.Refused(reply.status, "the server's answer was not understood")
 
     private fun HttpReply.failure(loginFailure: Boolean = false): ApiOutcome<Nothing> = when {
         status == HTTP_UNAUTHORIZED || (loginFailure && status == HTTP_FORBIDDEN) -> ApiOutcome.Unauthorized

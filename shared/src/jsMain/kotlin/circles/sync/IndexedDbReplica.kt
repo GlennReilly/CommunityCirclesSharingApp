@@ -1,6 +1,6 @@
 package circles.sync
 
-import circles.api.ApiJson
+import circles.api.Wire
 import circles.encoding.ByteString
 import circles.encoding.Parsed
 import circles.event.Envelope
@@ -146,7 +146,7 @@ class IndexedDbReplica private constructor(
     override suspend fun load(): StoredIdentity? {
         val tx = db.transaction(arrayOf(STORE_KEYS), MODE_READ)
         val row = tx.objectStore(STORE_KEYS).get(KEY_IDENTITY).await().value ?: return null
-        return ApiJson.decodeFromString(StoredIdentity.serializer(), row.json as String)
+        return Wire.decodeStoredIdentity(row.json as String)
     }
 
     override suspend fun save(identity: StoredIdentity) {
@@ -154,7 +154,7 @@ class IndexedDbReplica private constructor(
             tx.objectStore(STORE_KEYS).put(
                 jsObject {
                     this.k = KEY_IDENTITY
-                    this.json = ApiJson.encodeToString(StoredIdentity.serializer(), identity)
+                    this.json = Wire.encode(identity)
                 },
             )
         }
@@ -176,10 +176,10 @@ class IndexedDbReplica private constructor(
 
     // ---- helpers ----
 
-    private fun wire(envelope: Envelope): String = ApiJson.encodeToString(EnvelopeDto.serializer(), envelope.toDto())
+    private fun wire(envelope: Envelope): String = Wire.encode(envelope.toDto())
 
     private fun decode(text: String): Envelope =
-        when (val parsed = ApiJson.decodeFromString(EnvelopeDto.serializer(), text).toEnvelope()) {
+        when (val parsed = (Wire.decodeEnvelope(text) ?: throw IdbException("a stored event is damaged: not valid JSON")).toEnvelope()) {
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> throw IdbException("a stored event is damaged: ${parsed.reason}")
         }

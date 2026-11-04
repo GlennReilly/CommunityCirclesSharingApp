@@ -43,15 +43,15 @@ data class PushRequest(val events: List<EnvelopeDto>)
 data class SingleEventRequest(val event: EnvelopeDto)
 
 @Serializable
-enum class PushStatus {
+enum class PushStatus(val wire: String) {
     @SerialName("accepted")
-    ACCEPTED,
+    ACCEPTED("accepted"),
 
     @SerialName("duplicate")
-    DUPLICATE,
+    DUPLICATE("duplicate"),
 
     @SerialName("rejected")
-    REJECTED,
+    REJECTED("rejected"),
 }
 
 /** One entry of the push answer. [id] is null when the event was too malformed to have one. */
