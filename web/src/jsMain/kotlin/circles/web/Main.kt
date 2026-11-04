@@ -574,6 +574,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.ShareCodeShown(epoch, circleApp?.shareCode(epoch)))
                 }
                 ACTION_SHARE_HIDE -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { dispatch(AppAction.ShareCodeShown(it, null)) }
+                ACTION_TOGGLE_SECRET -> target.getAttribute(ATTR_TARGET)?.let { id ->
+                    (document.getElementById(id) as? HTMLInputElement)?.let { field ->
+                        val show = field.type == "password"
+                        field.type = if (show) "text" else "password"
+                        target.textContent = if (show) "Hide" else "Show"
+                        target.setAttribute("aria-label", if (show) "Hide what I typed" else "Show what I typed")
+                    }
+                }
                 ACTION_CHECK_NOW -> circleApp?.syncNow(SyncTrigger.MANUAL)
                 ACTION_COPY_FIELD -> target.getAttribute(ATTR_FROM)?.let { id ->
                     (document.getElementById(id) as? HTMLInputElement)?.let {

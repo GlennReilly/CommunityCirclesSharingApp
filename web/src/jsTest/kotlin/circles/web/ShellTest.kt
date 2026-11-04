@@ -1180,4 +1180,16 @@ class ShellViewTest {
         assertEquals(1, Regex("""\schecked""").findAll(edit.substringAfter("What would be welcome")).count())
         assertEquals(Screen.Skills, reduce(open(), AppAction.Navigate(Screen.EditSkill)).screen, "no offer chosen, so back to the list")
     }
+
+    @Test fun everyPassphraseFieldHasAShowHideButtonAndPagesOfferPasswordManagersAUsername() {
+        for (html in listOf(newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle, link), render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))))) {
+            assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_TOGGLE_SECRET"""").findAll(html).count())
+            assertTrue("""$ATTR_TARGET="$FIELD_PASSPHRASE"""" in html && """aria-label="Show what I typed"""" in html)
+            assertTrue("""autocomplete="username"""" in html && USERNAME_FOR_PASSWORD_MANAGERS in html)
+        }
+        val settings = render(open(home()).copy(screen = Screen.Settings))
+        assertEquals(2, Regex("""$ATTR_ACTION="$ACTION_TOGGLE_SECRET"""").findAll(settings).count(), "current and new passphrase")
+        assertFalse("You type it each time" in newcomer(Screen.StartCircle))
+        assertTrue("password manager" in newcomer(Screen.StartCircle))
+    }
 }

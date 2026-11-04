@@ -128,6 +128,9 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_TOGGLE_SECRET = "toggle-secret"
+const val ATTR_TARGET = "data-target"
+const val USERNAME_FOR_PASSWORD_MANAGERS = "Circles on this device"
 const val FORM_SKILL_ADD = "skill-add-form"
 const val FORM_SKILL_EDIT = "skill-edit-form"
 const val FIELD_SKILL_NAME = "skill-name"
@@ -321,7 +324,34 @@ private fun FlowContent.formSubmit(text: String, ready: Boolean = false) {
     }
 }
 
+/** A button that shows or hides what was typed in the password field [fieldId]; the page script flips it (ADR 0056). */
+private fun FlowContent.showHideButton(fieldId: String) {
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_TOGGLE_SECRET
+        attributes[ATTR_TARGET] = fieldId
+        attributes["aria-label"] = "Show what I typed"
+        attributes["aria-controls"] = fieldId
+        +"Show"
+    }
+}
+
+/**
+ * Password managers save a password only next to a username. This one is invisible and never changes: the browser then offers
+ * to remember the passphrase, which is the user's choice and kept by the browser, not by Circles (ADR 0056).
+ */
+private fun FlowContent.usernameForPasswordManagers() {
+    input(type = InputType.text, name = "username") {
+        classes = setOf("visually-hidden")
+        value = USERNAME_FOR_PASSWORD_MANAGERS
+        attributes["autocomplete"] = "username"
+        attributes["tabindex"] = "-1"
+        attributes["aria-hidden"] = "true"
+        attributes["readonly"] = "readonly"
+    }
+}
+
 private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
+    usernameForPasswordManagers()
     label {
         attributes["for"] = FIELD_PASSPHRASE
         +"Passphrase: "
@@ -334,10 +364,11 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
         attributes["autocomplete"] = autocomplete
         attributes["aria-describedby"] = "passphrase-help"
     }
+    showHideButton(FIELD_PASSPHRASE)
     if (hint) {
         p {
             id = "passphrase-help"
-            +"At least $MIN_PASSPHRASE_CHARS characters; a few random words is good. You type it each time you open Circles. "
+            +"At least $MIN_PASSPHRASE_CHARS characters; a few random words is good. Circles never stores it: you type it when you open Circles, or let your browser's password manager fill it in if you choose to save it there. "
             +"It protects your keys on this device, and it cannot be recovered if you forget it."
         }
     } else {
@@ -985,6 +1016,7 @@ private fun FlowContent.passwordInput(field: String, label: String, autocomplete
         attributes[ATTR_MIN] = min.toString()
         attributes["autocomplete"] = autocomplete
     }
+    showHideButton(field)
 }
 
 /** This browser's own settings: passphrase, locking, and forgetting the device. */
