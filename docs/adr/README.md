@@ -62,6 +62,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0056](0056-passphrase-show-hide-and-saving.md) | Showing the passphrase, and saving it | Accepted |
 | [0057](0057-visual-design-conventions.md) | Visual design conventions | Accepted |
 | [0058](0058-server-compression.md) | The server compresses text itself | Accepted |
+| [0059](0059-return-reminders.md) | Return reminders | Proposed |
 
 ## Open decisions still to record
 
