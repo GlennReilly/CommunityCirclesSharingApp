@@ -445,6 +445,11 @@ class ShellViewTest {
         assertTrue("2 photo files could not be fetched" in exportNotice(ready(4, 2)))
     }
 
+    @Test fun theOpeningScreenShowsASpinnerWithAStatusRole() {
+        val html = render(AppState(model = AppModel.Loading))
+        assertTrue(Regex("""<p[^>]*class="loading"[^>]*role="status"|<p[^>]*role="status"[^>]*class="loading"""").containsMatchIn(html), html)
+    }
+
     @Test fun theLockingChoicesIncludeTheCurrentOneAsSelected() {
         for (minutes in listOf(5, 15, 60, 0)) {
             val html = settings(minutes)

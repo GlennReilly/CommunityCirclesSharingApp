@@ -101,6 +101,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 button[aria-busy="true"] { pointer-events: none; cursor: progress; }
 button[aria-busy="true"]::after { content: ""; display: inline-block; width: 1em; height: 1em; margin-left: 0.6em; vertical-align: -0.15em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
 .icon-button[aria-busy="true"]::after { display: none; }
+/* The first screen: shown by index.html before the script arrives, and again while the app opens (same look, so nothing jumps). */
+.loading { display: flex; align-items: center; gap: 0.75rem; justify-content: center; margin: 3rem auto; font-size: 1.1rem; }
+.loading::before { content: ""; width: 1.5rem; height: 1.5rem; border: 3px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .loading::before { animation: none; border-right-color: currentColor; opacity: 0.4; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::after { animation: none !important; border-radius: 0; border: none; content: "\2026"; width: auto; height: auto; } }
 

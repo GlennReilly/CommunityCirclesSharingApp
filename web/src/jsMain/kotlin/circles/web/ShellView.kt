@@ -307,7 +307,11 @@ fun FlowContent.shell(state: AppState) {
         when (val model = state.model) {
             AppModel.Loading -> {
                 h1 { +"Circles" }
-                p { +"Opening your circle..." }
+                p {
+                    classes = setOf("loading")
+                    attributes["role"] = "status"
+                    +"Opening your circle"
+                }
             }
             AppModel.NoIdentity -> newcomer(state)
             is AppModel.Locked -> signIn(model.passkey)
