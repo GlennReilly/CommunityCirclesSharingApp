@@ -65,6 +65,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0059](0059-return-reminders.md) | Return reminders | Accepted |
 | [0060](0060-item-photos.md) | Item photos | Accepted |
 | [0061](0061-approving-other-dates.md) | Approving other dates | Accepted |
+| [0062](0062-qr-codes.md) | QR codes | Proposed |
 
 ## Open decisions still to record
 
