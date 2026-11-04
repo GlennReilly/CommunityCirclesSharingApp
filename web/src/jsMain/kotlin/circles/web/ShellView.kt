@@ -54,6 +54,7 @@ import kotlinx.html.ol
 import kotlinx.html.option
 import kotlinx.html.select
 import kotlinx.html.textArea
+import kotlinx.html.span
 import kotlinx.html.fieldSet
 import kotlinx.html.legend
 import kotlinx.html.classes
@@ -329,9 +330,14 @@ private fun FlowContent.showHideButton(fieldId: String) {
     button(type = ButtonType.button) {
         attributes[ATTR_ACTION] = ACTION_TOGGLE_SECRET
         attributes[ATTR_TARGET] = fieldId
-        attributes["aria-label"] = "Show what I typed"
+        classes = setOf("icon-button")
+        attributes["aria-label"] = "Show passphrase"
+        attributes["aria-pressed"] = "false"
         attributes["aria-controls"] = fieldId
-        +"Show"
+        span {
+            classes = setOf("icon")
+            attributes["aria-hidden"] = "true"
+        }
     }
 }
 
@@ -356,15 +362,18 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
         attributes["for"] = FIELD_PASSPHRASE
         +"Passphrase: "
     }
-    input(type = InputType.password, name = FIELD_PASSPHRASE) {
-        id = FIELD_PASSPHRASE
-        required = true
-        attributes["minlength"] = MIN_PASSPHRASE_CHARS.toString()
-        attributes[ATTR_MIN] = MIN_PASSPHRASE_CHARS.toString()
-        attributes["autocomplete"] = autocomplete
-        attributes["aria-describedby"] = "passphrase-help"
+    div {
+        classes = setOf("secret-field")
+        input(type = InputType.password, name = FIELD_PASSPHRASE) {
+            id = FIELD_PASSPHRASE
+            required = true
+            attributes["minlength"] = MIN_PASSPHRASE_CHARS.toString()
+            attributes[ATTR_MIN] = MIN_PASSPHRASE_CHARS.toString()
+            attributes["autocomplete"] = autocomplete
+            attributes["aria-describedby"] = "passphrase-help"
+        }
+        showHideButton(FIELD_PASSPHRASE)
     }
-    showHideButton(FIELD_PASSPHRASE)
     if (hint) {
         p {
             id = "passphrase-help"
@@ -519,6 +528,7 @@ private fun FlowContent.home(home: HomeData) {
 private fun FlowContent.members(home: HomeData, state: AppState) {
     h1 { +Screen.Members.title }
     ul {
+        classes = setOf("cards")
         for (person in home.people) {
             li {
                 h2 { +(if (person.isMe) "You" else "Member ${person.member.v.take(MEMBER_SHORT_CHARS)}") }
@@ -641,6 +651,7 @@ private fun FlowContent.items(home: HomeData) {
         return
     }
     ul {
+        classes = setOf("cards")
         for (item in home.items) {
             li {
                 h2 { +item.name }
@@ -1010,13 +1021,16 @@ private fun FlowContent.passwordInput(field: String, label: String, autocomplete
         attributes["for"] = field
         +label
     }
-    input(type = InputType.password, name = field) {
-        id = field
-        required = true
-        attributes[ATTR_MIN] = min.toString()
-        attributes["autocomplete"] = autocomplete
+    div {
+        classes = setOf("secret-field")
+        input(type = InputType.password, name = field) {
+            id = field
+            required = true
+            attributes[ATTR_MIN] = min.toString()
+            attributes["autocomplete"] = autocomplete
+        }
+        showHideButton(field)
     }
-    showHideButton(field)
 }
 
 /** This browser's own settings: passphrase, locking, and forgetting the device. */
@@ -1457,13 +1471,17 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
                 attributes["maxlength"] = MAX_DEVICE_NAME_CHARS.toString()
                 attributes["autocomplete"] = "off"
             }
-            label {
-                attributes["for"] = FIELD_CHECKED
-                +"The fingerprint above matches the one on the new device: "
-            }
-            input(type = InputType.checkBox, name = FIELD_CHECKED) {
-                id = FIELD_CHECKED
-                required = true
+            // A tick box reads as "[ ] statement": the box first, then its sentence (no colon: it is not asking for typing).
+            div {
+                classes = setOf("check-row")
+                input(type = InputType.checkBox, name = FIELD_CHECKED) {
+                    id = FIELD_CHECKED
+                    required = true
+                }
+                label {
+                    attributes["for"] = FIELD_CHECKED
+                    +"The fingerprint above matches the one on the new device"
+                }
             }
             formSubmit("Add this device")
         }
@@ -1897,6 +1915,7 @@ private fun FlowContent.skills(home: HomeData) {
         +(if (home.skills.size == 1) "1 offer" else "${home.skills.size} offers")
     }
     ul {
+        classes = setOf("cards")
         for (skill in home.skills) {
             li {
                 attributes[ATTR_SKILL_TEXT] = (skill.name + " " + skill.details).lowercase()

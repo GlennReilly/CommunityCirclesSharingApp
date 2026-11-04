@@ -26,7 +26,7 @@ try {
   ok('field labels end with ": " (' + JSON.stringify(labels) + ')');
   await checkAccessibility(alice, 'start page');
   await alice.evaluate('document.querySelector("[data-action=toggle-secret]").click()');
-  if (await alice.evaluate('document.getElementById("passphrase").type') !== 'text' || await alice.evaluate('document.querySelector("[data-action=toggle-secret]").getAttribute("aria-label")') !== 'Hide what I typed') throw new Error('the eye button did not reveal the passphrase');
+  if (await alice.evaluate('document.getElementById("passphrase").type') !== 'text' || await alice.evaluate('document.querySelector("[data-action=toggle-secret]").getAttribute("aria-pressed")') !== 'true') throw new Error('the eye button did not reveal the passphrase');
   await alice.evaluate('document.querySelector("[data-action=toggle-secret]").click()');
   if (await alice.evaluate('document.getElementById("passphrase").type') !== 'password') throw new Error('the eye button did not hide the passphrase again'); ok('the show/hide button reveals and hides the passphrase');
   if (!(await buttonHidden(alice, 'start-form'))) throw new Error('start button visible before a passphrase');

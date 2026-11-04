@@ -578,8 +578,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     (document.getElementById(id) as? HTMLInputElement)?.let { field ->
                         val show = field.type == "password"
                         field.type = if (show) "text" else "password"
-                        target.textContent = if (show) "Hide" else "Show"
-                        target.setAttribute("aria-label", if (show) "Hide what I typed" else "Show what I typed")
+                        // The name stays "Show passphrase"; the pressed state says it is showing (the icon follows aria-pressed).
+                        target.setAttribute("aria-pressed", if (show) "true" else "false")
                     }
                 }
                 ACTION_CHECK_NOW -> circleApp?.syncNow(SyncTrigger.MANUAL)

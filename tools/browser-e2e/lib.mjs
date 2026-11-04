@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,7 @@ export const readingLevels = [];
  * Only does anything when A11Y=1, so the ordinary run stays quick. Violations are collected, not thrown, so one run reports all pages.
  */
 export async function checkAccessibility(chrome, name) {
+  await screenshot(chrome, name);
   if (!A11Y) return;
   await chrome.evaluate(axeSource());
   const result = await chrome.evaluate(`axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } }).then(r => JSON.stringify({ violations: r.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.slice(0, 3).map(n => n.target.join(' ') + ' :: ' + (n.failureSummary || '').split('\\n').slice(0, 2).join(' | ')) })), passes: r.passes.length }))`);
@@ -132,4 +133,16 @@ export function reportAccessibility() {
   console.log(`\nAccessibility: ${a11yFindings.length} violation(s):`);
   for (const f of a11yFindings) console.log(`- [${f.page}] ${f.id} (${f.impact}): ${f.help}\n    ${f.nodes.join('\n    ')}`);
   return a11yFindings.length;
+}
+
+/** With SHOTS=<folder> every page state the script checks is also saved as a PNG (DARK=1 renders them in dark mode), for looking at. */
+async function screenshot(chrome, name) {
+  const dir = process.env.SHOTS;
+  if (!dir) return;
+  mkdirSync(dir, { recursive: true });
+  await chrome.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: process.env.DARK === '1' ? 'dark' : 'light' }] });
+  await chrome.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  const shot = await chrome.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+  writeFileSync(`${dir}/${name.replace(/[^a-z0-9]+/gi, '-')}.png`, Buffer.from(shot.result.data, 'base64'));
 }

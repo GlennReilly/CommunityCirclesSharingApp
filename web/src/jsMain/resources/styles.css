@@ -1,18 +1,94 @@
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
-body { margin: 0; }
-header, nav, main { padding: 0.75rem 1rem; max-width: 60rem; margin: 0 auto; }
-nav ul { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; list-style: none; padding: 0; margin: 0; }
-a[aria-current="page"] { font-weight: bold; text-decoration: underline; }
+/* Circles: one stylesheet, system fonts and colours, light and dark. Layout follows common app conventions (ADR 0057):
+   a header bar, a navigation bar, a notice banner and a centred content column; forms stack labels above full-width fields;
+   lists of things are cards; the main action of a form is the one filled button. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  --line: color-mix(in srgb, currentColor 28%, transparent);
+  --soft: color-mix(in srgb, currentColor 8%, transparent);
+  --primary: #0b57d0;
+  --on-primary: #ffffff;
+}
+@media (prefers-color-scheme: dark) { :root { --primary: #a8c7fa; --on-primary: #062e6f; } }
+body { margin: 0; background: Canvas; color: CanvasText; }
+
+/* The page column: header, navigation, notice and content share one width. */
+header, nav, #notice, main { box-sizing: border-box; max-width: 60rem; margin: 0 auto; padding: 0.75rem 1rem; }
+main { padding-bottom: 3rem; }
 main:focus { outline: none; }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
-/* Touch targets of at least 44 by 44 pixels (WCAG 2.2 asks for 24; this is the comfortable size on a phone). */
-button, select, textarea, summary, input:not([type="checkbox"]):not([type="radio"]) { min-height: 2.75rem; box-sizing: border-box; }
-button { min-width: 2.75rem; padding: 0.5rem 1rem; margin: 0.25rem 0.5rem 0.25rem 0; }
-input:not([type="checkbox"]):not([type="radio"]), select, textarea { padding: 0.5rem; margin: 0.25rem 0.5rem 0.25rem 0; max-width: 100%; }
-input[type="checkbox"], input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: 0.5rem; vertical-align: middle; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; border-bottom: 1px solid var(--line); }
+.app-name { font-size: 1.5rem; font-weight: bold; margin: 0 auto 0 0; }
+#sync-status { font-size: 0.9rem; opacity: 0.8; margin-right: 0.5rem; }
+header [role="alert"] { flex-basis: 100%; padding: 0.5rem 0; }
+
+nav { padding-top: 0; padding-bottom: 0; border-bottom: 1px solid var(--line); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0 0.25rem; list-style: none; padding: 0; margin: 0; }
+nav a { display: inline-block; padding: 0.75rem 0.75rem; text-decoration: none; border-bottom: 3px solid transparent; }
+nav a:hover { background: var(--soft); }
+nav a:visited { color: LinkText; }
+a[aria-current="page"] { font-weight: bold; border-bottom-color: currentColor; }
+
+/* Notice banner (status messages): inside the column, text on the left, Dismiss on the right. */
+#notice:empty { display: none; }
+#notice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.75rem; background: var(--soft); border: 1px solid var(--line); border-radius: 0.5rem; max-width: calc(60rem - 2rem); }
+#notice button { flex: none; margin: 0; }
+
+/* Headings and text. */
+main h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.5rem 0 1rem; }
+main h2 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+main h3 { font-size: 1.05rem; margin: 0.75rem 0 0.25rem; }
+main p { margin: 0.5rem 0; }
+main section { margin-top: 2rem; }
+main ul, main ol { padding-left: 1.5rem; }
+
+/* Things in a list are cards. */
+ul.cards { list-style: none; padding: 0; display: grid; gap: 1rem; }
+ul.cards > li, main section > div { border: 1px solid var(--line); border-radius: 0.5rem; padding: 1rem; margin: 0 0 0.75rem; }
+ul.cards > li { margin: 0; }
+ul.cards h2 { margin-top: 0; }
+details { margin: 0.5rem 0; }
 summary { display: list-item; padding: 0.5rem 0; cursor: pointer; }
-nav a { display: inline-block; padding: 0.5rem 0; }
-label { display: inline-block; margin-top: 0.5rem; }
+
+/* Controls. Touch targets are at least 44 by 44 pixels (WCAG 2.2 asks for 24; this is the comfortable size on a phone). */
+button, select, textarea, summary, input:not([type="checkbox"]):not([type="radio"]) { min-height: 2.75rem; box-sizing: border-box; font: inherit; }
+button { min-width: 2.75rem; padding: 0.5rem 1rem; margin: 0.25rem 0.5rem 0.25rem 0; border: 1px solid var(--line); border-radius: 0.5rem; background: var(--soft); color: inherit; cursor: pointer; }
+button:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+button[type="submit"] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); font-weight: 600; }
+button[type="submit"]:hover { filter: brightness(1.08); }
+button[hidden] { display: none; }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea { padding: 0.5rem 0.75rem; margin: 0.25rem 0; max-width: 100%; border: 1px solid var(--line); border-radius: 0.5rem; background: transparent; color: inherit; }
+input[type="checkbox"], input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: 0.5rem 0.5rem 0.5rem 0; vertical-align: middle; flex: none; }
+
+/* Labels outside forms (the invite link, the device code) stack above their field too; read-only fields fill the column and the Copy button wraps below. */
+main label { display: block; margin: 0.9rem 0 0.1rem; font-weight: 600; }
+main input[readonly] { width: 100%; max-width: 34rem; }
+
+/* Forms: a column; each label sits above its field, fields fill the column up to a comfortable width. */
+form { display: flex; flex-direction: column; align-items: flex-start; max-width: 34rem; margin: 0.5rem 0; }
+form label { display: block; margin: 0.9rem 0 0.1rem; font-weight: 600; }
+form input:not([type="checkbox"]):not([type="radio"]), form select, form textarea { width: 100%; }
+form textarea { min-height: 6rem; resize: vertical; }
+form p { font-size: 0.9rem; opacity: 0.85; margin: 0.25rem 0 0.5rem; }
+form button[type="submit"] { margin-top: 1rem; }
+fieldset { border: 1px solid var(--line); border-radius: 0.5rem; margin: 1rem 0 0; padding: 0.5rem 1rem 0.75rem; width: 100%; box-sizing: border-box; }
+legend { font-weight: 600; padding: 0 0.25rem; }
+fieldset div, .check-row { display: flex; align-items: center; }
+.check-row { margin-top: 1rem; }
+form input[type="checkbox"] + label, form input[type="radio"] + label { display: inline; margin: 0; font-weight: normal; }
+
+/* A password field: the show/hide eye sits inside the right end of the field (ADR 0057). */
+.secret-field { position: relative; width: 100%; }
+.secret-field input { padding-right: 3.25rem; margin: 0.25rem 0; }
+.icon-button { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); margin: 0; border: none; background: transparent; border-radius: 0.5rem; padding: 0.25rem; }
+.icon { display: inline-block; width: 1.5rem; height: 1.5rem; vertical-align: middle; background: currentColor;
+  -webkit-mask: var(--eye) center / contain no-repeat; mask: var(--eye) center / contain no-repeat;
+  --eye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+.icon-button[aria-pressed="true"] .icon {
+  --eye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.9 17.9A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2'/%3E%3Cpath d='M1 1l22 22'/%3E%3C/svg%3E"); }
+
+/* Focus, motion, and the invisible username that lets password managers save a passphrase. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-.app-name { font-size: 1.5rem; font-weight: bold; margin: 0; }
 .visually-hidden { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }

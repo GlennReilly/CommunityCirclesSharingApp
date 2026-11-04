@@ -256,12 +256,12 @@ class ShellViewTest {
         )
         var labels = 0
         for (html in pages) {
-            for (match in Regex("<label[^>]*>([\\s\\S]*?)</label>").findAll(html)) {
+            for (match in Regex("<label[^>]*>([\\s\\S]*?)</label>").findAll(html.replace(Regex("<div class=\"check-row\">[\\s\\S]*?</div>"), ""))) {
                 labels++
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -849,7 +849,7 @@ class ShellViewTest {
         val html = settingsWith(emptyList())
         assertTrue("""value="https://circles.example/#/device/${circle.v}/${me.v}"""" in html)
         assertTrue("""id="$FORM_ADD_DEVICE"""" in html)
-        for (label in listOf("Link: ", "Device code: ", "Name of the device: ", "The fingerprint above matches the one on the new device: ")) assertTrue(label in html, label)
+        for (label in listOf("Link: ", "Device code: ", "Name of the device: ", "The fingerprint above matches the one on the new device")) assertTrue(label in html, label)
         assertTrue("""id="$ID_DEVICE_PREVIEW"""" in html && """aria-live="polite"""" in html)
         assertTrue("""type="checkbox"""" in html && "required" in html.substringAfter(FIELD_CHECKED))
         assertTrue("""maxlength="40"""" in html)
@@ -1184,7 +1184,8 @@ class ShellViewTest {
     @Test fun everyPassphraseFieldHasAShowHideButtonAndPagesOfferPasswordManagersAUsername() {
         for (html in listOf(newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle, link), render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))))) {
             assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_TOGGLE_SECRET"""").findAll(html).count())
-            assertTrue("""$ATTR_TARGET="$FIELD_PASSPHRASE"""" in html && """aria-label="Show what I typed"""" in html)
+            assertTrue("""$ATTR_TARGET="$FIELD_PASSPHRASE"""" in html && """aria-label="Show passphrase"""" in html && """aria-pressed="false"""" in html)
+            assertFalse(">Show<" in html, "an icon, not a word")
             assertTrue("""autocomplete="username"""" in html && USERNAME_FOR_PASSWORD_MANAGERS in html)
         }
         val settings = render(open(home()).copy(screen = Screen.Settings))

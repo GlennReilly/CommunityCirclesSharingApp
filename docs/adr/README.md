@@ -60,6 +60,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0054](0054-hand-written-wire-json.md) | Hand-written wire JSON for the browser | Accepted |
 | [0055](0055-skills.md) | Skill offers | Accepted |
 | [0056](0056-passphrase-show-hide-and-saving.md) | Showing the passphrase, and saving it | Accepted |
+| [0057](0057-visual-design-conventions.md) | Visual design conventions | Accepted |
 
 ## Open decisions still to record
 
