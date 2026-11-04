@@ -257,6 +257,11 @@ try {
   if (!(exportSize > 500) || exportType !== 'application/zip') throw new Error('bad export ' + exportSize + ' ' + exportType); ok('bea downloaded a zip export of the circle (' + exportSize + ' bytes)');
   await checkAccessibility(bea, 'settings with export');
 
+  // A working button shows a spinner (ADR 0057): mark one busy by hand and read the spinner's animation back.
+  await alice.evaluate('location.hash = "#/home"'); await until(alice, 'document.querySelector("[data-action=sync]") !== null', 'sync button');
+  const spinner = await alice.evaluate('(() => { const b = document.querySelector("[data-action=sync]"); b.setAttribute("aria-busy", "true"); const a = getComputedStyle(b, "::after"); return JSON.stringify([a.animationName, a.content]); })()');
+  await checkAccessibility(alice, 'home with a busy button'); await alice.evaluate('document.querySelector("[data-action=sync]").removeAttribute("aria-busy")');
+  if (!spinner.includes('spin')) throw new Error('no spinner on a busy button: ' + spinner); ok('a busy button shows a spinner');
   // Skills (ADR 0055): offer one, find it by searching on this device, and see the empty search.
   await alice.evaluate('location.hash = "#/skills/add"'); await until(alice, 'document.getElementById("skill-add-form") !== null', 'skill form');
   await checkAccessibility(alice, 'offer a skill');

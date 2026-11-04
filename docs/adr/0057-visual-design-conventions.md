@@ -21,3 +21,7 @@ The first screens were styled only enough to pass the accessibility checks. The 
 
 - Design choices are made once in `styles.css`; pages differ only in markup (a few classes: `cards`, `secret-field`, `check-row`).
 - Any new screen is checked in a screenshot in both colour schemes before it is called done.
+
+## Addition (2026-11-04): working buttons
+
+Every click and submit goes through `busyLaunch`: the button gets `aria-busy="true"` while the work runs, which shows a spinner after its text, makes it ignore further clicks, and tells screen readers it is busy. With reduced motion the spinner is a static "…". It matters most for unlocking (Argon2 takes a second or more) and syncing.

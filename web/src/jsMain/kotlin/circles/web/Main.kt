@@ -189,6 +189,22 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     }
 
     /** A form's button appears only once every field that needs text has enough of it (`data-min`, in the views). */
+    /**
+     * Runs [work] for a click or a submit: the button shows a spinner and ignores further clicks until it ends, so a slow step
+     * (unlocking runs Argon2, syncing waits for the network) never looks like nothing happened (ADR 0057).
+     */
+    private fun busyLaunch(button: Element?, work: suspend () -> Unit) {
+        if (button?.getAttribute("aria-busy") == "true") return
+        button?.setAttribute("aria-busy", "true")
+        scope.launch {
+            try {
+                work()
+            } finally {
+                button?.removeAttribute("aria-busy")
+            }
+        }
+    }
+
     private fun onInput(event: Event) {
         (event.target as? HTMLInputElement)?.takeIf { it.id == ID_SKILL_SEARCH }?.let { field ->
             // Filtering happens here, on this device, as you type: nothing is sent anywhere.
@@ -236,18 +252,18 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             is HTMLSelectElement -> element.value
             else -> ""
         }
-        scope.launch {
+        busyLaunch((event.asDynamic().submitter as? Element) ?: form.querySelector("#$SUBMIT_ID")) {
             if (form.id.startsWith(FORM_DISPUTE_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val claim = DisputeClaim.entries.firstOrNull { it.name == field(FIELD_CLAIM) }
                 if (loan != null && claim != null) reportLoan(circleApp.disputeReturn(loan, claim, field(FIELD_NOTE)), "Reported. A steward who is not part of this loan will decide.", null)
-                return@launch
+                return@busyLaunch
             }
             if (form.id.startsWith(FORM_RETURN_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val outcome = ReturnOutcome.entries.firstOrNull { it.name == field(FIELD_OUTCOME) }
                 if (loan != null && outcome != null) reportLoan(circleApp.returnLoan(loan, outcome), "Thank you. Reported back.", null)
-                return@launch
+                return@busyLaunch
             }
             when (form.id) {
                 FORM_START -> report(circleApp.startCircle(field(FIELD_PASSPHRASE)))
@@ -492,7 +508,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     private fun onClick(event: Event) {
         val target = (event.target as? Element)?.closest("[$ATTR_ACTION]") ?: return
         val circleApp = app
-        scope.launch {
+        busyLaunch(target) {
             when (target.getAttribute(ATTR_ACTION)) {
                 ACTION_UPDATE -> registration?.waiting?.postMessage(js("({type: 'SKIP_WAITING'})"))
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))

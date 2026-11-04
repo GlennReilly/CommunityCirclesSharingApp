@@ -92,3 +92,10 @@ form input[type="checkbox"] + label, form input[type="radio"] + label { display:
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .visually-hidden { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* A button that is working shows a spinner and ignores clicks (set by the page script while a click or submit runs). */
+button[aria-busy="true"] { pointer-events: none; cursor: progress; }
+button[aria-busy="true"]::after { content: ""; display: inline-block; width: 1em; height: 1em; margin-left: 0.6em; vertical-align: -0.15em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.icon-button[aria-busy="true"]::after { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::after { animation: none !important; border-radius: 0; border: none; content: "\2026"; width: auto; height: auto; } }
