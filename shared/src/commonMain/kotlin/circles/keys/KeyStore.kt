@@ -4,6 +4,13 @@ import circles.event.DeviceId
 import circles.policy.MemberId
 import kotlinx.serialization.Serializable
 
+/**
+ * The passkey that can unlock this identity (ADR 0063): its credential id, the salt given to its secret-making function, and the
+ * seed sealed under a key made from that secret. Holds nothing that opens without the authenticator.
+ */
+@Serializable
+data class PasskeyWrap(val credential: String, val salt: String, val sealed: String)
+
 /** What a browser keeps about its own identity: public ids plus the wrapped seed. Nothing here lets anyone act as the member. */
 @Serializable
 data class StoredIdentity(
@@ -16,6 +23,8 @@ data class StoredIdentity(
     val autoLockMinutes: Int? = null,
     /** True for a browser added as another device of an existing member: it waits until that member registers it (ADR 0046). */
     val pairing: Boolean = false,
+    /** The seed sealed a second time under this device's passkey, if the member turned that on (ADR 0063). */
+    val passkey: PasskeyWrap? = null,
 ) {
     val memberId: MemberId get() = MemberId(member)
     val deviceId: DeviceId get() = DeviceId(device)

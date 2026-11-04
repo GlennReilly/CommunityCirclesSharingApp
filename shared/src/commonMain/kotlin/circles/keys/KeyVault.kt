@@ -145,6 +145,41 @@ class KeyVault(
         }
     }
 
+    /** Whether a passkey can unlock this identity (ADR 0063). */
+    suspend fun hasPasskey(): Boolean = store.load()?.passkey != null
+
+    /**
+     * Turns on unlocking with a passkey: the person is already unlocked, so the seed is in memory; a passkey is made, asked for its
+     * secret once, and the seed is sealed under it next to the passphrase wrapping, which stays as the way back in.
+     */
+    suspend fun enablePasskey(passkeys: PasskeyProvider): PasskeyResult {
+        val identity = (mutableState.value as? VaultState.Unlocked)?.identity ?: return PasskeyResult.NotUnlocked
+        val stored = store.load() ?: return PasskeyResult.NotUnlocked
+        val seed = identity.seed ?: return PasskeyResult.NotUnlocked
+        if (!passkeys.available) return PasskeyResult.Unavailable
+        val created = passkeys.create(identity.device) ?: return PasskeyResult.Unavailable
+        val secret = passkeys.secret(created.credential, created.salt) ?: return PasskeyResult.Unavailable
+        val wrap = PasskeyWrapping.seal(crypto, cipher, secret, seed, identity.device, created) ?: return PasskeyResult.Unavailable
+        store.save(stored.copy(passkey = wrap))
+        return PasskeyResult.Done
+    }
+
+    suspend fun disablePasskey() {
+        store.load()?.let { store.save(it.copy(passkey = null)) }
+    }
+
+    /** Unlocks with the passkey: the authenticator is asked for its secret, which opens the seed. */
+    suspend fun unlockWithPasskey(passkeys: PasskeyProvider): UnlockResult {
+        val stored = store.load() ?: return UnlockResult.NoIdentity
+        val wrap = stored.passkey ?: return UnlockResult.Unsupported("this browser has no passkey for this identity")
+        val credential = circles.encoding.ByteString.fromBase64Url(wrap.credential) ?: return UnlockResult.Unsupported("the passkey record is damaged")
+        val salt = circles.encoding.ByteString.fromBase64Url(wrap.salt) ?: return UnlockResult.Unsupported("the passkey record is damaged")
+        val secret = passkeys.secret(credential, salt) ?: return UnlockResult.WrongPassphrase
+        val seed = PasskeyWrapping.open(crypto, cipher, secret, wrap, stored.deviceId) ?: return UnlockResult.WrongPassphrase
+        unlocked(DeviceIdentity.fromSeed(crypto, cipher, seed, stored.memberId, stored.deviceId))
+        return UnlockResult.Unlocked
+    }
+
     /** Drops the keys from memory; the saved identity stays. */
     fun lock() {
         idleJob?.cancel()

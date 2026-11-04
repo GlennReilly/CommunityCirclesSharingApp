@@ -46,6 +46,7 @@ object Wire {
         obj(
             "member" to str(d.member), "device" to str(d.device), "wrapped" to wrappedNode(d.wrapped), "circle" to str(d.circle),
             "autoLockMinutes" to num(d.autoLockMinutes), "pairing" to JsonNode.Bool(d.pairing).takeIf { d.pairing },
+            "passkey" to d.passkey?.let { obj("credential" to str(it.credential), "salt" to str(it.salt), "sealed" to str(it.sealed)) },
         ),
     )
 
@@ -129,14 +130,21 @@ object Wire {
     }
 
     fun decodeStoredIdentity(text: String): StoredIdentity? {
-        val f = Fields(Json.parse(text), setOf("member", "device", "wrapped", "circle", "autoLockMinutes", "pairing"))
+        val f = Fields(Json.parse(text), setOf("member", "device", "wrapped", "circle", "autoLockMinutes", "pairing", "passkey"))
         if (!f.ok) return null
         if (f.has("circle") && f.str("circle") == null) return null
         if (f.has("autoLockMinutes") && f.int("autoLockMinutes") == null) return null
         if (f.has("pairing") && f.bool("pairing") == null) return null
+        val passkey = if (f.has("passkey")) {
+            val p = Fields(f.node("passkey"), setOf("credential", "salt", "sealed"))
+            if (!p.ok) return null
+            circles.keys.PasskeyWrap(p.str("credential") ?: return null, p.str("salt") ?: return null, p.str("sealed") ?: return null)
+        } else {
+            null
+        }
         return StoredIdentity(
             member = f.str("member") ?: return null, device = f.str("device") ?: return null, wrapped = wrappedFrom(f.node("wrapped")) ?: return null,
-            circle = f.str("circle"), autoLockMinutes = f.int("autoLockMinutes"), pairing = f.bool("pairing") ?: false,
+            circle = f.str("circle"), autoLockMinutes = f.int("autoLockMinutes"), pairing = f.bool("pairing") ?: false, passkey = passkey,
         )
     }
 }

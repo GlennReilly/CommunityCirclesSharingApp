@@ -12,7 +12,7 @@ export async function startServer(port = 18081) {
   let log = ''; proc.stdout.on('data', d => log += d); proc.stderr.on('data', d => log += d);
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch {} await sleep(250); }
   proc.once('exit', () => rmSync(data, { recursive: true, force: true }));
-  return { url: `http://127.0.0.1:${port}`, stop: () => proc.kill(), log: () => log };
+  return { url: `http://localhost:${port}`, stop: () => proc.kill(), log: () => log };
 }
 
 export async function startChrome(port = 9333) {

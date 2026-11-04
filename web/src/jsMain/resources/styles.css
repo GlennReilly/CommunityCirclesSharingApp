@@ -140,3 +140,5 @@ svg.qr { display: block; width: 100%; height: auto; }
   .tag { border: 2px solid #000; border-radius: 0.5rem; padding: 1.5rem; max-width: 20rem; text-align: center; }
   .qr-frame { width: 14rem; margin: 1rem auto; }
 }
+
+.primary-button { background: var(--primary); color: var(--on-primary); border-color: var(--primary); font-weight: 600; }

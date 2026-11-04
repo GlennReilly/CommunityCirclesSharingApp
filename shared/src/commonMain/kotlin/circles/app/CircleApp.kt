@@ -418,6 +418,9 @@ data class HomeData(
     val people: List<MemberSummary> = emptyList(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
     val autoLockMinutes: Int = circles.keys.DEFAULT_IDLE_LOCK_MINUTES,
+    /** Whether unlocking with a passkey is offered here, and whether it is on (ADR 0063). */
+    val passkeyOffered: Boolean = false,
+    val passkeyOn: Boolean = false,
 )
 
 /**
@@ -530,7 +533,8 @@ sealed interface AppModel {
     /** No identity in this browser: it can start a circle or join one. */
     data object NoIdentity : AppModel
 
-    data class Locked(val circle: CircleId?) : AppModel
+    /** [passkey]: this browser can also be unlocked with a passkey (ADR 0063). */
+    data class Locked(val circle: CircleId?, val passkey: Boolean = false) : AppModel
 
     /** This browser has an identity for a member who has not added it yet: it shows its code and waits (ADR 0046). */
     data class AwaitingApproval(val circle: CircleId, val code: String, val fingerprint: String) : AppModel
@@ -568,6 +572,8 @@ class CircleApp(
     private val wordlist: suspend () -> List<String> = { emptyList() },
     /** Binary uploads and downloads for item photos (ADR 0060); without it photos are not offered. */
     private val blobTransport: circles.sync.BlobTransport? = null,
+    /** The browser's passkeys for unlocking without typing (ADR 0063); null where there are none. */
+    private val passkeys: circles.keys.PasskeyProvider? = null,
 ) {
     private var pendingRecovery: Triple<circles.encoding.ByteString, List<Int>, List<String>>? = null
     private val mutableModel = MutableStateFlow<AppModel>(AppModel.Loading)
@@ -583,14 +589,14 @@ class CircleApp(
     suspend fun open() {
         vault.open()
         val stored = keyStore.load()
-        mutableModel.value = if (stored == null) AppModel.NoIdentity else AppModel.Locked(stored.circle?.let(::CircleId))
+        mutableModel.value = if (stored == null) AppModel.NoIdentity else AppModel.Locked(stored.circle?.let(::CircleId), stored.passkey != null)
         // The vault locks itself after the idle time; the session must stop with it.
         scope.launch {
             vault.state.collect { state ->
                 if (state is VaultState.Locked && session != null) {
                     val circle = session?.circle
                     stopSession()
-                    mutableModel.value = AppModel.Locked(circle)
+                    mutableModel.value = AppModel.Locked(circle, keyStore.load()?.passkey != null)
                 }
             }
         }
@@ -1343,6 +1349,28 @@ class CircleApp(
         return result
     }
 
+    /** Unlocks with this browser's passkey (fingerprint, face or PIN) instead of the passphrase (ADR 0063). */
+    suspend fun unlockWithPasskey(): UnlockResult {
+        val provider = passkeys ?: return UnlockResult.Unsupported("this browser has no passkeys")
+        val result = vault.unlockWithPasskey(provider)
+        if (result is UnlockResult.Unlocked) {
+            val identity = (vault.state.value as VaultState.Unlocked).identity
+            val circle = keyStore.load()?.circle?.let(::CircleId) ?: return UnlockResult.NoIdentity
+            activate(identity, circle).scheduler.trigger(SyncTrigger.OPEN)
+            refresh()
+        }
+        return result
+    }
+
+    /** Turns on passkey unlocking for this browser; the passphrase keeps working. */
+    suspend fun enablePasskey(): circles.keys.PasskeyResult =
+        (passkeys?.let { vault.enablePasskey(it) } ?: circles.keys.PasskeyResult.Unavailable).also { refresh() }
+
+    suspend fun disablePasskey() {
+        vault.disablePasskey()
+        refresh()
+    }
+
     /** Changes this browser's passphrase; the old one must be typed again. */
     suspend fun changePassphrase(old: String, new: String): ChangePassphraseResult = vault.changePassphrase(old, new)
 
@@ -1685,6 +1713,8 @@ class CircleApp(
                 stewardSettings = StewardSettingsSummary(view.stewardSettings.quorum, view.stewardSettings.inactiveDays, view.stewardSettings.fallbackDelayDays, view.stewardSettings.recoveryThreshold),
                 proposals = proposalsFrom(view, me, now),
                 autoLockMinutes = vault.autoLockMinutes,
+                passkeyOffered = passkeys?.available == true,
+                passkeyOn = keyStore.load()?.passkey != null,
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     MemberSummary(
                         member = member,

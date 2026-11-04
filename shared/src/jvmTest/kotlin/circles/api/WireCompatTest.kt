@@ -25,7 +25,7 @@ class WireCompatTest {
         assertEquals(ApiJson.encodeToString(PushRequest.serializer(), PushRequest(emptyList())), Wire.encode(PushRequest(emptyList())))
         assertEquals(ApiJson.encodeToString(ChallengeRequest.serializer(), ChallengeRequest("d")), Wire.encode(ChallengeRequest("d")))
         assertEquals(ApiJson.encodeToString(SessionRequest.serializer(), SessionRequest("d", "n", "s")), Wire.encode(SessionRequest("d", "n", "s")))
-        for (id in listOf(StoredIdentity("m", "d", wrapped), StoredIdentity("m", "d", wrapped, "c", 15, true), StoredIdentity("m", "d", wrapped, null, 0, false))) {
+        for (id in listOf(StoredIdentity("m", "d", wrapped), StoredIdentity("m", "d", wrapped, "c", 15, true), StoredIdentity("m", "d", wrapped, null, 0, false), StoredIdentity("m", "d", wrapped, "c", null, false, circles.keys.PasskeyWrap("Y3JlZA", "c2FsdA", "c2VhbGVk")))) {
             // kotlinx omits fields that equal their defaults only when encodeDefaults is off (it is), and so does Wire.
             assertEquals(ApiJson.encodeToString(StoredIdentity.serializer(), id), Wire.encode(id))
         }
@@ -54,7 +54,7 @@ class WireCompatTest {
         val pull = PullResponse(listOf(StoredEvent(1, e), StoredEvent(2, envelope())), 2, true)
         assertEquals(pull, Wire.decodePull(ApiJson.encodeToString(PullResponse.serializer(), pull)))
         assertEquals(PullResponse(emptyList(), 0, false), Wire.decodePull(ApiJson.encodeToString(PullResponse.serializer(), PullResponse(emptyList(), 0, false))))
-        for (id in listOf(StoredIdentity("m", "d", wrapped), StoredIdentity("m", "d", wrapped, "c", 15, true))) {
+        for (id in listOf(StoredIdentity("m", "d", wrapped), StoredIdentity("m", "d", wrapped, "c", 15, true), StoredIdentity("m", "d", wrapped, passkey = circles.keys.PasskeyWrap("Y3JlZA", "c2FsdA", "c2VhbGVk")))) {
             assertEquals(id, Wire.decodeStoredIdentity(ApiJson.encodeToString(StoredIdentity.serializer(), id)))
         }
         // An explicit null is read as absent, as kotlinx does with explicitNulls off.

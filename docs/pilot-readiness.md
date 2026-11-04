@@ -26,7 +26,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | ~~Photos on items~~ | done (ADR 0060) | Up to 3 per item, thumbnails in the list; not in a browser export. |
 | ~~QR codes: member fingerprint check and item tags~~ | done (ADR 0062) | Read with the phone camera app; there is no scanner inside Circles. |
 | ~~`standing.note` contribution events~~ | done (ADR 0053) | The sponsor nudge for upheld damage disputes was already in (ADR 0043). |
-| Passkey (WebAuthn PRF) wrapping as an alternative to the passphrase | M | Passphrase works everywhere. |
+| ~~Passkey (WebAuthn PRF) unlock~~ | done (ADR 0063) | Tried only with Chrome's virtual authenticator: try a real phone, laptop or security key. |
 | Language and accessibility settings page (text size, contrast) | S | |
 | Pause history and a plain "what happened" log for stewards | S | |
 

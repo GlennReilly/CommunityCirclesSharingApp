@@ -177,4 +177,92 @@ abstract class KeyVaultContract {
         advanceTimeBy(100 * IDLE)
         assertIs<VaultState.Unlocked>(vault.state.value)
     }
+
+    // ---- passkeys (ADR 0063) ----
+
+    /** An authenticator that gives a fixed secret per credential and salt, can be told to cancel, and counts its calls. */
+    private class FakePasskeys(val crypto: Crypto, var cancel: Boolean = false, override var available: Boolean = true, var wrongSecret: Boolean = false) : PasskeyProvider {
+        var creates = 0
+        override suspend fun create(device: circles.event.DeviceId): PasskeyCreated? {
+            if (cancel) return null
+            creates++
+            return PasskeyCreated(crypto.randomBytes(16), crypto.randomBytes(PASSKEY_SALT_BYTES))
+        }
+        override suspend fun secret(credential: circles.encoding.ByteString, salt: circles.encoding.ByteString): circles.encoding.ByteString? {
+            if (cancel) return null
+            val base = crypto.hash256(credential.toByteArray() + salt.toByteArray())
+            return if (wrongSecret) crypto.hash256(base.toByteArray()) else base
+        }
+    }
+
+    @Test fun aPasskeyUnlocksTheSameIdentityAndThePassphraseStillWorks() = runTest {
+        val crypto = newCrypto()
+        val store = InMemoryKeyStore()
+        val vault = vault(store)
+        val created = assertIs<CreateResult.Created>(vault.create(PASSPHRASE))
+        val passkeys = FakePasskeys(crypto)
+        assertEquals(false, vault.hasPasskey())
+        assertEquals(PasskeyResult.Done, vault.enablePasskey(passkeys))
+        assertTrue(vault.hasPasskey())
+        val saved = assertNotNull(store.load()).passkey!!
+        assertTrue(created.identity.seed!!.toBase64Url() !in saved.toString(), "the seed is not in the record")
+        vault.lock()
+        assertEquals(UnlockResult.Unlocked, vault.unlockWithPasskey(passkeys))
+        assertEquals(created.identity.signing.publicKey, assertIs<VaultState.Unlocked>(vault.state.value).identity.signing.publicKey)
+        vault.lock()
+        assertEquals(UnlockResult.Unlocked, vault.unlock(PASSPHRASE))
+    }
+
+    @Test fun aWrongSecretACancelAndALockedVaultChangeNothing() = runTest {
+        val crypto = newCrypto()
+        val store = InMemoryKeyStore()
+        val vault = vault(store)
+        vault.create(PASSPHRASE)
+        val passkeys = FakePasskeys(crypto)
+        vault.lock()
+        assertEquals(PasskeyResult.NotUnlocked, vault.enablePasskey(passkeys), "needs the passphrase first")
+        assertEquals(UnlockResult.Unlocked, vault.unlock(PASSPHRASE))
+        passkeys.cancel = true
+        assertEquals(PasskeyResult.Unavailable, vault.enablePasskey(passkeys))
+        assertNull(assertNotNull(store.load()).passkey)
+        passkeys.cancel = false
+        assertEquals(PasskeyResult.Done, vault.enablePasskey(passkeys))
+        vault.lock()
+        passkeys.cancel = true
+        assertEquals(UnlockResult.WrongPassphrase, vault.unlockWithPasskey(passkeys), "cancelled: stays locked")
+        assertIs<VaultState.Locked>(vault.state.value)
+        passkeys.cancel = false; passkeys.wrongSecret = true
+        assertEquals(UnlockResult.WrongPassphrase, vault.unlockWithPasskey(passkeys), "another secret opens nothing")
+        assertIs<VaultState.Locked>(vault.state.value)
+    }
+
+    @Test fun turningThePasskeyOffAndALackOfSupportAreHandled() = runTest {
+        val crypto = newCrypto()
+        val store = InMemoryKeyStore()
+        val vault = vault(store)
+        vault.create(PASSPHRASE)
+        val none = FakePasskeys(crypto, available = false)
+        assertEquals(PasskeyResult.Unavailable, vault.enablePasskey(none))
+        val passkeys = FakePasskeys(crypto)
+        vault.enablePasskey(passkeys)
+        vault.disablePasskey()
+        assertEquals(false, vault.hasPasskey())
+        vault.lock()
+        assertIs<UnlockResult.Unsupported>(vault.unlockWithPasskey(passkeys))
+        assertEquals(UnlockResult.Unlocked, vault.unlock(PASSPHRASE))
+    }
+
+    @Test fun aPasskeyRecordFromAnotherDeviceOrAlteredDoesNotOpen() = runTest {
+        val crypto = newCrypto(); val cipher = newCipher()
+        val vault = vault()
+        val created = assertIs<CreateResult.Created>(vault.create(PASSPHRASE))
+        val made = PasskeyCreated(crypto.randomBytes(16), crypto.randomBytes(PASSKEY_SALT_BYTES))
+        val secret = crypto.randomBytes(32)
+        val wrap = assertNotNull(PasskeyWrapping.seal(crypto, cipher, secret, created.identity.seed!!, created.identity.device, made))
+        assertEquals(created.identity.seed, PasskeyWrapping.open(crypto, cipher, secret, wrap, created.identity.device))
+        assertNull(PasskeyWrapping.open(crypto, cipher, secret, wrap, circles.event.newDeviceId(crypto)), "bound to its device")
+        assertNull(PasskeyWrapping.open(crypto, cipher, crypto.randomBytes(32), wrap, created.identity.device), "wrong secret")
+        assertNull(PasskeyWrapping.open(crypto, cipher, secret, wrap.copy(credential = crypto.randomBytes(16).toBase64Url()), created.identity.device), "bound to its credential")
+        assertNull(PasskeyWrapping.open(crypto, cipher, crypto.randomBytes(16), wrap, created.identity.device), "a secret of the wrong length")
+    }
 }

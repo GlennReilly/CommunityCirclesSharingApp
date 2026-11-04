@@ -213,6 +213,24 @@ try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Sign in'), 'locked after reload'); ok('after a reload alice is still locked (keys not in the clear)');
   await submit(alice, 'unlock-form', { passphrase: PASS }); await until(alice, has(alice, 'That passphrase did not work'), 'old passphrase refused'); ok('the old passphrase no longer works');
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '2 members'), 'alice unlocked'); ok('alice unlocked with the new passphrase, circle intact with 2 members');
+  // Passkey unlock (ADR 0063), with a virtual authenticator that supports the PRF extension.
+  await alice.send('WebAuthn.enable', {});
+  const authenticator = await alice.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true } });
+  await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=passkey-on]") !== null', 'passkey section');
+  await checkAccessibility(alice, 'settings with the passkey section');
+  await click(alice, 'passkey-on'); await until(alice, has(alice, 'Done. Next time you can unlock with this device.') + ' || ' + has(alice, 'could not set that up'), 'passkey enabled', 30000);
+  if (!(await alice.evaluate(has(alice, 'Done. Next time you can unlock with this device.')))) throw new Error('the virtual authenticator could not make a passkey: ' + await text(alice));
+  ok('a passkey was made and the seed sealed under its secret');
+  await until(alice, 'document.querySelector("[data-action=passkey-off]") !== null', 'passkey now on');
+  await click(alice, 'lock'); await until(alice, has(alice, 'Unlock with this device'), 'sign in offers the passkey'); await checkAccessibility(alice, 'sign in with a passkey');
+  await click(alice, 'unlock-passkey'); await until(alice, 'document.querySelector("[data-action=passkey-off]") !== null', 'unlocked by passkey', 30000); ok('alice unlocked with the passkey and no typing, and is on the page the address names (settings)');
+  // The person fails the fingerprint check: the authenticator refuses, the button fails kindly, nothing opens.
+  const authId = authenticator.result.authenticatorId;
+  await click(alice, 'lock'); await until(alice, has(alice, 'Unlock with this device'), 'locked again');
+  await alice.send('WebAuthn.setUserVerified', { authenticatorId: authId, isUserVerified: false });
+  await click(alice, 'unlock-passkey'); await until(alice, has(alice, 'That did not unlock it'), 'failed check, no unlock', 30000); ok('when the fingerprint check fails the passkey button fails kindly and nothing opens');
+  await alice.send('WebAuthn.setUserVerified', { authenticatorId: authId, isUserVerified: true });
+  await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, 'document.querySelector("[data-action=passkey-off]") !== null', 'unlocked by passphrase again'); ok('the passphrase still works beside the passkey'); await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, '2 members'), 'home again');
   // A second device: alice's phone is paired from her laptop, checks the fingerprint, reads her things, and is removed again.
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.getElementById("device-link") !== null', 'settings with the device link');
   const deviceLink = await alice.evaluate('document.getElementById("device-link").value');

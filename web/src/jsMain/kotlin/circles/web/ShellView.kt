@@ -138,6 +138,9 @@ const val FIELD_INACTIVE = "inactive-days"
 const val FIELD_FALLBACK = "fallback-days"
 const val FIELD_RECOVERY = "recovery-threshold"
 const val ACTION_VOUCH = "vouch"
+const val ACTION_UNLOCK_PASSKEY = "unlock-passkey"
+const val ACTION_PASSKEY_ON = "passkey-on"
+const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
 const val ACTION_PRINT = "print-page"
 const val ACTION_SHOW_ALL_ITEMS = "show-all-items"
@@ -303,7 +306,7 @@ fun FlowContent.shell(state: AppState) {
                 p { +"Opening your circle..." }
             }
             AppModel.NoIdentity -> newcomer(state)
-            is AppModel.Locked -> signIn()
+            is AppModel.Locked -> signIn(model.passkey)
             is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
                 Screen.Home -> home(model.home)
@@ -509,8 +512,18 @@ private fun FlowContent.joinCircle(state: AppState) {
     backToWelcome()
 }
 
-private fun FlowContent.signIn() {
+private fun FlowContent.signIn(passkey: Boolean) {
     h1 { +Screen.SignIn.title }
+    if (passkey) {
+        // The easy way in first (ADR 0063); the passphrase below always works.
+        p { +"Use this device's fingerprint, face, PIN or security key." }
+        button(type = ButtonType.button) {
+            classes = setOf("primary-button")
+            attributes[ATTR_ACTION] = ACTION_UNLOCK_PASSKEY
+            +"Unlock with this device"
+        }
+        p { +"Or type your passphrase." }
+    }
     form {
         id = FORM_UNLOCK
         passphraseField("current-password", hint = false)
@@ -1197,6 +1210,24 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
             passwordInput(FIELD_CURRENT, "Current passphrase: ", "current-password", min = 1)
             passwordInput(FIELD_NEW, "New passphrase: ", "new-password", min = MIN_PASSPHRASE_CHARS)
             formSubmit("Change passphrase")
+        }
+    }
+    if (home.passkeyOffered) {
+        section {
+            h2 { +"Unlock with this device" }
+            if (home.passkeyOn) {
+                p { +"On. When this browser locks, you can unlock it with this device's fingerprint, face, PIN or security key. Your passphrase still works." }
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_PASSKEY_OFF
+                    +"Turn this off"
+                }
+            } else {
+                p { +"Use this device's fingerprint, face, PIN or security key instead of typing your passphrase. Not every browser or device can do this; if yours cannot, nothing changes." }
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_PASSKEY_ON
+                    +"Turn this on"
+                }
+            }
         }
     }
     section {

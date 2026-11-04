@@ -217,9 +217,18 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             FetchStreamTransport(),
             wordlist = { loadWordlist() },
             blobTransport = FetchBlobTransport(),
+            passkeys = circles.keys.WebAuthnPasskeys { crypto.randomBytes(it) },
         )
         app = circleApp
-        scope.launch { circleApp.model.collect { dispatch(AppAction.ModelChanged(it)) } }
+        scope.launch {
+            var wasOpen = false
+            circleApp.model.collect {
+                dispatch(AppAction.ModelChanged(it))
+                // After signing in, show the page the address bar names (a bookmark, a reload), not always Home.
+                if (it is AppModel.Open && !wasOpen && state.verifying == null && state.focusItem == null) dispatch(AppAction.Navigate(Screen.fromFragment(window.location.hash)))
+                wasOpen = it is AppModel.Open
+            }
+        }
         scope.launch { circleApp.sync.collect { dispatch(AppAction.SyncChanged(it)) } }
         circleApp.open()
     }
@@ -604,6 +613,23 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_UPDATE -> registration?.waiting?.postMessage(js("({type: 'SKIP_WAITING'})"))
                 ACTION_DISMISS -> dispatch(AppAction.Notice(null))
                 ACTION_LOCK -> circleApp?.lock()
+                ACTION_UNLOCK_PASSKEY -> when (val result = circleApp?.unlockWithPasskey()) {
+                    UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
+                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Circles (${result.reason})."))
+                    else -> dispatch(AppAction.Notice("That did not unlock it. Try again, or type your passphrase."))
+                }
+                ACTION_PASSKEY_ON -> dispatch(
+                    AppAction.Notice(
+                        when (circleApp?.enablePasskey()) {
+                            circles.keys.PasskeyResult.Done -> "Done. Next time you can unlock with this device."
+                            circles.keys.PasskeyResult.NotUnlocked -> "Unlock with your passphrase first."
+                            else ->
+                                if (Regex("""^[0-9.]+$|:""").containsMatchIn(window.location.hostname)) "Passkeys need Circles to be opened by a name such as circles.example.org, not by a number like ${window.location.hostname}. Nothing changed; your passphrase still works."
+                                else "This browser or device could not set that up, so nothing changed. Your passphrase still works."
+                        },
+                    ),
+                )
+                ACTION_PASSKEY_OFF -> { circleApp?.disablePasskey(); dispatch(AppAction.Notice("Turned off. Your passphrase still works.")) }
                 ACTION_SYNC -> circleApp?.syncNow()
                 ACTION_RECOVERY_START -> {
                     val draft = circleApp?.prepareRecoveryCode(state.origin)
