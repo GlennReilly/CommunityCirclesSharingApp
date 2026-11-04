@@ -177,6 +177,13 @@ try {
   await alice.evaluate('(() => { const f = document.getElementById("autolock-form"); f.elements.namedItem("minutes").value = "5"; f.requestSubmit(); return true; })()');
   await until(alice, has(alice, 'Saved.'), 'lock saved'); await alice.evaluate('location.hash = "#/home"'); await alice.evaluate('location.hash = "#/settings"');
   await until(alice, 'document.getElementById("minutes") !== null && document.getElementById("minutes").value === "5"', 'lock choice remembered'); ok('idle lock choice saved (5 minutes)');
+  // Appearance: text size and colours are applied at once, kept in this browser, and the page still passes axe at the largest size.
+  await alice.evaluate('(() => { const f = document.getElementById("appearance-form"); f.elements.namedItem("text-size").value = "larger"; f.elements.namedItem("theme").value = "dark"; f.requestSubmit(); return true; })()');
+  await until(alice, 'document.documentElement.dataset.text === "larger" && document.documentElement.dataset.theme === "dark" && getComputedStyle(document.documentElement).fontSize === "22px" && getComputedStyle(document.documentElement).colorScheme === "dark"', 'appearance applied');
+  ok('largest text (22 px) and dark colours apply at once');
+  await checkAccessibility(alice, 'settings at the largest text size, dark');
+  await alice.evaluate('(() => { const f = document.getElementById("appearance-form"); f.elements.namedItem("text-size").value = "standard"; f.elements.namedItem("theme").value = "system"; f.requestSubmit(); return true; })()');
+  await until(alice, 'document.documentElement.dataset.text === "standard" && getComputedStyle(document.documentElement).fontSize === "16px"', 'appearance back to standard'); ok('appearance back to standard');
   // Standing: a valuable item is not open to a newcomer; the steward counts as trusted.
   await alice.evaluate('location.hash = "#/items/add"'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add page for the drill');
   await setField(alice, 'item-add-form', 'name', 'Drill'); await alice.evaluate('document.getElementById("item-add-form").elements.namedItem("kind").value = "VALUABLE"');

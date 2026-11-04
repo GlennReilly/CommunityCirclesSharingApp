@@ -104,6 +104,9 @@ const val FORM_AUTOLOCK = "autolock-form"
 const val FIELD_CURRENT = "current"
 const val FIELD_NEW = "new"
 const val FIELD_MINUTES = "minutes"
+const val FORM_APPEARANCE = "appearance-form"
+const val FIELD_TEXT_SIZE = "text-size"
+const val FIELD_THEME = "theme"
 const val FIELD_LINK = "invite-link"
 const val SUBMIT_ID = "submit"
 const val ACTION_INVITE = "invite"
@@ -1198,10 +1201,53 @@ private fun FlowContent.passwordInput(field: String, label: String, autocomplete
     }
 }
 
+/** Text size and colours: kept in this browser only, applied at once when saved. */
+private fun FlowContent.appearanceSection(current: Appearance) {
+    section {
+        h2 { +"Appearance" }
+        form {
+            id = FORM_APPEARANCE
+            label {
+                attributes["for"] = FIELD_TEXT_SIZE
+                +"Text size: "
+            }
+            select {
+                id = FIELD_TEXT_SIZE
+                name = FIELD_TEXT_SIZE
+                for (size in TextSize.entries) {
+                    option {
+                        value = size.key
+                        selected = size == current.textSize
+                        +size.label
+                    }
+                }
+            }
+            label {
+                attributes["for"] = FIELD_THEME
+                +"Colours: "
+            }
+            select {
+                id = FIELD_THEME
+                name = FIELD_THEME
+                for (choice in ThemeChoice.entries) {
+                    option {
+                        value = choice.key
+                        selected = choice == current.theme
+                        +choice.label
+                    }
+                }
+            }
+            formSubmit("Save", ready = true)
+        }
+        p { +"These choices stay in this browser only." }
+    }
+}
+
 /** This browser's own settings: passphrase, locking, and forgetting the device. */
 private fun FlowContent.settings(home: HomeData, state: AppState) {
     h1 { +Screen.Settings.title }
     devicesSection(home, state)
+    appearanceSection(state.appearance)
     section {
         h2 { +"Passphrase" }
         p { +"Your passphrase protects your keys on this device. Changing it does not change your identity in the circle." }

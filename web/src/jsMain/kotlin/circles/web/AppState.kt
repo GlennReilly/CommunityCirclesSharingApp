@@ -42,6 +42,8 @@ data class AppState(
     val recoveryDraft: RecoveryDraft? = null,
     /** Share codes this steward chose to show, by epoch: secrets, kept only in memory and only while signed in (ADR 0048). */
     val shareCodes: Map<Int, String> = emptyMap(),
+    /** Text size and colour choice of this browser (shown on Settings). */
+    val appearance: Appearance = Appearance(),
 ) {
     val signedIn: Boolean get() = model is AppModel.Open
 }
@@ -57,6 +59,7 @@ sealed interface AppAction {
     data class RecoveryDraftReady(val draft: RecoveryDraft?) : AppAction
     data class ShareCodeShown(val epoch: Int, val code: String?) : AppAction
     data class Notice(val text: String?) : AppAction
+    data class AppearanceChanged(val appearance: Appearance) : AppAction
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
     data class VerifyLinkSeen(val link: circles.app.VerifyLink) : AppAction
@@ -132,6 +135,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     is AppAction.RecoveryDraftReady -> state.copy(recoveryDraft = action.draft, screen = if (action.draft != null && state.signedIn) Screen.RecoveryCode else state.screen)
     is AppAction.ShareCodeShown -> state.copy(shareCodes = if (action.code == null) state.shareCodes - action.epoch else state.shareCodes + (action.epoch to action.code))
     is AppAction.Notice -> state.copy(notice = action.text)
+    is AppAction.AppearanceChanged -> state.copy(appearance = action.appearance)
     is AppAction.InviteMade -> state.copy(newInvite = action.link)
     AppAction.UpdateReady -> state.copy(updateAvailable = true)
     AppAction.UpdateAccepted -> state.copy(updateAvailable = false)

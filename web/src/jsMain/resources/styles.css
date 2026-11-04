@@ -7,10 +7,14 @@
   line-height: 1.5;
   --line: color-mix(in srgb, currentColor 28%, transparent);
   --soft: color-mix(in srgb, currentColor 8%, transparent);
-  --primary: #0b57d0;
-  --on-primary: #ffffff;
+  --primary: light-dark(#0b57d0, #a8c7fa);
+  --on-primary: light-dark(#ffffff, #062e6f);
 }
-@media (prefers-color-scheme: dark) { :root { --primary: #a8c7fa; --on-primary: #062e6f; } }
+/* Appearance settings: data attributes on <html> set by the page from this browser's saved choice. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-text="large"] { font-size: 118.75%; }
+:root[data-text="larger"] { font-size: 137.5%; }
 body { margin: 0; background: Canvas; color: CanvasText; }
 
 /* The page column: header, navigation, notice and content share one width. */

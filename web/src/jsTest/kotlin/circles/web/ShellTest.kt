@@ -261,7 +261,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1 + 2, labels)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -400,6 +400,26 @@ class ShellViewTest {
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html.substringAfter(FORM_CHANGE_PASSPHRASE))?.value ?: error("no button")
         assertTrue("hidden" in button)
         assertTrue("""$ATTR_MIN="1"""" in html && """$ATTR_MIN="12"""" in html)
+    }
+
+    @Test fun theAppearanceChoicesShowTheSavedOnesAsSelected() {
+        val html = render(open().copy(screen = Screen.Settings, appearance = Appearance(TextSize.LARGE, ThemeChoice.DARK)))
+        val form = html.substringAfter(FORM_APPEARANCE).substringBefore("</form>")
+        assertTrue("Text size: " in form && "Colours: " in form)
+        assertTrue(Regex("""<option[^>]*value="large"[^>]*selected""").containsMatchIn(form))
+        assertTrue(Regex("""<option[^>]*value="dark"[^>]*selected""").containsMatchIn(form))
+        assertEquals(2, Regex("<option[^>]*selected").findAll(form).count())
+    }
+
+    @Test fun unknownStoredAppearanceFallsBackToTheDefaults() {
+        assertEquals(Appearance(), Appearance.fromKeys(null, null))
+        assertEquals(Appearance(), Appearance.fromKeys("huge", "purple"))
+        assertEquals(Appearance(TextSize.LARGER, ThemeChoice.LIGHT), Appearance.fromKeys("larger", "light"))
+    }
+
+    @Test fun anAppearanceChangeIsKeptByTheReducer() {
+        val chosen = Appearance(TextSize.LARGE)
+        assertEquals(chosen, reduce(AppState(), AppAction.AppearanceChanged(chosen)).appearance)
     }
 
     @Test fun theLockingChoicesIncludeTheCurrentOneAsSelected() {

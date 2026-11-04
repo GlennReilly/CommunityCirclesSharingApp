@@ -169,6 +169,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     }
 
     suspend fun start() {
+        val saved = loadAppearance()
+        applyAppearance(saved)
+        dispatch(AppAction.AppearanceChanged(saved))
         render(screenChanged = false)
         dispatch(AppAction.OriginKnown(window.location.origin))
         registerServiceWorker()
@@ -365,6 +368,12 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         },
                     ),
                 )
+                FORM_APPEARANCE -> {
+                    val chosen = Appearance.fromKeys(field(FIELD_TEXT_SIZE), field(FIELD_THEME))
+                    saveAppearance(chosen)
+                    dispatch(AppAction.AppearanceChanged(chosen))
+                    dispatch(AppAction.Notice("Saved."))
+                }
                 FORM_AUTOLOCK -> field(FIELD_MINUTES).toIntOrNull()?.let {
                     circleApp.setAutoLockMinutes(it)
                     dispatch(AppAction.Notice("Saved."))
@@ -786,6 +795,32 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             }
         }
     }
+}
+
+private const val STORE_TEXT_SIZE = "circles.textSize"
+private const val STORE_THEME = "circles.theme"
+
+/** Reads the saved choice (local storage can be unavailable, then the defaults hold). */
+private fun loadAppearance(): Appearance = try {
+    Appearance.fromKeys(window.localStorage.getItem(STORE_TEXT_SIZE), window.localStorage.getItem(STORE_THEME))
+} catch (e: Throwable) {
+    Appearance()
+}
+
+/** Remembers the choice and applies it to the page: `data-text` and `data-theme` on `<html>` are what styles.css reads. */
+private fun saveAppearance(appearance: Appearance) {
+    applyAppearance(appearance)
+    try {
+        window.localStorage.setItem(STORE_TEXT_SIZE, appearance.textSize.key)
+        window.localStorage.setItem(STORE_THEME, appearance.theme.key)
+    } catch (e: Throwable) {
+        // Not saved for next time; still applied now.
+    }
+}
+
+private fun applyAppearance(appearance: Appearance) {
+    document.documentElement?.setAttribute("data-text", appearance.textSize.key)
+    document.documentElement?.setAttribute("data-theme", appearance.theme.key)
 }
 
 fun main() {
