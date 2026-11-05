@@ -120,7 +120,6 @@ class EventRules(
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }
         if (terms.epoch != envelope.epoch) return reject(RejectionCode.INVALID_PUBLIC, "public epoch must equal the envelope epoch")
-        if (terms.set != null) return reject(RejectionCode.INVALID_PUBLIC, "only a recovery share names a set")
         val target = directory.device(terms.device)
         if (target == null || target.circle != envelope.circle) return reject(RejectionCode.UNKNOWN_DEVICE, "the target device is not in this circle")
         if (target.isRevoked) return reject(RejectionCode.DEVICE_REVOKED, "the target device has been revoked")
@@ -214,7 +213,7 @@ class EventRules(
         val sender = sender(envelope, directory).deviceOrReject { return it }
         if (!payloadEmpty) return reject(RejectionCode.INVALID_PAYLOAD, "recovery.share has no secret part")
         if (!directory.isSteward(envelope.circle, sender.member)) return reject(RejectionCode.NOT_STEWARD, "only a steward may send recovery shares")
-        val terms = when (val parsed = CircleKeys.keyWrap(envelope.public)) {
+        val terms = when (val parsed = CircleKeys.recoveryShare(envelope.public)) {
             is Parsed.Ok -> parsed.value
             is Parsed.Invalid -> return reject(RejectionCode.INVALID_PUBLIC, parsed.reason)
         }

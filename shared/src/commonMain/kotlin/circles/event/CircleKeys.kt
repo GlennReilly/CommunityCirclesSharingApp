@@ -90,10 +90,19 @@ object CircleKeys {
         return (raw as? CborBytes)?.value?.takeIf { it.size == KEY_COMMITMENT_BYTES }?.let { Parsed.Ok(it) } ?: Parsed.Invalid("keyHash must be $KEY_COMMITMENT_BYTES bytes")
     }
 
-    fun keyWrap(map: CborMap): Parsed<KeyWrapTerms> {
+    /** `public` of `key.wrap`: exactly [device, epoch, wrapped] and optionally keyHash. It never carries a share set. */
+    fun keyWrap(map: CborMap): Parsed<KeyWrapTerms> = parseWrap(map, allowSet = false)
+
+    /** `public` of `recovery.share` (ADR 0048, 0065): the same shape as a key wrap, and optionally the name of its `set`. */
+    fun recoveryShare(map: CborMap): Parsed<KeyWrapTerms> = parseWrap(map, allowSet = true)
+
+    private fun parseWrap(map: CborMap, allowSet: Boolean): Parsed<KeyWrapTerms> {
         val required = setOf(KEY_DEVICE, KEY_EPOCH, KEY_WRAPPED)
+        val allowed = if (allowSet) required + KEY_HASH + KEY_SET else required + KEY_HASH
         val keys = map.entries.keys
-        if (!keys.containsAll(required) || !(required + KEY_HASH + KEY_SET).containsAll(keys)) return Parsed.Invalid("expected the keys [device, epoch, wrapped] and optionally keyHash and set")
+        if (!keys.containsAll(required) || !allowed.containsAll(keys)) {
+            return Parsed.Invalid(if (allowSet) "expected the keys [device, epoch, wrapped] and optionally keyHash and set" else "expected the keys [device, epoch, wrapped] and optionally keyHash")
+        }
         val device = (map[KEY_DEVICE] as? CborText)?.value?.takeIf { isValidRandomId(it) } ?: return Parsed.Invalid("device must be 32 lowercase hex characters")
         val epoch = epochOf(map) ?: return Parsed.Invalid("epoch must be at least $FIRST_EPOCH")
         val wrapped = (map[KEY_WRAPPED] as? CborBytes)?.value?.takeIf { it.size in 1..MAX_WRAPPED_BYTES } ?: return Parsed.Invalid("wrapped must be 1 to $MAX_WRAPPED_BYTES bytes")

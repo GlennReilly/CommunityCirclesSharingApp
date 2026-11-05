@@ -27,7 +27,7 @@ abstract class RecoverySharesContract {
         fun events(threshold: Int = 3) = founder.recoveryShares(circle, FIRST_EPOCH, stewards.map { it.registration }, threshold, 20_000)!!
 
         fun opened(events: List<Envelope>, index: Int): RecoveryShare {
-            val terms = (CircleKeys.keyWrap(events[index].public) as Parsed.Ok).value
+            val terms = (CircleKeys.recoveryShare(events[index].public) as Parsed.Ok).value
             assertEquals(stewards[index].device, terms.device)
             return assertIs<Parsed.Ok<RecoveryShare>>(RecoveryShares.open(cipher, stewards[index].boxKeys, circle, FIRST_EPOCH, terms.wrapped)).value
         }
@@ -71,7 +71,7 @@ abstract class RecoverySharesContract {
     fun aShareOpensOnlyOnItsStewardsDeviceAndOnlyForItsCircleAndEpoch() = runTest {
         val s = setup()
         val events = s.events()
-        val terms = (CircleKeys.keyWrap(events[0].public) as Parsed.Ok).value
+        val terms = (CircleKeys.recoveryShare(events[0].public) as Parsed.Ok).value
         assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[1].boxKeys, s.circle, FIRST_EPOCH, terms.wrapped))
         assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys, s.circle, 2, terms.wrapped))
         assertIs<Parsed.Invalid>(RecoveryShares.open(s.cipher, s.stewards[0].boxKeys, newCircleId(s.crypto), FIRST_EPOCH, terms.wrapped))
@@ -127,7 +127,7 @@ abstract class RecoverySharesContract {
         val events = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
         assertEquals(4, events.size) // a, b, b2, c
         events.forEach { assertNull(EnvelopeChecks.check(it)) }
-        val byDevice = events.associate { e -> (CircleKeys.keyWrap(e.public) as Parsed.Ok).value.let { it.device to it.wrapped } }
+        val byDevice = events.associate { e -> (CircleKeys.recoveryShare(e.public) as Parsed.Ok).value.let { it.device to it.wrapped } }
         fun share(owner: DeviceIdentity) = assertIs<Parsed.Ok<RecoveryShare>>(RecoveryShares.open(circle.cipher(), owner.boxKeys, circle.id, FIRST_EPOCH, byDevice.getValue(owner.device))).value
         // The two devices of the second steward hold the same share, so they do not make a quorum together.
         assertEquals(share(circle.b.identity).share, share(circle.b2).share)
@@ -208,7 +208,7 @@ abstract class RecoverySharesContract {
         val circle = Circle(newCrypto(), newCipher())
         val first = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
         val second = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices.take(2), 2, circle.day)!!
-        fun setOf(e: Envelope) = (CircleKeys.keyWrap(e.public) as Parsed.Ok).value.set
+        fun setOf(e: Envelope) = (CircleKeys.recoveryShare(e.public) as Parsed.Ok).value.set
         assertEquals(1, first.map(::setOf).toSet().size)
         assertEquals(1, second.map(::setOf).toSet().size)
         assertNotEquals(setOf(first[0]), setOf(second[0]))
@@ -227,10 +227,13 @@ abstract class RecoverySharesContract {
     fun aShareSetNameMustBeThirtyTwoLowercaseHexCharactersAndKeyWrapsHaveNone() = runTest {
         val circle = Circle(newCrypto(), newCipher())
         val event = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!.first()
-        val terms = (CircleKeys.keyWrap(event.public) as Parsed.Ok).value
+        val terms = (CircleKeys.recoveryShare(event.public) as Parsed.Ok).value
+        assertIs<Parsed.Ok<KeyWrapTerms>>(CircleKeys.recoveryShare(terms.copy(set = null).toPublic()))
+        // The key.wrap parser is strict: a set is not one of its keys at all.
         assertIs<Parsed.Ok<KeyWrapTerms>>(CircleKeys.keyWrap(terms.copy(set = null).toPublic()))
-        assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "ABC").toPublic()))
-        assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.copy(set = "g".repeat(32)).toPublic()))
+        assertIs<Parsed.Invalid>(CircleKeys.keyWrap(terms.toPublic()))
+        assertIs<Parsed.Invalid>(CircleKeys.recoveryShare(terms.copy(set = "ABC").toPublic()))
+        assertIs<Parsed.Invalid>(CircleKeys.recoveryShare(terms.copy(set = "g".repeat(32)).toPublic()))
     }
 
     @Test
@@ -238,8 +241,8 @@ abstract class RecoverySharesContract {
         val circle = Circle(newCrypto(), newCipher())
         val real = circle.a.recoverySharesPerSteward(circle.id, FIRST_EPOCH, circle.stewardDevices, 2, circle.day)!!
         circle.log += real
-        val name = (CircleKeys.keyWrap(real.first().public) as Parsed.Ok).value.set!!
-        val someShare = (CircleKeys.keyWrap(real.first().public) as Parsed.Ok).value.wrapped
+        val name = (CircleKeys.recoveryShare(real.first().public) as Parsed.Ok).value.set!!
+        val someShare = (CircleKeys.recoveryShare(real.first().public) as Parsed.Ok).value.wrapped
         // Steward b reuses a's set name to add a share to it: refused, and the holders stay as a's set made them.
         val stolen = circle.b.rawEvent(circle.id, EventType.RECOVERY_SHARE, circle.day, KeyWrapTerms(circle.a.identity.device, FIRST_EPOCH, someShare, set = name).toPublic(), FIRST_EPOCH)
         circle.log += stolen
@@ -249,7 +252,7 @@ abstract class RecoverySharesContract {
         val view = circle.fold(circle.a.identity)
         val reasons = view.rejected.associate { it.id to it.reason }
         assertTrue("another steward" in reasons.getValue(stolen.eventId(circle.crypto)))
-        assertTrue("share set" in reasons.getValue(wrapWithSet.eventId(circle.crypto)))
+        assertTrue("bad key.wrap" in reasons.getValue(wrapWithSet.eventId(circle.crypto)))
         assertEquals(setOf(circle.a.identity.member, circle.b.identity.member, circle.c.identity.member), view.shareHolders.getValue(FIRST_EPOCH))
     }
 

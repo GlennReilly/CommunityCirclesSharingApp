@@ -289,7 +289,6 @@ class CircleFold(
 
         private fun wrap(e: Envelope, sender: DeviceRegistration): String? {
             val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad key.wrap"
-            if (terms.set != null) return "a key.wrap has no share set"
             if (terms.epoch != e.epoch) return "public epoch differs from the envelope epoch"
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (epoch == 0) {
@@ -319,7 +318,7 @@ class CircleFold(
         /** A share of an epoch's key sent to a steward's device (ADR 0048): only a steward may send, and only to a steward. */
         private fun recoveryShare(e: Envelope, sender: DeviceRegistration, position: Long): String? {
             if (sender.member !in stewards) return "only a steward may send recovery shares"
-            val terms = (CircleKeys.keyWrap(e.public) as? Parsed.Ok)?.value ?: return "bad recovery.share"
+            val terms = (CircleKeys.recoveryShare(e.public) as? Parsed.Ok)?.value ?: return "bad recovery.share"
             if (terms.epoch != e.epoch || terms.keyHash != null) return "bad recovery.share"
             val target = devices[terms.device]?.takeIf { !it.revoked } ?: return "target device is unknown or revoked"
             if (target.registration.member !in stewards) return "a recovery share may only go to a steward"

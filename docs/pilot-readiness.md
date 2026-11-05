@@ -1,4 +1,4 @@
-# Before a real pilot (written 2026-11-04)
+# Before a real pilot (written 2026-11-04, refreshed 2026-11-05)
 
 What is left between today's build and a pilot with one real group of 10 to 20 people (spec M6). Sizes: S = under a day, M = a few days, L = a week or more of work. "You" means the project owner.
 
@@ -23,16 +23,17 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | Item | Size | Notes |
 |---|---|---|
 | Config events (ADR 0051) and the owner's minimum tier on the item form | M | Lets the pilot tune thresholds without a release. |
-| ~~Photos on items~~ | done (ADR 0060) | Up to 3 per item, thumbnails in the list; not in a browser export. |
+| ~~Photos on items~~ | done (ADR 0060) | Up to 3 per item, thumbnails in the list; the browser export now carries the sealed photos (up to 200 MiB, any that cannot be fetched are counted in the notice). |
 | ~~QR codes: member fingerprint check and item tags~~ | done (ADR 0062) | Read with the phone camera app; there is no scanner inside Circles. |
 | ~~`standing.note` contribution events~~ | done (ADR 0053) | The sponsor nudge for upheld damage disputes was already in (ADR 0043). |
 | ~~Passkey (WebAuthn PRF) unlock~~ | done (ADR 0063) | Tried only with Chrome's virtual authenticator: try a real phone, laptop or security key. |
-| Language and accessibility settings page (text size, contrast) | S | |
-| Pause history and a plain "what happened" log for stewards | S | |
+| ~~Appearance settings (text size, colours)~~ | done | Standard, large, largest text and light, dark or device colours, kept in the browser. Language is not offered: the pilot is English only. A contrast setting beyond light and dark is not built. |
+| ~~Pause history~~ | done | "Earlier pauses" on the Pauses page, only pauses that took effect, visible to the subject and the reviewers. A general "what happened" log of everything stewards did is not built. |
 
 ## Known limits to tell the pilot group
 
-- A removed steward keeps their old recovery share until a new set is sent; shares are only refreshed when the first-sorted steward opens the app.
+- A removed steward keeps their old recovery share until a new set is sent; shares are only refreshed when the first-sorted steward opens the app. Sets are told apart by a name each share carries (ADR 0065), so other activity no longer makes a set look incomplete.
+- The script is capped at 300 KiB gzipped (ADR 0064); a first visit takes about 2 s on fast 3G and 6 s on slow 3G, once per version because the service worker keeps it.
 - A borrower's new device cannot read details of items already approved until the owner approves again.
 - Anyone who holds a member's passphrase and a device, or a recovery code, can act as that member.
 - The server cannot read circle contents, but the operator can see who talks to whom and when.

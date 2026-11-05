@@ -23,3 +23,9 @@ A `recovery.share` carries one more public field, `set`: 32 lowercase hex charac
 - The set name is public and says nothing about the key or the shares.
 - The server only validates shape (32 hex, recovery shares only); the grouping is client fold logic like the rest of ADR 0048.
 - Tests: `RecoverySharesContract` (an unrelated event between shares keeps one set; the name's format; key wraps carry none).
+
+## As built (2026-11-04)
+
+- The fold keeps the holders of each named set separately and reports those of the set touched last, so another steward's share landing inside a batch does not split it (found in review). Tested in `RecoverySharesContract`.
+- The rule that a key wrap has no set lives in one place: `CircleKeys.keyWrap` is strict (device, epoch, wrapped, optional keyHash) and `CircleKeys.recoveryShare` is the same shape plus the optional `set`. The fold and the server each call the one that fits their event type.
+- Known and accepted: a steward who sees a batch in flight could claim its set name first; stewards are trusted, and the fold then refuses the rest of that set, so the harm is a stale set, not a leak.
