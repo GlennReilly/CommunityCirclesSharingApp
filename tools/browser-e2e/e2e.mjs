@@ -75,6 +75,11 @@ try {
   await checkAccessibility(alice, 'members with someone waiting');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, 'document.getElementById("name-form") !== null', 'bea is asked for her name'); ok('bea can now read the circle and is asked for her name first');
+  // ADR 0069: a name another member holds is taken, whatever the case, and the person is told so on the same page.
+  await submit(bea, 'name-form', { 'display-name': 'ALICE SMITH' });
+  await until(bea, has(bea, 'ALICE SMITH is already used in this circle. Choose another, for example add your surname or initial.') + ' && document.getElementById("name-form") !== null', 'bea is told the name is taken');
+  ok('a second member who types the first member\'s name in capitals is told it is taken and stays on the name page');
+  await checkAccessibility(bea, 'your name, name taken');
   await submit(bea, 'name-form', { 'display-name': 'Bea' }); await until(bea, has(bea, 'Circle home'), 'bea home after naming'); ok('bea named herself');
   // Items: add, privacy, change, remove.
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'empty items page'); ok('items page starts empty');

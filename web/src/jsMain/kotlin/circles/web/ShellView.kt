@@ -250,6 +250,7 @@ const val NAME_CONFIRMED = "(confirmed)"
 const val NAME_NOT_CONFIRMED = "(not confirmed yet)"
 const val FORM_MY_NAME = "name-form"
 const val FORM_RENAME = "rename-form"
+const val ID_NAME_REFUSAL = "name-refusal"
 const val FIELD_DISPLAY_NAME = "display-name"
 const val FORM_CONFIRM_NAME_PREFIX = "confirm-name-"
 const val FIELD_NAME_CHECKED = "name-checked"
@@ -351,7 +352,7 @@ fun FlowContent.shell(state: AppState) {
             is AppModel.Locked -> signIn(model.passkey)
             is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
-                Screen.YourName -> yourNamePage()
+                Screen.YourName -> yourNamePage(model.home.nameRefusal)
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home, state)
@@ -652,9 +653,20 @@ private fun FlowContent.nameField(labelText: String) {
     }
 }
 
+/** Why the newest name claim was refused (ADR 0069), kept on the page until the person chooses another name. */
+private fun FlowContent.nameRefusal(refusal: String?) {
+    if (refusal == null) return
+    p {
+        id = ID_NAME_REFUSAL
+        attributes["role"] = "alert"
+        +refusal
+    }
+}
+
 /** The first page after joining or starting a circle, and after unlocking if no name is set: one question (ADR 0068). */
-private fun FlowContent.yourNamePage() {
+private fun FlowContent.yourNamePage(refusal: String?) {
     h1 { +Screen.YourName.title }
+    nameRefusal(refusal)
     p { +"Other members see this name next to everything you share or ask for. Only members of the circle can read it." }
     form {
         id = FORM_MY_NAME
@@ -1370,6 +1382,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
     h1 { +Screen.Settings.title }
     section {
         h2 { +"Your name" }
+        nameRefusal(home.nameRefusal)
         p {
             +"Others see you as: "
             personName(home, home.me)

@@ -71,7 +71,8 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0065](0065-recovery-share-set-id.md) | A recovery share names its set | Accepted |
 | [0066](0066-rename-to-lendger.md) | The product is called Lendger | Accepted |
 | [0067](0067-tier-names-new-regular-trusted.md) | Tier names are New, Regular and Trusted | Accepted |
-| [0068](0068-verified-display-names.md) | Display names: chosen by the member, confirmed by another | Accepted |
+| [0068](0068-verified-display-names.md) | Display names: chosen by the member, confirmed by another | Accepted (point on shared names superseded by 0069) |
+| [0069](0069-unique-display-names.md) | Display names are unique within a circle | Accepted |
 
 ## Open decisions still to record
 

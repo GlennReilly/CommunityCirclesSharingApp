@@ -206,10 +206,18 @@ data class MemberSummary(
 /** A member's display name as every screen shows it (ADR 0068). */
 data class NameSummary(val name: String, val confirmed: Boolean)
 
+/** What a person is told when a name is taken (ADR 0069). */
+fun nameTakenMessage(name: String): String = "$name is already used in this circle. Choose another, for example add your surname or initial."
+
 sealed interface NameResult {
     data object Saved : NameResult
 
     data class Refused(val reason: String) : NameResult
+
+    /** Another member of the circle already uses [name] (ADR 0069); nothing was queued. */
+    data class NameTaken(val name: String) : NameResult {
+        val message: String get() = nameTakenMessage(name)
+    }
 
     /** Names are sealed with the circle key, so a member must be let in first. */
     data object NotLetInYet : NameResult
@@ -461,6 +469,8 @@ data class HomeData(
     val people: List<MemberSummary> = emptyList(),
     /** My own display name, or null if I have not set one yet: the app then asks for it first (ADR 0068). */
     val myName: String? = null,
+    /** Set when my latest name claim lost to a name another member holds (a race, ADR 0069): the message to show; null otherwise. */
+    val nameRefusal: String? = null,
     /** The display name of every member who has one, including members who have left (old loans still name them). */
     val names: Map<MemberId, NameSummary> = emptyMap(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
@@ -934,7 +944,8 @@ class CircleApp(
         val tidy = circles.event.DisplayNames.tidy(name) { circles.text.nfkc(it) }
         circles.event.DisplayNames.problem(tidy)?.let { return NameResult.Refused(it) }
         val (s, _) = pauseSession() ?: return if (session == null) NameResult.NotAllowed else NameResult.NotLetInYet
-        return nameResult(sendPause(s, s.author.memberProfile(s.circle, today(), tidy)))
+        val result = sendPause(s, s.author.memberProfile(s.circle, today(), tidy))
+        return if (result is PauseResult.Refused && result.reason == circles.event.NAME_TAKEN_REASON) NameResult.NameTaken(tidy) else nameResult(result)
     }
 
     /** Confirms [member]'s current name, after checking their key fingerprint in person (ADR 0068). */
@@ -1829,6 +1840,7 @@ class CircleApp(
                 passkeyOffered = passkeys?.available == true,
                 passkeyOn = keyStore.load()?.passkey != null,
                 myName = view.market.names[me]?.name,
+                nameRefusal = view.nameRefusals[me]?.let { nameTakenMessage(it) },
                 names = view.market.names.mapValues { (member, state) -> NameSummary(state.name, view.market.nameConfirmed(member)) },
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
                     val confirmers = view.market.nameConfirmers(member)

@@ -110,6 +110,46 @@ object DisplayNames {
     }
 }
 
+/** Why the fold refuses a `member.profile` whose name another current member already holds (ADR 0069). */
+const val NAME_TAKEN_REASON = "that name is already used by another member of the circle"
+
+/**
+ * The key two names are compared by to decide whether a name is taken (ADR 0069). The text is already NFKC (done when it
+ * was saved); this folds case with a fixed table, never the platform's, so the JVM and the browser always agree.
+ * Covered: ASCII, Latin-1, Latin Extended-A, Greek (with final sigma) and Cyrillic including its extensions up to U+052F.
+ * Left unchanged on purpose: the Turkish dotted capital I (U+0130) and dotless small i (U+0131), the German sharp s, and
+ * every other script. Look-alike letters from different scripts (Cyrillic a for Latin a) are NOT detected.
+ */
+object NameKey {
+    private const val ASCII_CASE_GAP = 0x20
+    private const val CYRILLIC_EXTRA_GAP = 0x50
+
+    fun of(name: String): String = buildString(name.length) { name.forEach { append(fold(it.code).toChar()) } }
+
+    private fun fold(c: Int): Int = when (c) {
+        in 0x41..0x5A -> c + ASCII_CASE_GAP
+        in 0xC0..0xDE -> if (c == 0xD7) c else c + ASCII_CASE_GAP
+        0x130, 0x131 -> c
+        in 0x100..0x137 -> if (c % 2 == 0) c + 1 else c
+        in 0x139..0x148 -> if (c % 2 == 1) c + 1 else c
+        in 0x14A..0x177 -> if (c % 2 == 0) c + 1 else c
+        0x178 -> 0xFF
+        in 0x179..0x17E -> if (c % 2 == 1) c + 1 else c
+        0x386 -> 0x3AC
+        in 0x388..0x38A -> c + 37
+        0x38C -> 0x3CC
+        0x38E, 0x38F -> c + 63
+        in 0x391..0x3AB -> if (c == 0x3A2) c else c + ASCII_CASE_GAP
+        0x3C2 -> 0x3C3 // final sigma
+        in 0x400..0x40F -> c + CYRILLIC_EXTRA_GAP
+        in 0x410..0x42F -> c + ASCII_CASE_GAP
+        in 0x460..0x481, in 0x48A..0x4BF, in 0x4D0..0x52F -> if (c % 2 == 0) c + 1 else c
+        in 0x4C1..0x4CE -> if (c % 2 == 1) c + 1 else c
+        0x4C0 -> 0x4CF
+        else -> c
+    }
+}
+
 private const val K_NAME = "name"
 private const val K_MEMBER = "member"
 private const val K_PROFILE = "profile"

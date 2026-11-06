@@ -7,6 +7,7 @@ import circles.app.InviteLink
 import circles.app.LoanRole
 import circles.app.MemberSummary
 import circles.app.NameSummary
+import circles.app.nameTakenMessage
 import circles.app.LoanSummary
 import circles.event.LoanId
 import circles.event.LoanStatus
@@ -1434,6 +1435,17 @@ class NamesViewTest {
         assertTrue("""id="$FORM_MY_NAME"""" in html && """name="$FIELD_DISPLAY_NAME"""" in html && """$ATTR_MIN="1"""" in html)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value.orEmpty()
         assertTrue("hidden" in button, button)
+    }
+
+    @Test fun aNameThatWasTakenIsExplainedOnTheNamePageAndInSettingsUntilAnotherWorks() {
+        val message = nameTakenMessage("Bea")
+        val unnamed = render(open(home(myName = null).copy(nameRefusal = message)).copy(screen = Screen.YourName))
+        assertTrue("""id="$ID_NAME_REFUSAL"""" in unnamed && """role="alert"""" in unnamed && "Bea is already used in this circle. Choose another, for example add your surname or initial." in unnamed, unnamed)
+        assertTrue("""id="$FORM_MY_NAME"""" in unnamed, "the form is still there to try again")
+        val settings = render(open(home().copy(nameRefusal = message)).copy(screen = Screen.Settings))
+        assertTrue("""id="$ID_NAME_REFUSAL"""" in settings)
+        assertFalse(ID_NAME_REFUSAL in render(open(home(myName = null)).copy(screen = Screen.YourName)), "no message when nothing was refused")
+        assertFalse(ID_NAME_REFUSAL in render(open(home()).copy(screen = Screen.Settings)))
     }
 
     @Test fun membersShowNamesWithTheirStateAndTheConfirmFormNeedsTheInPersonTick() {

@@ -41,6 +41,8 @@ class CircleView(
     val shareHolders: Map<Int, Set<MemberId>> = emptyMap(),
     /** The public commitment to each epoch's key (ADR 0045), which a rebuilt key is checked against. */
     val commitments: Map<Int, ByteString> = emptyMap(),
+    /** Members whose newest name claim was refused because the name was taken, with the name they tried (ADR 0069). */
+    val nameRefusals: Map<MemberId, String> = emptyMap(),
 )
 
 /** The last `recovery.share` of an epoch, to tell whether the next one continues its set (ADR 0048, ADR 0065). */
@@ -108,11 +110,19 @@ class CircleFold(
         val opened = accepted.map { (id, envelope) -> OpenedEvent(id, envelope, PayloadSealing.open(cipher, state.keys, envelope)) }
         val market = MarketFold(cipher, me, circle, state.devices, mayBorrow, { stewardsAfter[it].orEmpty() }, stewardFactsAt = { factsAfter[it] ?: StewardFacts(emptySet(), DEFAULT_STEWARD_QUORUM, emptyMap()) }).fold(opened)
         val refused = opened.filter { it.id in market.rejected }.map { RejectedEvent(it.id, it.envelope.type, market.rejected.getValue(it.id)) }
+        // ADR 0069: a member whose newest name claim lost to a name someone else holds is told why.
+        val nameRefusals = mutableMapOf<MemberId, String>()
+        for (event in opened) {
+            if (event.envelope.type != EventType.MEMBER_PROFILE.wire) continue
+            val author = event.envelope.author
+            val name = ((event.payload as? Parsed.Ok)?.value)?.let { (NamePayloads.parseProfile(it) as? Parsed.Ok)?.value?.name } ?: continue
+            if (market.rejected[event.id] == NAME_TAKEN_REASON) nameRefusals[author] = name else if (event.id !in market.rejected) nameRefusals.remove(author)
+        }
         return CircleView(
             state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
             opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
             state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
-            state.unrotatedRemovals(), state.heldShares.toMap(), state.shareHolders.mapValues { it.value.toSet() }, state.commitmentsSnapshot(),
+            state.unrotatedRemovals(), state.heldShares.toMap(), state.shareHolders.mapValues { it.value.toSet() }, state.commitmentsSnapshot(), nameRefusals,
         )
     }
 

@@ -1565,4 +1565,49 @@ class CircleAppEndToEndTest {
         assertFalse("Alice Smith" in dump || "Bea Lee" in dump || "Bea L." in dump || "Carol" in dump, "names are sealed")
         listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
+
+    @Test
+    fun twoMembersCannotShareANameAndTheLoserOfARaceIsToldWhy() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        assertEquals(NameResult.Saved, alice.app.setMyName("Alice"))
+        suspend fun admitted(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); member.app.syncOnce()
+            return member
+        }
+        val bea = admitted()
+        val carol = admitted()
+        // Already taken: refused before anything is queued, in any case.
+        val taken = assertIs<NameResult.NameTaken>(bea.app.setMyName("ALICE"))
+        assertEquals("ALICE is already used in this circle. Choose another, for example add your surname or initial.", taken.message)
+        assertEquals(null, home(bea.app).myName)
+        // The race: both claim a free name before either has synced.
+        assertEquals(NameResult.Saved, bea.app.setMyName("Dana"))
+        assertEquals(NameResult.Saved, carol.app.setMyName("dana"))
+        bea.app.syncOnce(); carol.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
+        assertEquals("Dana", home(alice.app).names[home(bea.app).me]?.name)
+        assertEquals(null, home(carol.app).myName, "the loser stays unnamed")
+        assertEquals("dana is already used in this circle. Choose another, for example add your surname or initial.", home(carol.app).nameRefusal)
+        assertEquals(null, home(bea.app).nameRefusal)
+        // Choosing another name ends the message; a member may change their own name's case; leaving frees the name.
+        assertEquals(NameResult.Saved, carol.app.setMyName("Dana C"))
+        assertEquals(NameResult.Saved, bea.app.setMyName("DANA"))
+        listOf(alice, bea, carol).forEach { it.app.syncOnce() }
+        listOf(alice, bea, carol).forEach { it.app.syncOnce() }
+        assertEquals(null, home(carol.app).nameRefusal)
+        assertEquals("Dana C", home(alice.app).names[home(carol.app).me]?.name)
+        assertEquals("DANA", home(alice.app).names[home(bea.app).me]?.name)
+        assertEquals(NameResult.Saved, bea.app.setMyName("Bea"))
+        listOf(alice, bea, carol).forEach { it.app.syncOnce() }
+        listOf(alice, bea, carol).forEach { it.app.syncOnce() }
+        assertEquals(NameResult.Saved, carol.app.setMyName("dana"))
+        listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
 }

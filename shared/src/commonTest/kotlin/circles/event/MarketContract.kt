@@ -1048,6 +1048,69 @@ abstract class MarketContract {
         assertEquals(setOf(w.founder.identity.member), w.foldAs(w.founder).market.nameConfirmers(carol))
     }
 
+    // ---- unique display names (ADR 0069) ----
+
+    @Test
+    fun aNameAnotherCurrentMemberHoldsIsTakenInAnyCaseAndTheFirstClaimInTheLogWins() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        val bea = w.bea.identity.member
+        val carol = w.carol.identity.member
+        w.log += w.bea.memberProfile(w.circle, DAY, "Bea")
+        // Same name in another case, with accents folded as written, and the Turkish letters kept apart.
+        assertEquals(listOf(NAME_TAKEN_REASON), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, "BEA"))))
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, "B\u00E9a"))), "an accent makes a different name")
+        val view = w.foldAs(w.founder)
+        assertEquals("Bea", view.market.names.getValue(bea).name)
+        assertEquals("Bea", w.foldAs(w.founder).market.names.getValue(bea).name)
+        assertEquals(null, w.foldAs(w.founder).market.names[carol], "a refused first claim leaves the member unnamed")
+        // Two claims for a free name: the earlier one in the log wins, the later one is refused with a reason.
+        val first = w.carol.memberProfile(w.circle, DAY + 1, "Sam")
+        val second = w.founder.memberProfile(w.circle, DAY + 1, "sam")
+        w.log += first
+        assertEquals(listOf(NAME_TAKEN_REASON), w.reasons(listOf(second)))
+        w.log += second
+        val folded = w.foldAs(w.founder)
+        assertEquals("Sam", folded.market.names.getValue(carol).name)
+        assertEquals(null, folded.market.names[w.founder.identity.member])
+        assertEquals(mapOf(w.founder.identity.member to "sam"), folded.nameRefusals)
+    }
+
+    @Test
+    fun aMemberMayChangeTheirOwnNameToOneOnlyTheyHoldAndTheOldNameIsFreed() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.bea.memberProfile(w.circle, DAY, "bea")
+        val recased = w.bea.memberProfile(w.circle, DAY + 1, "Bea")
+        assertEquals(emptyList(), w.reasons(listOf(recased)), "a case change of their own name is allowed")
+        w.log += recased
+        assertEquals("Bea", w.foldAs(w.bea).market.names.getValue(w.bea.identity.member).name)
+        w.log += w.bea.memberProfile(w.circle, DAY + 2, "Beatrice")
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY + 3, "BEA"))), "freed by the rename")
+        // A refused change keeps the old name and is reported to its author until a later claim works.
+        val refused = w.carol.memberProfile(w.circle, DAY + 3, "beatrice")
+        w.log += w.carol.memberProfile(w.circle, DAY + 3, "Carol")
+        assertEquals(listOf(NAME_TAKEN_REASON), w.reasons(listOf(refused)))
+        w.log += refused
+        val folded = w.foldAs(w.founder)
+        assertEquals("Carol", folded.market.names.getValue(w.carol.identity.member).name)
+        assertEquals(mapOf(w.carol.identity.member to "beatrice"), folded.nameRefusals)
+        w.log += w.carol.memberProfile(w.circle, DAY + 4, "Carol Ng")
+        assertEquals(emptyMap(), w.foldAs(w.founder).nameRefusals, "a later accepted claim ends the message")
+    }
+
+    @Test
+    fun aNameIsFreedWhenItsHolderLeaves() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.bea.memberProfile(w.circle, DAY, "Bea")
+        assertEquals(listOf(NAME_TAKEN_REASON), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, "bea"))))
+        w.log += w.bea.deviceRevoke(w.circle, w.bea.identity.device, DAY + 1)
+        assertEquals(emptyList(), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY + 1, "bea"))))
+        w.log += w.carol.memberProfile(w.circle, DAY + 1, "bea")
+        assertEquals("Bea", w.foldAs(w.founder).market.names.getValue(w.bea.identity.member).name, "the leaver keeps the name on old records")
+    }
+
     // ---- item photos (ADR 0060) ----
 
     private fun photo(n: Int, alt: String = "Front view") = ItemPhoto(n.toString(16).padStart(64, 'a'), n.toString(16).padStart(64, 'b'), FIRST_EPOCH, alt)

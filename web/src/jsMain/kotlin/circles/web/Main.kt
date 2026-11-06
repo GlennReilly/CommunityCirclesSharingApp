@@ -103,14 +103,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     private var state = AppState()
     private var app: CircleApp? = null
     private var registration: dynamic = null
+    private var noticeCount = 0
 
     fun dispatch(action: AppAction) {
         // A message goes away by itself after a while (Dismiss is still there), so it never lingers on another page.
         if (action is AppAction.Notice && action.text != null) {
             val text = action.text
+            val mine = ++noticeCount
             scope.launch {
                 delay(NOTICE_MILLIS)
-                if (state.notice == text) dispatch(AppAction.Notice(null))
+                // Only the newest notice's timer may clear it: an older timer must not cut a repeated message short.
+                if (mine == noticeCount && state.notice == text) dispatch(AppAction.Notice(null))
             }
         }
         val before = state
@@ -585,6 +588,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 when (result) {
                     NameResult.Saved -> done
                     is NameResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is NameResult.NameTaken -> result.message
                     NameResult.NotLetInYet -> "A steward needs to let you in before you can set your name."
                     NameResult.NotAllowed -> "That cannot be done right now. Try syncing, then again."
                 },

@@ -8,6 +8,7 @@ import circles.text.nfkc
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -73,5 +74,48 @@ class DisplayNamesTest {
         assertIs<Parsed.Invalid>(NamePayloads.parseConfirmation(CborMap(wire + ("member" to CborText("NOT-HEX")))))
         assertIs<Parsed.Invalid>(NamePayloads.parseConfirmation(CborMap(wire - "how")))
         assertTrue(NamePayloads.profile(MemberProfile("Bea")).entries.keys == setOf("name"))
+    }
+}
+
+/** The case-folded comparison key of ADR 0069: one fixed table, so the JVM and the browser agree (this runs on both). */
+class NameKeyTest {
+    @Test
+    fun caseDoesNotMakeANameDifferent() {
+        assertEquals(NameKey.of("Bea"), NameKey.of("bea"))
+        assertEquals(NameKey.of("Bea"), NameKey.of("BEA"))
+        assertEquals("bea lee", NameKey.of("BEA Lee"))
+    }
+
+    @Test
+    fun accentedGreekAndCyrillicLettersFold() {
+        assertEquals(NameKey.of("josé"), NameKey.of("JOSÉ"))
+        assertEquals(NameKey.of("Łukasz"), NameKey.of("łUKASZ"))
+        assertEquals(NameKey.of("Řehák"), NameKey.of("řEHÁK"))
+        assertEquals(NameKey.of("Αλέξης"), NameKey.of("ΑΛΈΞΗΣ")) // final sigma folds to sigma
+        assertEquals(NameKey.of("Анна"), NameKey.of("АННА"))
+        assertEquals(NameKey.of("Ёлка"), NameKey.of("ёЛКА"))
+        assertEquals(NameKey.of("Ҙ"), NameKey.of("ҙ"))
+    }
+
+    @Test
+    fun anAccentMakesADifferentNameAndTurkishLettersStayApart() {
+        assertNotEquals(NameKey.of("Bea"), NameKey.of("Béa"))
+        assertNotEquals(NameKey.of("I"), NameKey.of("ı"), "dotless i is its own letter")
+        assertNotEquals(NameKey.of("i"), NameKey.of("İ"), "dotted capital I is not folded to i")
+        assertNotEquals(NameKey.of("İsmail"), NameKey.of("ismail"))
+        assertEquals(NameKey.of("ISMAIL"), NameKey.of("ismail"))
+        assertEquals("ß", NameKey.of("ß"), "sharp s is left alone")
+        assertEquals("×", NameKey.of("×"), "the multiplication sign is not a letter")
+    }
+
+    @Test
+    fun lookAlikesFromOtherScriptsAreNotDetected() {
+        assertNotEquals(NameKey.of("Anna"), NameKey.of("Аnna"), "Cyrillic A is not Latin A: a known limit of ADR 0069")
+    }
+
+    @Test
+    fun theKeysOfFixedVectorsAreTheSameOnBothPlatforms() {
+        val vectors = mapOf("Bea" to "bea", "ÉMILE" to "émile", "ЖЕНЯ" to "женя", "ΣΩΦΙΑ" to "σωφια", "İIıi" to "İiıi", "中文" to "中文")
+        for ((text, key) in vectors) assertEquals(key, NameKey.of(text), text)
     }
 }

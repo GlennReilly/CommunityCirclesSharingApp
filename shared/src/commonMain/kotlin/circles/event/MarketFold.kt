@@ -355,6 +355,9 @@ internal class MarketFold(
     /** A member names themselves; a new name starts with no confirmations. */
     private fun setName(author: MemberId, v: MemberProfile, day: Int, id: EventId): String? {
         if (names[author]?.name == v.name) return "that is already the member's name"
+        // ADR 0069: log order decides; a name is taken while another member who has not left holds the same key.
+        val key = NameKey.of(v.name)
+        if (names.any { (member, state) -> member != author && NameKey.of(state.name) == key && removedOn(member) == null }) return NAME_TAKEN_REASON
         names[author] = NameState(author, v.name, id, day)
         return null
     }
