@@ -49,7 +49,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0043](0043-confirmation-disputes-and-resolution.md) | Owner confirmation, disputes and their resolution (M4, second slice) | Accepted |
 | [0044](0044-removing-members-and-rotating-the-circle-key.md) | Removing a member and rotating the circle key | Accepted |
 | [0045](0045-circle-key-commitments.md) | Circle key commitments | Accepted |
-| [0046](0046-adding-another-device.md) | Adding another device | Accepted |
+| [0046](0046-adding-another-device.md) | Adding another device | Accepted (where the fingerprint comparison happens superseded by 0071) |
 | [0047](0047-recovery-code.md) | The recovery code | Accepted |
 | [0048](0048-recovery-shares-in-the-app.md) | Recovery shares in the app | Accepted |
 | [0049](0049-item-keys-after-a-removal.md) | Item detail keys after a removal | Accepted |
@@ -65,14 +65,16 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0059](0059-return-reminders.md) | Return reminders | Accepted |
 | [0060](0060-item-photos.md) | Item photos | Accepted |
 | [0061](0061-approving-other-dates.md) | Approving other dates | Accepted |
-| [0062](0062-qr-codes.md) | QR codes | Accepted |
+| [0062](0062-qr-codes.md) | QR codes | Accepted (fingerprint text on Members superseded by 0071) |
 | [0063](0063-passkey-unlock.md) | Unlocking with a passkey | Accepted |
 | [0064](0064-bundle-budget-300-kib.md) | Script budget raised to 300 KiB | Accepted |
 | [0065](0065-recovery-share-set-id.md) | A recovery share names its set | Accepted |
 | [0066](0066-rename-to-lendger.md) | The product is called Lendger | Accepted |
-| [0067](0067-tier-names-new-regular-trusted.md) | Tier names are New, Regular and Trusted | Accepted |
-| [0068](0068-verified-display-names.md) | Display names: chosen by the member, confirmed by another | Accepted (point on shared names superseded by 0069) |
+| [0067](0067-tier-names-new-regular-trusted.md) | Tier names are New, Regular and Trusted | Accepted (display wording superseded by 0070; identifiers stay) |
+| [0068](0068-verified-display-names.md) | Display names: chosen by the member, confirmed by another | Accepted (point on shared names superseded by 0069; wording and where the confirm form and fingerprint sit superseded by 0071) |
 | [0069](0069-unique-display-names.md) | Display names are unique within a circle | Accepted |
+| [0070](0070-level-numbers.md) | People see level numbers, not tier names | Accepted |
+| [0071](0071-checking-identity-in-person.md) | Checking identity in person: one check page, fingerprints only as the fallback | Accepted |
 
 ## Open decisions still to record
 
