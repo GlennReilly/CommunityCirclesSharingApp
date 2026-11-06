@@ -13,6 +13,14 @@ Needs `google-chrome` and `java` on the PATH (set `LENDGER_JAR` to use another j
 
 What it checks, in order: the welcome page has choices only; field labels end in ": "; the passphrase button stays hidden until the passphrase is long enough; a short passphrase is refused; Alice starts a circle, is asked for her name first ("Your name: ", button hidden until typed) and it syncs; the Members page shows her fingerprint; she makes an invite link; Bea opens the link (the secret is removed from the address bar), joins, and waits; Alice sees her waiting (as "New member (waiting for a name)" with a fingerprint) and lets her in; Bea can then read and names herself; Alice adds a ladder with private details, Bea sees the name but not the details and is not offered Change, Alice renames it and then removes it and both lists follow; Bea asks to borrow it (dates and a note), Alice approves and Bea then sees the private details, both confirm the hand-over, Bea reports it back with damage and Alice sees that; Alice changes her passphrase (the old one then stops working) and her idle-lock time; a valuable item is shown as not yet open to the new member with the reasons, the standing pages show New and Trusted, and only the steward is offered Vouch; Bea cannot confirm names, Alice ticks that she checked the fingerprint in person (the button appears only then) and confirms Bea's name, which Bea then sees as confirmed; Alice locks, a wrong passphrase is refused, a reload leaves her locked, the right passphrase unlocks with the circle intact; the stored identity is only the wrapped blob. Any console error or exception is printed at the end.
 
+## Sync gap check
+
+```
+node tools/browser-e2e/sync-gap-e2e.mjs
+```
+
+Holds the founder's first pull for 3 seconds (DevTools `Fetch` domain) and saves "Your name" while it is held. Before the fix the sync engine dropped pushed events from the outbox before the pull stored them, so the new circle looked empty for that moment and the name was refused with "A steward needs to let you in" (the intermittent `e2e.mjs` failure of November 2026). Uses ports 18092 and 9350.
+
 ## Service worker check
 
 ```

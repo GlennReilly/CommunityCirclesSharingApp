@@ -70,12 +70,28 @@ class SyncEngine(
         var pulled = 0
         var skipped = 0
         var unchecked = 0
+        // Events the server has taken in this run. They stay in the outbox until the pull brings them back into the log
+        // (Replica.append drops them then), so a fold during the pull still sees them: dropping them on the push answer
+        // left a gap in which the device's own events were in neither place, and a founder's brand-new circle looked
+        // unreadable (the "Your name" page refused to save). If the pull fails they are dropped as before.
+        val taken = mutableSetOf<EventId>()
+        suspend fun forgetTaken() {
+            if (taken.isNotEmpty()) replica.dropFromOutbox(circle, taken)
+        }
         fun report(state: SyncState) = SyncReport(state, sent, refused, pulled, skipped, unchecked).also { mutableState.value = state }
-        suspend fun waiting() = replica.outbox(circle).size
+        suspend fun waiting() = replica.outbox(circle).count { it.eventId(crypto) !in taken }
+        suspend fun problem(text: String): SyncReport {
+            forgetTaken()
+            return report(SyncState.Problem(text, waiting()))
+        }
+        suspend fun failed(outcome: ApiOutcome<*>): SyncReport {
+            forgetTaken()
+            return report(failure(outcome, waiting()))
+        }
 
         // Push first, in batches the server accepts.
         while (true) {
-            val batch = replica.outbox(circle).take(MAX_PUSH_EVENTS)
+            val batch = replica.outbox(circle).filter { it.eventId(crypto) !in taken }.take(MAX_PUSH_EVENTS)
             if (batch.isEmpty()) break
             when (val outcome = api.push(circle, batch)) {
                 is ApiOutcome.Ok -> {
@@ -89,13 +105,13 @@ class SyncEngine(
                             replica.markRefused(circle, id, event.type, describe(result))
                             refused++
                         } else {
-                            replica.dropFromOutbox(circle, setOf(id))
+                            taken += id
                             sent++
                         }
                     }
-                    if (!progressed) return report(SyncState.Problem("The server did not answer for any of the changes sent", waiting()))
+                    if (!progressed) return problem("The server did not answer for any of the changes sent")
                 }
-                else -> return report(failure(outcome, waiting()))
+                else -> return failed(outcome)
             }
         }
 
@@ -104,13 +120,13 @@ class SyncEngine(
         while (true) {
             val page = when (val outcome = api.pull(circle, cursor, MAX_PULL_LIMIT)) {
                 is ApiOutcome.Ok -> outcome.value
-                else -> return report(failure(outcome, waiting()))
+                else -> return failed(outcome)
             }
             val directory = directories.getOrPut(circle) { DeviceKeyDirectory.from(replica.entries(circle)) }
             val entries = mutableListOf<LogEntry>()
             var last = cursor
             for (stored in page.events) {
-                if (stored.serverSeq <= last) return report(SyncState.Problem("The server sent events out of order", waiting()))
+                if (stored.serverSeq <= last) return problem("The server sent events out of order")
                 last = stored.serverSeq
                 val envelope = (stored.envelope.toEnvelope() as? Parsed.Ok)?.value
                 if (envelope == null || envelope.circle != circle || EnvelopeChecks.check(envelope) != null) {
@@ -123,13 +139,14 @@ class SyncEngine(
                 entries += LogEntry(stored.serverSeq, envelope.eventId(crypto), envelope, checkedWith)
             }
             if (page.next < last || (page.hasMore && page.next <= cursor)) {
-                return report(SyncState.Problem("The server's cursor did not move forward", waiting()))
+                return problem("The server's cursor did not move forward")
             }
             replica.append(circle, entries, page.next, entries.map { it.id }.toSet())
             pulled += entries.size
             cursor = maxOf(cursor, page.next)
             if (!page.hasMore) break
         }
+        forgetTaken() // the ones the log did not bring back (the server already had them before our cursor)
         return report(SyncState.UpToDate)
     }
 

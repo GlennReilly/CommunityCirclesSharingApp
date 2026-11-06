@@ -70,7 +70,13 @@ private class FakeServer(private val crypto: Crypto) : SyncApi {
         )
     }
 
+    /** Runs at the start of every pull, after the push: stands in for the app doing something while the pull is on the wire. */
+    var beforePull: suspend () -> Unit = {}
+    var pullDown = false
+
     override suspend fun pull(circle: CircleId, after: Long, limit: Int): ApiOutcome<PullResponse> {
+        beforePull()
+        if (pullDown) return ApiOutcome.Offline
         failure<PullResponse>()?.let { return it }
         var page = log.filter { it.serverSeq > after }.take(minOf(pageSize, limit))
         val more = log.any { it.serverSeq > (page.lastOrNull()?.serverSeq ?: after) }
@@ -132,6 +138,40 @@ abstract class SyncEngineContract {
         assertEquals(events, w.replica.entries(w.circle).map { it.envelope })
         assertEquals(5, w.replica.cursor(w.circle))
         assertEquals(SyncState.UpToDate, w.engine.state.value)
+    }
+
+    // Regression: the engine used to drop accepted events from the outbox on the push answer, before the pull had stored
+    // them, so a fold during the pull saw a brand-new circle with no events at all (the founder's "Your name" was refused).
+    @Test fun ownEventsStayVisibleToTheFoldWhileThePullIsOnTheWire() = runTest {
+        val w = world()
+        val events = w.buildCircle()
+        w.enqueueAll(events)
+        var seenDuringPull: Boolean? = null
+        w.server.beforePull = {
+            if (seenDuringPull == null) {
+                val view = w.replica.fold(w.circle, w.crypto, w.cipher, w.founder.identity)
+                seenDuringPull = view.currentEpoch == FIRST_EPOCH && view.keys[FIRST_EPOCH] != null
+            }
+        }
+        assertEquals(SyncState.UpToDate, w.engine.sync(w.circle).state)
+        assertEquals(true, seenDuringPull, "the founder's key must still be readable while the pull runs")
+        assertEquals(emptyList(), w.replica.outbox(w.circle))
+        assertEquals(5, w.replica.entries(w.circle).size)
+    }
+
+    @Test fun aFailedPullAfterAnAcceptedPushDoesNotSendTheEventsAgain() = runTest {
+        val w = world()
+        w.enqueueAll(w.buildCircle())
+        w.server.pullDown = true
+        val report = w.engine.sync(w.circle)
+        assertEquals(SyncState.Offline(0), report.state)
+        assertEquals(5, report.sent)
+        assertEquals(emptyList(), w.replica.outbox(w.circle))
+        w.server.pullDown = false
+        val again = w.engine.sync(w.circle)
+        assertEquals(0, again.sent)
+        assertEquals(5, again.pulled)
+        assertEquals(5, w.server.log.size)
     }
 
     @Test fun everyIngestedEventCarriesTheKeyItWasCheckedWith() = runTest {

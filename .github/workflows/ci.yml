@@ -44,3 +44,6 @@ jobs:
       - name: Service worker life cycle
         working-directory: tools/browser-e2e
         run: node sw-e2e.mjs
+      - name: Saving a name while the first sync is between push and pull
+        working-directory: tools/browser-e2e
+        run: node sync-gap-e2e.mjs

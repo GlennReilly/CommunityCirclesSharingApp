@@ -34,7 +34,7 @@ export async function startChrome(port = 9333) {
     if (d.method === 'Log.entryAdded') logs.push(`log.${d.params.entry.level}: ${d.params.entry.text} ${d.params.entry.url ?? ''}`);
   });
   const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); return r.result.exceptionDetails ? `ERR ${r.result.exceptionDetails.exception?.description}` : r.result.result.value; };
-  return { send, evaluate, logs, goto: async url => { await send('Page.navigate', { url }); await sleep(1500); }, stop: () => { try { ws.close(); } catch {} proc.once('exit', () => setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500)); proc.kill(); } };
+  return { send, evaluate, logs, on: listener => listeners.push(listener), goto: async url => { await send('Page.navigate', { url }); await sleep(1500); }, stop: () => { try { ws.close(); } catch {} proc.once('exit', () => setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500)); proc.kill(); } };
 }
 
 // ---- accessibility (axe-core) ----
