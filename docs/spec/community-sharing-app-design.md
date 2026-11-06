@@ -1,4 +1,4 @@
-# Community sharing network: design doc (working title "Lendger")
+# Community sharing network: design doc ("Lendger")
 
 Status: draft v0.2, 2026-11-02 (v0.2: `public`/`encrypted` envelope split, optimistic returns, corrected "what the server sees", policy corrections)
 Owner: Glenn
@@ -7,7 +7,7 @@ Reference code: `CircleAccess.kt` (trust model v0.2, now in `shared/src/commonMa
 
 ## 1. Purpose
 
-A local-first web app that lets small groups of neighbours, friends or communities share tools, skills and help without using money, credit scores or a central company. It grew out of a r/solarpunk thread on trading outside standard monetary systems, where the strongest practical idea was a lending and skill-share network rather than a new currency.
+A local-first web app that lets groups of neighbours, friends or communities share tools, skills and help without using money, credit scores or a central company. It grew out of a r/solarpunk thread on trading outside standard monetary systems, where the strongest practical idea was a lending and skill-share network rather than a new currency.
 
 It is a hobby and community project. It must work whether or not its author ever hosts an instance.
 

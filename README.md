@@ -1,29 +1,80 @@
 # Lendger
 
-A local-first sharing network for small groups of neighbours: lend tools, offer skills, and help each other without money, credit scores or a central company. Working title; see [the design doc](docs/spec/community-sharing-app-design.md) for the why and [the spec](docs/spec/community-sharing-app-spec.md) for what to build.
+A local-first sharing network for community groups, or a group of neighbours: lend tools, offer skills, and help each other without money, credit scores or a central company. See [the design doc](docs/spec/community-sharing-app-design.md) for the why and [the spec](docs/spec/community-sharing-app-spec.md) for what to build.
 
-## Status
+## What Lendger is for
 
-Done: **M0** (skeleton, trust policy), **M1** (signed event log and sync), **M2** (end-to-end encryption), rate limiting, JSON logging, a single-jar build, and from M3 to M5 the server and shared pieces listed below. There is **no web client yet** (M3 proper) and the access policy is not wired in (M4: standing, disputes).
+Neighbours and community groups already lend drills, ladders and prams, and swap skills like bike repair or tax help. Today that usually runs on group chats and spreadsheets, or on platforms that want money, personal data or an account. Nobody can see who has what. It is hard to know whom to trust. And a central company holds everyone's details.
 
-- **Events and sync:** signed events in a deterministic CBOR encoding, a SQLite-backed server with push, pull and challenge-response login, optional server-sent hints on `/events/stream` ([ADR 0026](docs/adr/0026-sse-hints-and-blob-storage.md)).
-- **Encryption** ([ADR 0018](docs/adr/0018-m2-libsodium-bindings.md) to [0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md), [0024](docs/adr/0024-retire-the-plaintext-v0-format.md), [0035](docs/adr/0035-browser-crypto-with-noble.md) for the browser): every private payload is sealed under a circle key (format `v = 1`, the only one); the server stores ciphertext and never holds a key. Circle keys are wrapped to devices, rotated, and split among stewards (Shamir).
-- **Governance** ([ADR 0027](docs/adr/0027-steward-quorum-setting-and-inactivity-fallback.md), [0029](docs/adr/0029-lower-the-minimum-silent-days.md)): stewards, a per-circle quorum, and an inactivity fallback with settings the stewards control.
-- **Items and loans** ([ADR 0025](docs/adr/0025-item-and-loan-event-payloads.md)) with per-item detail keys, and encrypted blobs for attachments.
-- **Handover** ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)): `export`, `import` and `verify` move a circle between hosts using only ciphertext. Server `backup` and `restore` ([ADR 0031](docs/adr/0031-server-backup-and-restore.md)) are done too; signed steward export and import over HTTP ([ADR 0033](docs/adr/0033-signed-steward-admin-requests.md)) is done; a Dockerfile, a compose file, a systemd unit and operator guides ([docs/operator/](docs/operator/README.md): install, requirements from a measured load test, backup and restore, upgrade, handover) complete M5.
+Lendger is a web app for one group (a "circle") to do this for itself, with no money, no ratings, no ads and no company in the middle.
 
-The API is in [docs/api.md](docs/api.md); the decisions are in [docs/adr/](docs/adr/README.md).
+### Lend and borrow
+
+- Members list things they own, with a private description and up to three photos. Only members of the circle can see them.
+- Someone asks to borrow an item for some dates. The owner approves (or suggests other dates), hands it over, and confirms the return. An item cannot be promised twice for the same days.
+- Reminders for returns show inside the app. Nothing is sent by email.
+- Reporting damage or loss is a normal, no-blame step. A steward (see below) can settle a disagreement.
+- QR codes can tag an item, or let two people check each other in person.
+
+### Offer skills
+
+- A skills directory lists what members can help with. It is a noticeboard: people then talk outside the app, and there is no messaging and no money.
+
+### Trust that grows, with no bans
+
+- Newcomers can borrow lightly. As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
+- Members can vouch for a newcomer. Contribution notes (for example, helping at a working bee) also count.
+- There are no star ratings. Owners decide who borrows their things; standing is advice shown to them.
+- As a last resort, trusted members can pause someone. A pause needs several reviewers, has an end date and an appeal, and keeps essentials open ([ADR 0050](docs/adr/0050-pauses.md)). Nobody is banned for good.
+
+### Your data stays private
+
+- Everything private (item details, photos, loans, vouches, notes) is locked on your device before it leaves it. The server only stores locked data and holds no key, so even the person running it cannot read it ([ADR 0021](docs/adr/0021-sealed-envelope-v1-and-circle-key-wrapping.md)).
+- The host can still see that a circle exists, who is a member, and when members use it. This is stated plainly in the design doc.
+- When a member is removed, the circle's key is changed so they cannot read what comes next.
+
+### No accounts, no email
+
+- You do not sign up. Your keys are made in your browser and stay there, locked by a passphrase. You can also unlock with your device's passkey or fingerprint where the browser supports it.
+- A 12-word recovery code lets you get back in if you lose a device. Stewards can also hold pieces of the circle's key, so the group can recover it together.
+- You join through an invite link. You can add a second device (your phone and your laptop) after checking a short fingerprint.
+
+### Works offline, installs like an app
+
+- It is a web page you can install on a phone or computer. It keeps your circle on the device, so it works without a connection and syncs when you are back online.
+- Text size and light or dark colours can be changed. The text is written to be easy to read, and automated accessibility checks pass.
+
+### Run by the community
+
+- A circle has stewards. Important changes (adding or removing a steward, changing the circle's rules) need several of them to agree. If stewards go quiet, a fallback lets the rest carry on ([ADR 0027](docs/adr/0027-steward-quorum-setting-and-inactivity-fallback.md)).
+- Anyone can run the server themselves, on a small computer or a cheap rented one. Operator guides are in [docs/operator/](docs/operator/README.md).
+- A circle is not locked to its host. A steward can export it, or any member's copy can be used, and the group can move to a new host and carry on ([ADR 0030](docs/adr/0030-circle-export-import-and-verify.md)). The server also has backup and restore.
+
+### Where it stands
+
+The features above are built and tested: unit tests on both the server and browser sides, tests against a real server, and a script that drives real Chrome. The server was load-tested with 300 members in one circle on a 2012 desktop ([requirements](docs/operator/requirements.md)); nothing larger has been measured.
+
+**Not done yet** (see [docs/pilot-readiness.md](docs/pilot-readiness.md) and [docs/remaining-steps.md](docs/remaining-steps.md)):
+
+- A real install over HTTPS on a Raspberry Pi or a rented server. The guides were checked only in containers.
+- A trial on real phones, including passkeys (tried only with Chrome's test authenticator) and how long unlock takes.
+- A screen-reader pass of the borrowing steps.
+- Someone who has not seen the code following the operator guides.
+- A pilot with a real group. The default trust thresholds are to be tuned after it.
+
+The API is in [docs/api.md](docs/api.md); the technical decisions are in [docs/adr/](docs/adr/README.md).
 
 ## Layout
 
 | Folder | What it holds |
 |---|---|
-| `shared/` | Kotlin Multiplatform (JVM + JS): policy (tiers, standing, access), CBOR encoding, envelope, validation, the event fold, steward rules, items and loans, export format, `Crypto` and `Cipher` (libsodium on JS) |
+| `shared/` | Kotlin Multiplatform (JVM + JS): policy (tiers, standing, access), CBOR encoding, envelope, validation, the event fold, steward rules, items and loans, export format, `Crypto` and `Cipher` (JDK/libsodium on the JVM, noble in the browser), the client sync engine and app logic |
 | `server/` | Ktor server: `domain/` (rules, services), `data/` (SQLite, migrations, blob files), `backup/` (export and import), `web/` (routes), `config/`, CLI |
-| `web/` | Placeholder for the PWA; stack not yet decided ([ADR 0009](docs/adr/0009-web-ui-stack.md)) |
+| `web/` | The browser client: Kotlin/JS with kotlinx-html, no TypeScript ([ADR 0009](docs/adr/0009-web-ui-stack.md)); views, state, service worker, styles. See [web/README.md](web/README.md) |
 | `deploy/` | Dockerfile, compose file with an optional HTTPS proxy, Caddyfile, systemd unit |
-| `tools/` | Independent reference generators for test vectors |
+| `tools/` | Independent reference generators for test vectors, the real-Chrome end-to-end scripts (`browser-e2e`) and bundle analysis |
 | `docs/operator/` | Guides for the person running a host |
+| `docs/` | Also [api.md](docs/api.md), [pilot-readiness.md](docs/pilot-readiness.md) and [remaining-steps.md](docs/remaining-steps.md) |
 | `docs/spec/` | Design doc and implementation spec |
 | `docs/adr/` | Architecture decision records |
 
@@ -41,7 +92,22 @@ Run only the shared policy tests, on both targets:
 ./gradlew :shared:jvmTest :shared:jsNodeTest
 ```
 
-Run the server (a brand-new database is created and migrated on first start):
+Run the web client's own tests, and check that its script stays under the size budget (300 KiB gzipped, part of `check`):
+
+```bash
+./gradlew :web:jsNodeTest
+./gradlew :web:checkBundleBudget
+```
+
+Run the browser end-to-end check (needs Chrome, Node 22+ and the jar; details in [tools/browser-e2e/README.md](tools/browser-e2e/README.md)):
+
+```bash
+./gradlew :server:shadowJar
+(cd tools/browser-e2e && npm ci)
+A11Y=1 node tools/browser-e2e/e2e.mjs
+```
+
+Run the server, which also serves the web client at `/` (a brand-new database is created and migrated on first start):
 
 ```bash
 ./gradlew :server:run --args=serve
@@ -90,7 +156,7 @@ Settings (environment variables, all optional):
 
 Logs are one JSON object per line on stdout. They never contain bodies, headers, tokens, keys, client addresses or exception messages ([ADR 0016](docs/adr/0016-structured-json-logging.md)).
 
-Build a single runnable jar (about 39 MB, [ADR 0017](docs/adr/0017-shadow-jar-for-single-file-deploy.md)) and run it anywhere with Java 17+:
+Then open http://localhost:8080. Build a single runnable jar (about 41 MB, [ADR 0017](docs/adr/0017-shadow-jar-for-single-file-deploy.md)) and run it anywhere with Java 17+:
 
 ```bash
 ./gradlew :server:shadowJar
