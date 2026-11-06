@@ -184,6 +184,18 @@ try {
   await setField(alice, 'change-passphrase-form', 'current', 'x'); if (!(await buttonHidden(alice, 'change-passphrase-form'))) throw new Error('change button visible with one field');
   await setField(alice, 'change-passphrase-form', 'new', PASS_NEW); if (await buttonHidden(alice, 'change-passphrase-form')) throw new Error('change button hidden with both fields');
   await alice.evaluate('document.getElementById("change-passphrase-form").requestSubmit()'); await until(alice, has(alice, 'The current passphrase was not right'), 'wrong current'); ok('changing the passphrase needs the right current one');
+  // A redraw (here: the "Saved." notice) must leave focus, typed text and the caret where the user had them.
+  await alice.evaluate('(() => { const e = document.getElementById("change-passphrase-form").elements.namedItem("new"); e.focus(); e.value = "abcdefghij"; e.setSelectionRange(3, 6); return true; })()');
+  await alice.evaluate('(() => { const f = document.getElementById("autolock-form"); f.elements.namedItem("minutes").value = "15"; f.requestSubmit(); return true; })()');
+  await until(alice, has(alice, 'Saved.'), 'saved notice redraw');
+  const kept = await alice.evaluate('(() => { const e = document.activeElement; return JSON.stringify({ name: e.name, value: e.value, s: e.selectionStart, e: e.selectionEnd }); })()');
+  if (kept !== JSON.stringify({ name: 'new', value: 'abcdefghij', s: 3, e: 6 })) throw new Error('focus or caret lost by a redraw: ' + kept);
+  ok('a redraw keeps focus, the typed text and the caret in the field');
+  await alice.evaluate('(() => { const b = document.querySelector("[data-action=sync]"); b.focus(); return true; })()');
+  await setField(alice, 'change-passphrase-form', 'current', 'x'); await setField(alice, 'change-passphrase-form', 'new', PASS_NEW);
+  await alice.evaluate('document.getElementById("change-passphrase-form").requestSubmit()'); // the wrong-passphrase notice redraws the page
+  await until(alice, has(alice, 'The current passphrase was not right') + ' && document.activeElement && document.activeElement.getAttribute("data-action") === "sync"', 'focus stays on the Sync now button after the page was redrawn');
+  ok('a redraw keeps focus on a button')
   await setField(alice, 'change-passphrase-form', 'current', PASS); await setField(alice, 'change-passphrase-form', 'new', PASS_NEW);
   await alice.evaluate('document.getElementById("change-passphrase-form").requestSubmit()'); await until(alice, has(alice, 'Passphrase changed'), 'changed'); ok('passphrase changed');
   await alice.evaluate('(() => { const f = document.getElementById("autolock-form"); f.elements.namedItem("minutes").value = "5"; f.requestSubmit(); return true; })()');

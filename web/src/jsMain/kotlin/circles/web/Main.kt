@@ -125,12 +125,55 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     }
 
     private fun render(screenChanged: Boolean) {
+        val kept = if (screenChanged) null else rememberFocus()
         root.clear()
         root.append { div { shell(state) } }
         val due = (state.model as? AppModel.Open)?.let { dueCount(it.home) } ?: 0
         document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Lendger" else "${state.screen.title} - Lendger"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
+        kept?.let { restoreFocus(it) }
         loadImages()
+    }
+
+    private class KeptFocus(val key: String, val value: String?, val start: Int?, val end: Int?, val scrollY: Double)
+
+    private fun focusables(): List<HTMLElement> {
+        val all = root.querySelectorAll("a[href],button,input,select,textarea,summary,[tabindex]")
+        return (0 until all.length).mapNotNull { all.item(it) as? HTMLElement }.filter {
+            val d: dynamic = it
+            d.disabled != true && !it.hidden && d.type != "hidden" && d.tabIndex >= 0 && (d.checkVisibility == undefined || d.checkVisibility() == true)
+        }
+    }
+
+    private fun candidates(els: List<HTMLElement>): List<FocusCandidate> = els.map {
+        val d: dynamic = it
+        FocusCandidate(it.id, (it.getAttribute("name") ?: ""), (it.getAttribute("data-action") ?: ""), it.tagName,
+            (it.getAttribute("aria-label") ?: it.textContent ?: "").trim())
+    }
+
+    /** A redraw must not drop the keyboard user's place (they would be sent back to the top of the page). */
+    private fun rememberFocus(): KeptFocus? {
+        val active = document.activeElement as? HTMLElement ?: return null
+        if (active == document.body || !root.contains(active)) return null
+        val els = focusables()
+        val index = els.indexOf(active).takeIf { it >= 0 } ?: return null
+        val key = focusKeys(candidates(els))[index]
+        val d: dynamic = active
+        val typing = d.value is String && d.selectionStart != null && d.type != "checkbox" && d.type != "radio"
+        return KeptFocus(key, if (typing) d.value as String else null, if (typing) d.selectionStart as Int else null,
+            if (typing) d.selectionEnd as Int else null, window.scrollY)
+    }
+
+    private fun restoreFocus(kept: KeptFocus) {
+        val els = focusables()
+        val target = focusTarget(kept.key, candidates(els)) ?: return
+        val el = els[target]
+        val d: dynamic = el
+        // Text typed into the focused field survives the redraw (other fields are rebuilt from state, as before).
+        if (kept.value != null && d.value is String && d.value != kept.value) d.value = kept.value
+        el.focus()
+        if (kept.start != null && kept.end != null) try { d.setSelectionRange(kept.start, kept.end) } catch (e: Throwable) { }
+        window.scrollTo(window.scrollX, kept.scrollY)
     }
 
     /** True if the address held a verify or item link: it is dispatched and the address is replaced by the page's own (ADR 0062). */
