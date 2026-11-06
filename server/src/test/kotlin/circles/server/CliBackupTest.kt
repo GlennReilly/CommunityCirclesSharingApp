@@ -58,7 +58,7 @@ class CliBackupTest {
         assertEquals(EXIT_OK, made.code, made.err)
         assertTrue(made.out.contains("and 2 blobs to"), made.out)
         val file = onlyZip(folder)
-        assertTrue(file.fileName.toString().startsWith("circles-backup-"))
+        assertTrue(file.fileName.toString().startsWith("lendger-backup-"))
 
         val verified = run(null, "verify", file.toString())
         assertEquals(EXIT_OK, verified.code, verified.err)
@@ -87,7 +87,7 @@ class CliBackupTest {
         val forced = run(target, "restore", file.toString(), "--force")
         assertEquals(EXIT_OK, forced.code, forced.err)
         assertTrue(forced.out.contains("Moved aside, not deleted:"), forced.out)
-        assertTrue(Files.list(target).use { s -> s.anyMatch { it.fileName.toString().startsWith("circles.db.before-restore-") } })
+        assertTrue(Files.list(target).use { s -> s.anyMatch { it.fileName.toString().startsWith("lendger.db.before-restore-") } })
     }
 
     @Test

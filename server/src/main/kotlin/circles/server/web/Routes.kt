@@ -76,7 +76,7 @@ import kotlinx.serialization.builtins.ListSerializer
 /** Health check body. */
 const val HEALTHY_BODY = "ok"
 const val READY_BODY = "ready"
-const val SERVER_NAME = "circles-server"
+const val SERVER_NAME = "lendger-server"
 const val SERVER_VERSION = "0.5.0-M5"
 private const val BEARER_PREFIX = "Bearer "
 private const val LOGGED_FRAMES = 5

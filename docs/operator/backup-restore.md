@@ -8,12 +8,12 @@ Treat the files as private. The tool writes them readable by their owner only. T
 
 ## Automatic backups
 
-- **Every day.** With `CIRCLES_BACKUP_INTERVAL_HOURS=24` and `CIRCLES_BACKUP_DIR` set, the running server writes `scheduled-<time>.zip` into that folder every 24 hours and keeps the newest `CIRCLES_BACKUP_KEEP` (7 by default). The first one is written one interval after the server starts, not at start-up. Other files in that folder are never deleted.
+- **Every day.** With `LENDGER_BACKUP_INTERVAL_HOURS=24` and `LENDGER_BACKUP_DIR` set, the running server writes `scheduled-<time>.zip` into that folder every 24 hours and keeps the newest `LENDGER_BACKUP_KEEP` (7 by default). The first one is written one interval after the server starts, not at start-up. Other files in that folder are never deleted.
 - **Before every upgrade.** `migrate` writes `pre-migrate-from-v<N>-<time>.zip` first, and refuses to change anything if it cannot ([upgrade.md](upgrade.md)).
-- **Where the folder is matters.** A backup on the same disk as the data is lost with it. Point `CIRCLES_BACKUP_DIR` at a different disk or a mounted network drive, and also copy the files off the machine regularly, for example:
+- **Where the folder is matters.** A backup on the same disk as the data is lost with it. Point `LENDGER_BACKUP_DIR` at a different disk or a mounted network drive, and also copy the files off the machine regularly, for example:
 
 ```bash
-rsync -a /srv/circles-backups/ backup-server:/srv/backups/circles/        # every night, from cron
+rsync -a /srv/lendger-backups/ backup-server:/srv/backups/circles/        # every night, from cron
 ```
 
 ## Making a backup by hand
@@ -22,17 +22,17 @@ It is safe while the server is running and takes a few seconds (about 6 seconds 
 
 ```bash
 # Docker:
-docker compose -f deploy/compose.yaml exec circles java -Xmx256m -jar /app/circles-server.jar backup /backups
+docker compose -f deploy/compose.yaml exec lendger java -Xmx256m -jar /app/lendger-server.jar backup /backups
 # Plain jar:
-sudo -u circles env $(cat /etc/circles/circles.env | xargs) java -jar /opt/circles/circles-server.jar backup /srv/circles-backups
+sudo -u lendger env $(cat /etc/lendger/lendger.env | xargs) java -jar /opt/lendger/lendger-server.jar backup /srv/lendger-backups
 ```
 
-It prints the file it wrote, `circles-backup-<time>.zip`. It never overwrites an existing file, and if a photo is missing on disk it stops with an error instead of making a backup that is quietly incomplete.
+It prints the file it wrote, `lendger-backup-<time>.zip`. It never overwrites an existing file, and if a photo is missing on disk it stops with an error instead of making a backup that is quietly incomplete.
 
 ## Checking a backup
 
 ```bash
-java -jar circles-server.jar verify circles-backup-20261103024657.zip
+java -jar lendger-server.jar verify lendger-backup-20261103024657.zip
 ```
 
 `verify` does not need a database or a running server and can be run on another machine. It checks every checksum, that nothing extra is in the file, that the database opens and passes SQLite's own integrity check, and that this server is not older than the backup. It reports every problem it finds. On success it prints `OK: backup of schema 7 with N blobs`. Run it on your newest backup now and then.
@@ -45,9 +45,9 @@ Restoring replaces the server's data with the backup's, so **stop the server fir
 
 ```bash
 # Docker, with the backup file in the folder mounted at /backups:
-docker compose -f deploy/compose.yaml run --rm circles restore /backups/circles-backup-20261103024657.zip
+docker compose -f deploy/compose.yaml run --rm lendger restore /backups/lendger-backup-20261103024657.zip
 # Plain jar:
-java -jar circles-server.jar restore circles-backup-20261103024657.zip
+java -jar lendger-server.jar restore lendger-backup-20261103024657.zip
 ```
 
 Then start the server. Members' devices reconnect on their own, using the same web address.
@@ -55,10 +55,10 @@ Then start the server. Members' devices reconnect on their own, using the same w
 **On a host that already has data**, `restore` refuses and says so. Add `--force`:
 
 ```bash
-java -jar circles-server.jar restore circles-backup-20261103024657.zip --force
+java -jar lendger-server.jar restore lendger-backup-20261103024657.zip --force
 ```
 
-With `--force` nothing is deleted. The existing database is renamed to `circles.db.before-restore-<time>` (with its `-wal` and `-shm` files) and the existing `blobs/` folder to `blobs.before-restore-<time>`, and the command prints what it moved. Delete them yourself when you are satisfied.
+With `--force` nothing is deleted. The existing database is renamed to `lendger.db.before-restore-<time>` (with its `-wal` and `-shm` files) and the existing `blobs/` folder to `blobs.before-restore-<time>`, and the command prints what it moved. Delete them yourself when you are satisfied.
 
 **If the backup is from an older version** (for example the `pre-migrate-...` file taken before an upgrade), `restore` puts it back as it was and tells you to run `migrate` next, which will take its own backup first. A backup from a **newer** version than your server is refused: install the newer server.
 
@@ -71,7 +71,7 @@ If anything is wrong with the file, `restore` says what and changes nothing: it 
 A backup you have never restored is a hope, not a backup. On a spare machine (or a second Docker project), restore your latest backup into an empty folder, start the server, and check `list` shows your circle with the event count you expect. Then throw the spare away.
 
 ```bash
-java -jar circles-server.jar list          # circle id, date created, events, devices, stewards
+java -jar lendger-server.jar list          # circle id, date created, events, devices, stewards
 ```
 
 ## How big and how long

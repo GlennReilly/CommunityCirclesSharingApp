@@ -1,14 +1,14 @@
-# Circles: implementation spec for Claude Code
+# Lendger: implementation spec for Claude Code
 
 Status: draft v0.2, 2026-11-02. Read `community-sharing-app-design.md` first for rationale. This document says what to build. Where it says "decide", pick the simplest option that meets the constraints and record the choice in `docs/adr/` as a short ADR (`NNNN-slug.md`, with a `README.md` index and a `template.md`).
 
 M1 amendments (2026-11-02, ADRs 0010-0014): `UNIQUE(device, ctr)` and the counter check are dropped; `events` gains `v`; `stewards` and `invites` tables; `POST /circles` for `circle.create`; `v = 0` is the plaintext development payload format used until M2; JVM crypto is the JDK plus BouncyCastle.
-M2 amendments (2026-11-02, ADRs 0018-0021): encryption is a separate `Cipher` interface (libsodium on JS, lazysodium in JVM tests only); the associated data of a sealed payload excludes `nonce` as well as `encrypted` and `sig`; the first circle key is epoch 1 and epoch 0 means "no key"; `key.wrap` public is `{device, epoch, wrapped}` with `wrapped` bound to circle and epoch; the server stores `current_epoch` per circle (migration V2) and refuses `v = 0` unless `CIRCLES_ALLOW_PLAINTEXT_DEV=true`; Shamir is our own implementation (ADR 0020).
+M2 amendments (2026-11-02, ADRs 0018-0021): encryption is a separate `Cipher` interface (libsodium on JS, lazysodium in JVM tests only); the associated data of a sealed payload excludes `nonce` as well as `encrypted` and `sig`; the first circle key is epoch 1 and epoch 0 means "no key"; `key.wrap` public is `{device, epoch, wrapped}` with `wrapped` bound to circle and epoch; the server stores `current_epoch` per circle (migration V2) and refuses `v = 0` unless `LENDGER_ALLOW_PLAINTEXT_DEV=true`; Shamir is our own implementation (ADR 0020).
 M3-prep amendment (2026-11-03, ADR 0024): the plaintext `v = 0` format is gone; `v = 1` is the only format, `EventAuthor` always seals, and the server no longer reads any secret part (so it no longer length-checks notes and labels).
 Items and loans (2026-11-03, ADR 0025): payload fields and folding rules for `item.upsert/retire/detail` and `loan.request/respond/handover/return`, with item detail keys wrapped to the owner's and the approved borrower's devices; the server only requires an empty `public` and a sealed payload.
-Streams and blobs (2026-11-03, ADR 0026): SSE is served in v1 as hints only; blob bytes live under `data/blobs/<circleId>/<aa>/<hash>` with a per-circle quota (`CIRCLES_BLOB_QUOTA_MIB`) and the `blobs` table keyed by `(circle_id, hash)` (migration V4).
+Streams and blobs (2026-11-03, ADR 0026): SSE is served in v1 as hints only; blob bytes live under `data/blobs/<circleId>/<aa>/<hash>` with a per-circle quota (`LENDGER_BLOB_QUOTA_MIB`) and the `blobs` table keyed by `(circle_id, hash)` (migration V4).
 Steward governance (2026-11-03, ADR 0027, supersedes 0022 and 0023): steward changes need a quorum of distinct stewards, set per circle (`stewardQuorum`, `stewardInactiveDays`, `stewardFallbackDelayDays` in `circle.create`, changed by `steward.policy`), with an inactivity fallback; migrations V3 and V5. Client image policy (ADR 0028): resize, re-encode and strip metadata on the device before sealing a blob.
-Export, import and backup (2026-11-03, ADRs 0030 and 0031): `circles-export/1` and `circles-backup/1` are zip files with a manifest and hashes; `verify` reads both; the snapshot uses `VACUUM INTO`; scheduled backups use `CIRCLES_BACKUP_INTERVAL_HOURS` and `CIRCLES_BACKUP_KEEP` instead of `CIRCLES_BACKUP_CRON`; `migrate` takes a full backup first into the required `CIRCLES_BACKUP_DIR` (ADR 0032).
+Export, import and backup (2026-11-03, ADRs 0030 and 0031): `circles-export/1` and `circles-backup/1` are zip files with a manifest and hashes; `verify` reads both; the snapshot uses `VACUUM INTO`; scheduled backups use `LENDGER_BACKUP_INTERVAL_HOURS` and `LENDGER_BACKUP_KEEP` instead of `LENDGER_BACKUP_CRON`; `migrate` takes a full backup first into the required `LENDGER_BACKUP_DIR` (ADR 0032).
 Admin endpoints (2026-11-03, ADR 0033): `/api/v1/admin/export/{circleId}` and `/api/v1/admin/import` are authorised by an Ed25519-signed request header (`Circles-Signature`), with a nonce and a 5-minute window; import proves stewardship from the file itself so a brand-new host can accept it, and a circle the host does not have also needs an operator-issued single-use token (ADR 0034, `import-token`, migration V6).
 Operations (2026-11-03): `deploy/` and `docs/operator/` hold the Dockerfile, compose file, Caddyfile, systemd unit and the install, requirements (measured), backup-restore, upgrade and handover guides; the CLI gains `list`; `bootstrap` is not built because this spec never says what it does.
 Image policy (2026-11-03, ADR 0028): `shared` carries `ImagePolicy` (size limits, scaling, the encode ladders, the metadata scan) for every client to apply before sealing a photo.
@@ -246,7 +246,7 @@ Blobs:
 - `PUT /circles/{id}/blobs/{hash}` ciphertext (<= 2 MiB); server verifies hash of body; `GET` same path.
 
 Joining and admin:
-- `POST /circles` accepts one signed `circle.create` envelope, `{event}`; no session (the founder has none yet). Open by default; `CIRCLES_ALLOW_CREATE=false` closes it (ADR 0014). Answers `201` accepted, `200` duplicate, `422` rejected.
+- `POST /circles` accepts one signed `circle.create` envelope, `{event}`; no session (the founder has none yet). Open by default; `LENDGER_ALLOW_CREATE=false` closes it (ADR 0014). Answers `201` accepted, `200` duplicate, `422` rejected.
 - `POST /circles/{id}/join` accepts a signed `member.join` envelope plus invite proof (public join path; rate limited).
 - `GET /healthz`, `GET /readyz`, `GET /version` (unauthenticated, minimal info).
 - `POST /admin/import` and `GET /admin/export/{circleId}`: authorised by a signed steward request, not by a server password (see 4.5).
@@ -259,8 +259,8 @@ The server filters by circle membership only: an authenticated device receives e
 
 ### 4.5 Export, import, backup (the handover feature)
 
-CLI: `circles-server serve | migrate | backup <dir> | restore <file> | export <circleId> <file> | import <file> | verify <file> | bootstrap`.
-- `backup`: uses the SQLite online backup API, plus blobs, into a single archive with a manifest and checksums. Runs automatically before any migration and optionally on a schedule (`CIRCLES_BACKUP_CRON`).
+CLI: `lendger-server serve | migrate | backup <dir> | restore <file> | export <circleId> <file> | import <file> | verify <file> | bootstrap`.
+- `backup`: uses the SQLite online backup API, plus blobs, into a single archive with a manifest and checksums. Runs automatically before any migration and optionally on a schedule (`LENDGER_BACKUP_CRON`).
 - `restore`: validates the archive, refuses to overwrite a non-empty data directory unless `--force`.
 - `export`: a circle's complete event log and blobs in a documented, versioned format (`circles-export/1`): newline-delimited JSON envelopes plus a manifest. Contains only ciphertext and public keys.
 - `import`: re-validates every signature and rebuilds `devices` and sequence numbers in log order. Idempotent.
@@ -321,15 +321,15 @@ Environment variables (all optional unless stated):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CIRCLES_DATA_DIR` | `./data` | Database, blobs, backups |
-| `CIRCLES_BASE_URL` | required for prod | Public URL; used in invite links |
-| `CIRCLES_BIND` | `0.0.0.0` | Listen address |
-| `CIRCLES_PORT` | `8080` | Listen port |
-| `CIRCLES_LOG_LEVEL` | `info` | Log level; JSON logs to stdout |
-| `CIRCLES_BACKUP_CRON` | unset | Scheduled backups |
-| `CIRCLES_BACKUP_KEEP` | `7` | Backups to retain |
-| `CIRCLES_SMTP_*` | unset | Optional email notifications |
-| `CIRCLES_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` from a reverse proxy |
+| `LENDGER_DATA_DIR` | `./data` | Database, blobs, backups |
+| `LENDGER_BASE_URL` | required for prod | Public URL; used in invite links |
+| `LENDGER_BIND` | `0.0.0.0` | Listen address |
+| `LENDGER_PORT` | `8080` | Listen port |
+| `LENDGER_LOG_LEVEL` | `info` | Log level; JSON logs to stdout |
+| `LENDGER_BACKUP_CRON` | unset | Scheduled backups |
+| `LENDGER_BACKUP_KEEP` | `7` | Backups to retain |
+| `LENDGER_SMTP_*` | unset | Optional email notifications |
+| `LENDGER_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` from a reverse proxy |
 
 TLS: document Caddy as the first-class option (`deploy/Caddyfile`). Do not build ACME in v1.
 

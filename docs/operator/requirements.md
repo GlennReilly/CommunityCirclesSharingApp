@@ -1,4 +1,4 @@
-# What a host needs to run Circles
+# What a host needs to run Lendger
 
 These numbers come from a load test, not from guesses: [`docs/operator/load-test-512mb.md`](load-test-512mb.md) and [`load-test-256mb.md`](load-test-256mb.md) are the raw reports, measured on 2026-11-03 on an Intel Core i7-3770 (2012; 4 cores, 8 threads), 32 GB RAM, Java 21. To repeat the test on your own hardware:
 
@@ -44,8 +44,8 @@ For scale: 300 members each doing something once an hour is about 0.08 writes pe
 ## Disk
 
 - **Database:** about **1.2 KB per event** including its indexes. The 9,600-event circle was 10.8 MiB; after the load test added 6,600 more events it was 17.4 MiB. A circle at one event per member per hour is roughly 1.2 KB x 300 x 24 x 365 = **3 GB a year**, so in practice the photos dominate long before the events do.
-- **Blobs (photos):** whatever members upload, up to `CIRCLES_BLOB_QUOTA_MIB` per circle (256 by default). The test's 600 photos took 146.5 MiB. Clients shrink photos before upload ([ADR 0028](../adr/0028-client-image-policy.md)), so a typical photo is about 150 to 400 KB.
-- **Backups:** a full backup is the database plus every blob (154 MiB for the test circle); keep several, and keep them on another disk (`CIRCLES_BACKUP_DIR` is required, [ADR 0032](../adr/0032-explicit-backup-folder-and-full-pre-migration-backup.md)).
+- **Blobs (photos):** whatever members upload, up to `LENDGER_BLOB_QUOTA_MIB` per circle (256 by default). The test's 600 photos took 146.5 MiB. Clients shrink photos before upload ([ADR 0028](../adr/0028-client-image-policy.md)), so a typical photo is about 150 to 400 KB.
+- **Backups:** a full backup is the database plus every blob (154 MiB for the test circle); keep several, and keep them on another disk (`LENDGER_BACKUP_DIR` is required, [ADR 0032](../adr/0032-explicit-backup-folder-and-full-pre-migration-backup.md)).
 
 ## Network
 

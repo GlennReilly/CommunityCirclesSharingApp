@@ -340,7 +340,7 @@ class LoadTest {
             say()
             val backupDir = Files.createDirectories(work.resolve("backups"))
             val exportFile = work.resolve("circle.zip")
-            val env = mapOf("CIRCLES_DATA_DIR" to dataDir.toString())
+            val env = mapOf("LENDGER_DATA_DIR" to dataDir.toString())
             val backup = timed(jar, heapMb, env, "backup", backupDir.toString())
             val backupFile = Files.list(backupDir).use { it.toList() }.single()
             say("- `backup`: %.1f s, archive %s".format(backup, mib(Files.size(backupFile))))

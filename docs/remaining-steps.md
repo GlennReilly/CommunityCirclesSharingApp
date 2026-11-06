@@ -24,29 +24,29 @@ Full reference: `docs/operator/install.md`. These are the steps for a Docker ins
 
 **Before you start**
 1. Pick a machine: a Raspberry Pi 4 or a small VPS (1 core, 512 MB of memory is enough for 300 members; see `docs/operator/requirements.md`).
-2. Pick a domain name (for example `circles.example.org`). Add a DNS "A" record pointing it at the machine's public address.
+2. Pick a domain name (for example `lendger.example.org`). Add a DNS "A" record pointing it at the machine's public address.
 3. Make sure ports 80 and 443 are open to the internet (router port forwarding at home; the firewall page on a VPS).
 
 **On your development computer** (in `/mnt/2TB_SSD/Dev/ClaudeCodeExperiments/CommunityCirclesSharingApp`)
-4. Build the jar: `./gradlew :server:shadowJar`. It appears at `server/build/libs/circles-server.jar`.
+4. Build the jar: `./gradlew :server:shadowJar`. It appears at `server/build/libs/lendger-server.jar`.
 5. Copy the `deploy/` folder and that jar to the machine (for example with `scp`), keeping the same folder layout.
 
 **On the machine** (Docker with the Compose plugin installed)
 6. Make a folder for backups, ideally on another disk:
-   `sudo mkdir -p /srv/circles-backups && sudo chown 10001:10001 /srv/circles-backups`
+   `sudo mkdir -p /srv/lendger-backups && sudo chown 10001:10001 /srv/lendger-backups`
 7. In the folder that holds `deploy/`, create a file called `.env` with these lines (use your own domain):
    ```
-   BACKUP_DIR_ON_HOST=/srv/circles-backups
-   CIRCLES_DOMAIN=circles.example.org
-   CIRCLES_TRUST_PROXY=true
+   BACKUP_DIR_ON_HOST=/srv/lendger-backups
+   LENDGER_DOMAIN=lendger.example.org
+   LENDGER_TRUST_PROXY=true
    ```
 8. Start it with the certificate proxy: `docker compose -f deploy/compose.yaml --profile tls up -d --build`
 9. Wait about 30 seconds, then check: `docker compose -f deploy/compose.yaml ps` (the circles service says "healthy").
-10. From any computer, open `https://circles.example.org/healthz`. It should say `ok`, and the browser should show a padlock with no warning.
+10. From any computer, open `https://lendger.example.org/healthz`. It should say `ok`, and the browser should show a padlock with no warning.
 
 **Prove the basics**
-11. Open `https://circles.example.org` and choose **Start a circle**. Pick a passphrase of at least 12 characters. You should land on **Circle home**.
-12. Backups: run `docker compose -f deploy/compose.yaml exec circles java -Xmx256m -jar /app/circles-server.jar backup /backups` if you want to force one now (the folder inside the container is the one you mapped). Then look in `/srv/circles-backups` for a new file.
+11. Open `https://lendger.example.org` and choose **Start a circle**. Pick a passphrase of at least 12 characters. You should land on **Circle home**.
+12. Backups: run `docker compose -f deploy/compose.yaml exec lendger java -Xmx256m -jar /app/lendger-server.jar backup /backups` if you want to force one now (the folder inside the container is the one you mapped). Then look in `/srv/lendger-backups` for a new file.
 13. Restore test (do this once; it is the thing you will be glad of later): follow `docs/operator/backup-restore.md`, section "Practice once", on a spare folder or machine. Write down how long it took.
 14. Reboot the machine. After it is back, step 10 should work again with no action from you.
 
@@ -59,7 +59,7 @@ Full reference: `docs/operator/install.md`. These are the steps for a Docker ins
 You need two devices that can both open your host: **Phone A** (the one you are testing) and **Device B** (a second phone or a laptop) so there are two members.
 
 **Set up two members**
-1. On Device B, open `https://circles.example.org`, **Start a circle**, and sign in. This is the founder.
+1. On Device B, open `https://lendger.example.org`, **Start a circle**, and sign in. This is the founder.
 2. On Device B go to **Members**, tap **Invite**, then **Copy** the link. Send it to Phone A (a message to yourself works; the link holds a secret, so delete it afterwards).
 3. On Phone A open the link, choose a passphrase, and **Join**. Phone A now says it is waiting.
 4. On Device B, **Members** now shows Phone A's person under "waiting". Tap **Let in**. Sync both (the circular arrows at the top right).
@@ -85,7 +85,7 @@ You need two devices that can both open your host: **Phone A** (the one you are 
 7. Phone A: **Items**, ask to borrow it, then **Borrow**: check the request shows under "waiting".
 8. Device B: **Borrow**, approve it. Then mark it handed over. Phone A confirms. Then return it and confirm the return. Every step should appear on the other device within a couple of seconds without pressing Sync (live updates); if it takes longer, note it.
 
-**QR codes** (uses the phone's normal camera app; there is no scanner inside Circles)
+**QR codes** (uses the phone's normal camera app; there is no scanner inside Lendger)
 9. Device B: **Members**, open "Show my QR code". Hold Phone A's camera at it. The phone should offer to open a link ending in `#/verify/...`. Open it: the page should say the fingerprint **matches**.
 10. Make a doctored check: on Phone A change one character in that link in the address bar and open it. It should say it does **not** match.
 11. Device B: **Items**, open an item, tap **Print a tag**, then **Print this tag** (print to paper or "Save as PDF"). Scan the printed tag with Phone A: it should open the Items page showing only that item.
@@ -93,7 +93,7 @@ You need two devices that can both open your host: **Phone A** (the one you are 
 **Slow network and offline**
 12. On Phone A switch on airplane mode. Add an item. The header should say changes are waiting. Switch airplane mode off: it should sync by itself within about a minute (or press Sync now).
 13. On Phone A, in the browser menu choose **Install app** or **Add to Home Screen**. Open it from the home screen: it should open with a spinner and then the sign-in page.
-14. If you can, set the phone to a poor connection (mobile data with one bar) and load the site fresh: it should show the spinner and "Opening Circles", then work. Note how many seconds it took.
+14. If you can, set the phone to a poor connection (mobile data with one bar) and load the site fresh: it should show the spinner and "Opening Lendger", then work. Note how many seconds it took.
 
 **Done when:** every row above was tried and you wrote down anything that was hard to read, hard to tap, slow or confusing.
 

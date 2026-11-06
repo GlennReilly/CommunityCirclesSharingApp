@@ -18,7 +18,7 @@ const has = (c, s) => `document.getElementById("app").innerText.includes(${JSON.
 async function syncUntil(c, expr, what, ms = 25000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await click(c, 'sync'); await sleep(1500); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
 let step = 0; const ok = m => console.log(`ok ${++step}: ${m}`);
 try {
-  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Circles'), 'welcome page');
+  await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Lendger'), 'welcome page');
   if (await alice.evaluate('document.querySelectorAll("form, button").length') !== 0) throw new Error('the welcome page has a form or button');
   ok('welcome page offers choices only (no form, no button)');
   await checkAccessibility(alice, 'welcome page');

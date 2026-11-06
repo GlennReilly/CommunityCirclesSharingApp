@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
-const jar = process.env.CIRCLES_JAR ?? join(dirname(fileURLToPath(import.meta.url)), '../../server/build/libs/circles-server.jar');
+const jar = process.env.LENDGER_JAR ?? join(dirname(fileURLToPath(import.meta.url)), '../../server/build/libs/lendger-server.jar');
 
 export async function startServer(port = 18081) {
   const data = mkdtempSync(join(tmpdir(), 'circles-smoke-'));
-  const proc = spawn('java', ['-jar', jar, 'serve'], { env: { ...process.env, CIRCLES_DATA_DIR: data, CIRCLES_BIND: '127.0.0.1', CIRCLES_RATE_LIMIT: 'false', CIRCLES_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn('java', ['-jar', jar, 'serve'], { env: { ...process.env, LENDGER_DATA_DIR: data, LENDGER_BIND: '127.0.0.1', LENDGER_RATE_LIMIT: 'false', LENDGER_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; proc.stdout.on('data', d => log += d); proc.stderr.on('data', d => log += d);
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch {} await sleep(250); }
   proc.once('exit', () => rmSync(data, { recursive: true, force: true }));

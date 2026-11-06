@@ -1,4 +1,4 @@
-# Running a Circles host
+# Running a Lendger host
 
 For the person who looks after the server. You do not need to read the code. Read in this order the first time:
 

@@ -1272,7 +1272,7 @@ class ShellViewTest {
     @Test fun theBorrowPageShowsWhenThingsAreDueAndTheOwnerGetsAnInPersonNudgeOnlyWhenLate() {
         val late = loan("a", LoanRole.OWNER, LoanStatus.ACTIVE, mine = true, theirs = true)
         val html = render(open(home(people = listOf(MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "ab12 cd34"))).copy(loans = listOf(late), today = 20_763)).copy(screen = Screen.Borrow))
-        assertTrue("Back was expected 1 day ago" in html && "Ask them to return it" in html && "ab12 cd34" in html && "Circles sends nothing" in html)
+        assertTrue("Back was expected 1 day ago" in html && "Ask them to return it" in html && "ab12 cd34" in html && "Lendger sends nothing" in html)
         val notYet = render(open(home().copy(loans = listOf(late), today = 20_761)).copy(screen = Screen.Borrow))
         assertTrue("Due back in 1 day" in notYet)
         assertFalse("Ask them to return it" in notYet)
@@ -1365,7 +1365,7 @@ class ShellViewTest {
     @Test fun anItemTagHasTheNameAQrCodeAPrintButtonAndNoPrintedControls() {
         val item = ItemSummary(ladder.item, "Ladder", ItemClass.EVERYDAY, me, true, null)
         val html = render(open(home(items = listOf(item))).copy(screen = Screen.ItemTag, tagging = ladder.item, origin = "https://circles.example"))
-        assertTrue("""<div class="tag">""" in html && "<h2>Ladder</h2>" in html && "QR code that opens Ladder in Circles" in html)
+        assertTrue("""<div class="tag">""" in html && "<h2>Ladder</h2>" in html && "QR code that opens Ladder in Lendger" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_PRINT"""" in html && """class="no-print"""" in html)
         assertTrue("not on the list any more" in render(open(home()).copy(screen = Screen.ItemTag, tagging = ladder.item)))
         assertTrue("""$ATTR_ACTION="$ACTION_TAG_ITEM"""" in render(open(home(items = listOf(item))).copy(screen = Screen.Items)), "owners can print a tag")

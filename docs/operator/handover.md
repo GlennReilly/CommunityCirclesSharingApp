@@ -14,7 +14,7 @@ Moving the web address is the easiest way to keep members connected: point the s
 ## First: find the circle's id
 
 ```bash
-java -jar circles-server.jar list
+java -jar lendger-server.jar list
 # circle id                         created     events  devices  stewards
 # 3f9a...                           2026-10-01    9603      300         5
 ```
@@ -24,13 +24,13 @@ java -jar circles-server.jar list
 1. Install the new host ([install.md](install.md)) and run `migrate` once so it has an empty database.
 2. On the **old** host (works while it is running):
    ```bash
-   java -jar circles-server.jar export <circleId> circle.zip
-   java -jar circles-server.jar verify circle.zip          # prints OK: N events and M blobs ...
+   java -jar lendger-server.jar export <circleId> circle.zip
+   java -jar lendger-server.jar verify circle.zip          # prints OK: N events and M blobs ...
    ```
 3. Copy `circle.zip` to the new host (a circle of 300 members with 150 MiB of photos is a file of about 150 MiB).
 4. On the **new** host:
    ```bash
-   java -jar circles-server.jar import circle.zip
+   java -jar lendger-server.jar import circle.zip
    ```
    It re-checks every event with the circle's own rules before and while writing, so a damaged or tampered file is refused. It prints `Imported N new events ... and M new blobs ...`. Running it again is harmless, and a later, bigger export extends an earlier import.
 5. Switch the web address to the new host. Members' devices reconnect.
@@ -44,7 +44,7 @@ This lets a steward bring a circle onto your host without you handling the file,
 
 1. You decide the circle may come, and make a one-time token for it:
    ```bash
-   java -jar circles-server.jar import-token <circleId> --hours 24
+   java -jar lendger-server.jar import-token <circleId> --hours 24
    ```
    Send the printed token to the steward over a private channel. It works **once**, for **that circle only**, and expires.
 2. The steward's app exports the circle from the old host (their signed request) and sends it to your host with the token.
@@ -57,7 +57,7 @@ The host must be reached over HTTPS, because the token travels in a header.
 Install a new host, stop it if it started, and restore ([backup-restore.md](backup-restore.md)):
 
 ```bash
-java -jar circles-server.jar restore circles-backup-<time>.zip
+java -jar lendger-server.jar restore lendger-backup-<time>.zip
 ```
 
 Point the web address at the new host. Anything sent after the backup was taken is still on members' devices and arrives again when they sync.
@@ -67,8 +67,8 @@ Point the web address at the new host. Anything sent after the backup was taken 
 Any member's device holds the circle's whole history. Using the same file format as above (`circles-export/1`), a member's app can export what it has, and you import it like in step A:
 
 ```bash
-java -jar circles-server.jar verify circle-from-member.zip
-java -jar circles-server.jar import circle-from-member.zip
+java -jar lendger-server.jar verify circle-from-member.zip
+java -jar lendger-server.jar import circle-from-member.zip
 ```
 
 Pick the member whose app was most recently up to date. The format and the import are ready and tested; the app's "export circle" button is not built yet, so for now this path needs a developer to produce the file.

@@ -1,5 +1,5 @@
 // The service worker in a real Chrome (ADR 0041): offline load, then a new version waits for "Update now".
-// Serves a temporary copy of web/build/dist/web with a tiny static server, so it needs no Circles server.
+// Serves a temporary copy of web/build/dist/web with a tiny static server, so it needs no Lendger server.
 import { createServer } from 'node:http';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,7 +28,7 @@ const close = (s) => new Promise((r) => { s.closeAllConnections?.(); s.close(r);
 
 let step = 0; const ok = (m) => console.log(`ok ${++step}: ${m}`);
 async function until(c, expr, what, ms = 15000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if ((await c.evaluate(expr)) === true) return; await sleep(200); } throw new Error('timeout: ' + what + '\n' + await c.evaluate('document.body.innerText')); }
-const welcome = 'document.body.innerText.includes("Welcome to Circles")';
+const welcome = 'document.body.innerText.includes("Welcome to Lendger")';
 
 let server = await open();
 const chrome = await startChrome(9335);

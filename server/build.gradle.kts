@@ -61,9 +61,9 @@ tasks.run {
     classpath(webDistParent)
 }
 
-// One runnable jar with everything inside (ADR 0017): java -jar server/build/libs/circles-server.jar serve
+// One runnable jar with everything inside (ADR 0017): java -jar server/build/libs/lendger-server.jar serve
 tasks.shadowJar {
-    archiveBaseName = "circles-server"
+    archiveBaseName = "lendger-server"
     archiveClassifier = ""
     archiveVersion = ""
     mergeServiceFiles()

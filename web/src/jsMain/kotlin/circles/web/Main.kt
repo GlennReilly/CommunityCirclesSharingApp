@@ -127,7 +127,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         root.clear()
         root.append { div { shell(state) } }
         val due = (state.model as? AppModel.Open)?.let { dueCount(it.home) } ?: 0
-        document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Circles" else "${state.screen.title} - Circles"
+        document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Lendger" else "${state.screen.title} - Lendger"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
         loadImages()
     }
@@ -208,7 +208,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         val replica = when (val opened = IndexedDbReplica.open({ it.eventId(crypto) })) {
             is IdbOpenResult.Opened -> opened.replica
             is IdbOpenResult.Unavailable -> {
-                dispatch(AppAction.Notice("This browser cannot keep your data (${opened.reason}), so Circles cannot run here."))
+                dispatch(AppAction.Notice("This browser cannot keep your data (${opened.reason}), so Lendger cannot run here."))
                 return
             }
         }
@@ -516,7 +516,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
                     UnlockResult.NoIdentity -> dispatch(AppAction.Notice("There is nothing saved on this device."))
-                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Circles (${result.reason})."))
+                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Lendger (${result.reason})."))
                 }
             }
         }
@@ -624,7 +624,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_UNLOCK_PASSKEY -> when (val result = circleApp?.unlockWithPasskey()) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
-                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Circles (${result.reason})."))
+                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Lendger (${result.reason})."))
                     else -> dispatch(AppAction.Notice("That did not unlock it. Try again, or type your passphrase."))
                 }
                 ACTION_PASSKEY_ON -> dispatch(
@@ -633,7 +633,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             circles.keys.PasskeyResult.Done -> "Done. Next time you can unlock with this device."
                             circles.keys.PasskeyResult.NotUnlocked -> "Unlock with your passphrase first."
                             else ->
-                                if (Regex("""^[0-9.]+$|:""").containsMatchIn(window.location.hostname)) "Passkeys need Circles to be opened by a name such as circles.example.org, not by a number like ${window.location.hostname}. Nothing changed; your passphrase still works."
+                                if (Regex("""^[0-9.]+$|:""").containsMatchIn(window.location.hostname)) "Passkeys need Lendger to be opened by a name such as circles.example.org, not by a number like ${window.location.hostname}. Nothing changed; your passphrase still works."
                                 else "This browser or device could not set that up, so nothing changed. Your passphrase still works."
                         },
                     ),

@@ -165,7 +165,7 @@ class AdminService(
     }
 
     private companion object {
-        const val NEEDS_TOKEN = "a circle this host does not have yet needs an import token from the host operator (circles-server import-token)"
+        const val NEEDS_TOKEN = "a circle this host does not have yet needs an import token from the host operator (lendger-server import-token)"
         val REGISTERING = setOf(EventType.CIRCLE_CREATE.wire, EventType.MEMBER_JOIN.wire, EventType.DEVICE_ADD.wire)
     }
 }

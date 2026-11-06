@@ -25,12 +25,12 @@ class ServerProcess(jar: Path, val dataDir: Path, heapMb: Int, extraEnv: Map<Str
         val builder = ProcessBuilder("java", "-Xmx${heapMb}m", "-jar", jar.toString(), "serve")
         builder.environment().putAll(
             mapOf(
-                "CIRCLES_DATA_DIR" to dataDir.toString(),
-                "CIRCLES_PORT" to port.toString(),
-                "CIRCLES_BIND" to "127.0.0.1",
-                "CIRCLES_RATE_LIMIT" to "false",
-                "CIRCLES_BLOB_QUOTA_MIB" to "4096",
-                "CIRCLES_LOG_LEVEL" to "warn",
+                "LENDGER_DATA_DIR" to dataDir.toString(),
+                "LENDGER_PORT" to port.toString(),
+                "LENDGER_BIND" to "127.0.0.1",
+                "LENDGER_RATE_LIMIT" to "false",
+                "LENDGER_BLOB_QUOTA_MIB" to "4096",
+                "LENDGER_LOG_LEVEL" to "warn",
             ) + extraEnv,
         )
         builder.redirectErrorStream(true)

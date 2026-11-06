@@ -130,7 +130,7 @@ class CliTest {
 
     @Test
     fun serveHonoursTheLogLevelAndPassesTheNewSettingsOn() {
-        val quiet = run("serve", env = mapOf(ENV_DATA_DIR to tempDir().toString(), "CIRCLES_LOG_LEVEL" to "warn", "CIRCLES_RATE_LIMIT" to "false", "CIRCLES_TRUST_PROXY" to "true"))
+        val quiet = run("serve", env = mapOf(ENV_DATA_DIR to tempDir().toString(), "LENDGER_LOG_LEVEL" to "warn", "LENDGER_RATE_LIMIT" to "false", "LENDGER_TRUST_PROXY" to "true"))
         assertEquals(EXIT_OK, quiet.code, quiet.err)
         assertEquals("", quiet.out.trim(), "info lines must be dropped at level warn")
         assertEquals(false, quiet.launched?.rateLimit)
@@ -139,9 +139,9 @@ class CliTest {
 
     @Test
     fun anUnknownLogLevelIsAUsageError() {
-        val r = run("serve", env = mapOf(ENV_DATA_DIR to tempDir().toString(), "CIRCLES_LOG_LEVEL" to "loud"))
+        val r = run("serve", env = mapOf(ENV_DATA_DIR to tempDir().toString(), "LENDGER_LOG_LEVEL" to "loud"))
         assertEquals(EXIT_USAGE, r.code)
-        assertTrue(r.err.contains("CIRCLES_LOG_LEVEL"))
+        assertTrue(r.err.contains("LENDGER_LOG_LEVEL"))
         assertNull(r.launched)
     }
 }

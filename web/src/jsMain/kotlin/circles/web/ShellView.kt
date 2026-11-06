@@ -159,7 +159,7 @@ const val ATTR_HASH = "data-hash"
 const val ATTR_EPOCH_OF = "data-photo-epoch"
 const val ACTION_TOGGLE_SECRET = "toggle-secret"
 const val ATTR_TARGET = "data-target"
-const val USERNAME_FOR_PASSWORD_MANAGERS = "Circles on this device"
+const val USERNAME_FOR_PASSWORD_MANAGERS = "Lendger on this device"
 const val FORM_SKILL_ADD = "skill-add-form"
 const val FORM_SKILL_EDIT = "skill-edit-form"
 const val FIELD_SKILL_NAME = "skill-name"
@@ -251,7 +251,7 @@ fun FlowContent.shell(state: AppState) {
         // The app's name is not a heading: each page has exactly one h1 of its own.
         p {
             classes = setOf("app-name")
-            +"Circles"
+            +"Lendger"
         }
         div {
             id = "sync-status"
@@ -306,7 +306,7 @@ fun FlowContent.shell(state: AppState) {
         attributes["tabindex"] = "-1"
         when (val model = state.model) {
             AppModel.Loading -> {
-                h1 { +"Circles" }
+                h1 { +"Lendger" }
                 p {
                     classes = setOf("loading")
                     attributes["role"] = "status"
@@ -394,7 +394,7 @@ private fun FlowContent.showHideButton(fieldId: String) {
 
 /**
  * Password managers save a password only next to a username. This one is invisible and never changes: the browser then offers
- * to remember the passphrase, which is the user's choice and kept by the browser, not by Circles (ADR 0056).
+ * to remember the passphrase, which is the user's choice and kept by the browser, not by Lendger (ADR 0056).
  */
 private fun FlowContent.usernameForPasswordManagers() {
     input(type = InputType.text, name = "username") {
@@ -428,7 +428,7 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
     if (hint) {
         p {
             id = "passphrase-help"
-            +"At least $MIN_PASSPHRASE_CHARS characters; a few random words is good. Circles never stores it: you type it when you open Circles, or let your browser's password manager fill it in if you choose to save it there. "
+            +"At least $MIN_PASSPHRASE_CHARS characters; a few random words is good. Lendger never stores it: you type it when you open Lendger, or let your browser's password manager fill it in if you choose to save it there. "
             +"It protects your keys on this device, and it cannot be recovered if you forget it."
         }
     } else {
@@ -458,7 +458,7 @@ private fun FlowContent.newcomer(state: AppState) {
 
 private fun FlowContent.welcome() {
     h1 { +Screen.Welcome.title }
-    p { +"Circles is a way for neighbours to share things and skills. Everything is encrypted on your own device." }
+    p { +"Lendger is a way for neighbours to share things and skills. Everything is encrypted on your own device." }
     // Two clear choices, each a button with a line saying who it is for.
     div {
         classes = setOf("choices")
@@ -615,7 +615,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                 if (person.isMe) {
                     details {
                         summary { +"Show my QR code" }
-                        p { +"Let the other person point their phone's camera at this. The link opens in Circles on their phone, where they must be signed in, and it checks your key fingerprint for them." }
+                        p { +"Let the other person point their phone's camera at this. The link opens in Lendger on their phone, where they must be signed in, and it checks your key fingerprint for them." }
                         val link = VerifyLink(home.circle, person.member, Fingerprint.compact(person.fingerprint)).format(state.origin)
                         qrImage(link, "QR code of the link that checks member ${person.member.v.take(MEMBER_SHORT_CHARS)}'s key fingerprint")
                         label {
@@ -1037,7 +1037,7 @@ private fun FlowContent.borrow(home: HomeData) {
                             summary { +"Ask them to return it" }
                             p {
                                 val fingerprint = home.people.firstOrNull { it.member == loan.other }?.fingerprint ?: "not known yet"
-                                +"Ask ${who(loan)} in person, or wherever your group talks: Circles sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
+                                +"Ask ${who(loan)} in person, or wherever your group talks: Lendger sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
                             }
                         }
                     }
@@ -2370,8 +2370,8 @@ private fun FlowContent.itemTagPage(home: HomeData, state: AppState) {
     div {
         classes = setOf("tag")
         h2 { +item.name }
-        qrImage(ItemLink(item.item).format(state.origin), "QR code that opens ${item.name} in Circles")
-        p { +"Point a phone camera here to see this item in Circles (you need to be signed in)." }
+        qrImage(ItemLink(item.item).format(state.origin), "QR code that opens ${item.name} in Lendger")
+        p { +"Point a phone camera here to see this item in Lendger (you need to be signed in)." }
     }
     button(type = ButtonType.button) {
         classes = setOf("no-print")

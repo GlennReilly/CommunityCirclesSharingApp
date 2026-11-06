@@ -35,11 +35,11 @@ class WebAuthnPasskeys(private val randomBytes: (Int) -> ByteString) : PasskeyPr
             val options = js("({})")
             val publicKey = js("({})")
             publicKey.challenge = bytes(randomBytes(CHALLENGE_BYTES))
-            publicKey.rp = js("({ name: 'Circles' })")
+            publicKey.rp = js("({ name: 'Lendger' })")
             val user = js("({})")
             user.id = bytes(ByteString.of(device.v.encodeToByteArray()))
-            user.name = "Circles on this device"
-            user.displayName = "Circles on this device"
+            user.name = "Lendger on this device"
+            user.displayName = "Lendger on this device"
             publicKey.user = user
             publicKey.pubKeyCredParams = arrayOf(js("({ type: 'public-key', alg: -7 })"), js("({ type: 'public-key', alg: -257 })"))
             publicKey.authenticatorSelection = js("({ residentKey: 'preferred', userVerification: 'required' })")

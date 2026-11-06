@@ -7,7 +7,7 @@ local.properties
 *.iml
 .DS_Store
 .env
-# Runtime data directory (CIRCLES_DATA_DIR defaults to ./data); anchored so the source package circles.server.data is not ignored.
+# Runtime data directory (LENDGER_DATA_DIR defaults to ./data); anchored so the source package circles.server.data is not ignored.
 /data/
 /server/data/
 node_modules/

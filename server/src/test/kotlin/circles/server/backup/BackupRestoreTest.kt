@@ -32,7 +32,7 @@ import kotlinx.coroutines.runBlocking
 
 /** Server backup and restore (ADR 0031), over real database files. */
 class BackupRestoreTest {
-    private val base: Path = Files.createTempDirectory("circles-backup")
+    private val base: Path = Files.createTempDirectory("lendger-backup")
     private val crypto = JvmCrypto()
     private val clock = MutableClock()
     private val toClose = mutableListOf<AutoCloseable>()
@@ -203,9 +203,9 @@ class BackupRestoreTest {
 
         val forced = assertIs<RestoreResult.Done>(restore(target, file, force = true))
         val movedNames = forced.movedAside.map { it.fileName.toString() }
-        assertTrue(movedNames.any { it.startsWith("circles.db.before-restore-") }, movedNames.toString())
+        assertTrue(movedNames.any { it.startsWith("lendger.db.before-restore-") }, movedNames.toString())
         assertTrue(movedNames.any { it.startsWith("blobs.before-restore-") }, movedNames.toString())
-        val kept = forced.movedAside.first { it.fileName.toString().startsWith("circles.db.before-restore-") }
+        val kept = forced.movedAside.first { it.fileName.toString().startsWith("lendger.db.before-restore-") }
         assertContentEquals(oldDb, Files.readAllBytes(kept), "the old database was moved, not deleted")
         assertEquals(fixture.events.size.toLong(), (dbQuery(target.resolve(Database.FILE_NAME), "SELECT COUNT(*) FROM events")[0][0] as Number).toLong())
         assertTrue(target.resolve("blobs").resolve(fixture.circle.v).exists())

@@ -1,4 +1,4 @@
-# Community sharing network: design doc (working title "Circles")
+# Community sharing network: design doc (working title "Lendger")
 
 Status: draft v0.2, 2026-11-02 (v0.2: `public`/`encrypted` envelope split, optimistic returns, corrected "what the server sees", policy corrections)
 Owner: Glenn

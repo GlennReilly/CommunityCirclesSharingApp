@@ -30,7 +30,7 @@ fun interface RateLimits {
     fun check(bucket: Bucket, key: String): Limit
 }
 
-/** Lets everything through (`CIRCLES_RATE_LIMIT=false`). */
+/** Lets everything through (`LENDGER_RATE_LIMIT=false`). */
 object Unlimited : RateLimits {
     override fun check(bucket: Bucket, key: String): Limit = Limit.Allowed
 }

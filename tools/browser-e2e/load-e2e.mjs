@@ -43,7 +43,7 @@ try {
     await chrome.send('Page.navigate', { url: process.env.DIRECT === '1' ? 'http://127.0.0.1:18083/' : 'http://127.0.0.1:18084/' });
     let ms = null;
     while (Date.now() - started < 120000) {
-      if (await chrome.evaluate(`(document.querySelector('main h1') || {}).textContent === 'Welcome to Circles'`) === true) { ms = Date.now() - started; break; }
+      if (await chrome.evaluate(`(document.querySelector('main h1') || {}).textContent === 'Welcome to Lendger'`) === true) { ms = Date.now() - started; break; }
       await sleep(100);
     }
     const resources = JSON.parse(await chrome.evaluate(`JSON.stringify(performance.getEntriesByType('resource').filter(r => /circles\\.js$/.test(r.name)).map(r => ({ transfer: r.transferSize, decoded: r.decodedBodySize, encoding: r.contentEncoding })))`));

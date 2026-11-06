@@ -55,7 +55,7 @@ private const val MAX_TOKEN_HOURS = 168L
 private const val IMPORT_TOKEN_BYTES = 32
 private const val MILLIS_PER_HOUR = 3_600_000L
 
-private const val USAGE = """Usage: circles-server <command>
+private const val USAGE = """Usage: lendger-server <command>
 
 Commands:
   serve     Start the server (migrates a brand-new database; refuses an old or newer one)
@@ -65,13 +65,13 @@ Commands:
   import <file>              Seed this server from an export; re-checks every event, safe to repeat
   import-token <circleId> [--hours N]   Print a single-use token that lets a steward import that new circle over HTTP (ADR 0034)
   verify <file>              Check an export or a backup without touching any database
-  backup <dir>               Write circles-backup-<time>.zip (database and blobs) into <dir>
+  backup <dir>               Write lendger-backup-<time>.zip (database and blobs) into <dir>
   restore <file> [--force]   Put a backup back (stop the server first); --force moves existing data aside
   help      Show this text
 
-Settings come from the environment: CIRCLES_DATA_DIR, CIRCLES_BIND, CIRCLES_PORT, CIRCLES_ALLOW_CREATE,
-CIRCLES_LOG_LEVEL, CIRCLES_TRUST_PROXY, CIRCLES_RATE_LIMIT, CIRCLES_BLOB_QUOTA_MIB,
-CIRCLES_BACKUP_DIR, CIRCLES_BACKUP_INTERVAL_HOURS, CIRCLES_BACKUP_KEEP (see the README)."""
+Settings come from the environment: LENDGER_DATA_DIR, LENDGER_BIND, LENDGER_PORT, LENDGER_ALLOW_CREATE,
+LENDGER_LOG_LEVEL, LENDGER_TRUST_PROXY, LENDGER_RATE_LIMIT, LENDGER_BLOB_QUOTA_MIB,
+LENDGER_BACKUP_DIR, LENDGER_BACKUP_INTERVAL_HOURS, LENDGER_BACKUP_KEEP (see the README)."""
 
 /** Starts the HTTP server and blocks until it stops. Replaceable so tests need not open a port. */
 fun interface ServerLauncher {
@@ -171,7 +171,7 @@ class Cli(
         if (args.size != 2) return usageError("'backup' takes one folder: backup <dir>")
         val dir = Paths.get(args[1])
         return withConfig { config ->
-            val target = dir.resolve("circles-backup-${fileStamp(clock)}.zip")
+            val target = dir.resolve("lendger-backup-${fileStamp(clock)}.zip")
             when (val result = BackupService(config.dataDir, crypto).backup(target)) {
                 is BackupResult.Done -> out.println("Backed up the database (schema ${result.schemaVersion}) and ${result.blobs} blobs to $target.").let { EXIT_OK }
                 is BackupResult.Failed -> result.problems.forEach { err.println("problem: $it") }.let { EXIT_FAILURE }

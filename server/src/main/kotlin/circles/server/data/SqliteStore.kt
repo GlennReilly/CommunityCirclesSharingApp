@@ -34,7 +34,7 @@ private const val FIRST_SEQ = 1L
 
 /** Opens SQLite databases the way the server wants them: WAL for files, immediate write transactions. */
 object Database {
-    const val FILE_NAME = "circles.db"
+    const val FILE_NAME = "lendger.db"
 
     /** A database file inside [dataDir] (created if needed). */
     fun openFile(dataDir: Path): Connection {

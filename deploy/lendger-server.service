@@ -1,17 +1,17 @@
 # systemd unit for running the jar directly (see docs/operator/install.md).
 # Install: copy to /etc/systemd/system/, create the user and folders, edit the paths, then
-#   systemctl daemon-reload && systemctl enable --now circles-server
+#   systemctl daemon-reload && systemctl enable --now lendger-server
 [Unit]
-Description=Circles server
+Description=Lendger server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=circles
-Group=circles
-# Settings live in /etc/circles/circles.env (one NAME=value per line); see docs/operator/install.md.
-EnvironmentFile=/etc/circles/circles.env
-ExecStart=/usr/bin/java -Xmx256m -jar /opt/circles/circles-server.jar serve
+User=lendger
+Group=lendger
+# Settings live in /etc/lendger/lendger.env (one NAME=value per line); see docs/operator/install.md.
+EnvironmentFile=/etc/lendger/lendger.env
+ExecStart=/usr/bin/java -Xmx256m -jar /opt/lendger/lendger-server.jar serve
 Restart=on-failure
 RestartSec=5
 
@@ -24,7 +24,7 @@ PrivateDevices=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=/var/lib/circles /srv/circles-backups
+ReadWritePaths=/var/lib/lendger /srv/lendger-backups
 LimitNOFILE=4096
 
 [Install]

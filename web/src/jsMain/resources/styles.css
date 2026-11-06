@@ -1,4 +1,4 @@
-/* Circles: one stylesheet, system fonts and colours, light and dark. Layout follows common app conventions (ADR 0057):
+/* Lendger: one stylesheet, system fonts and colours, light and dark. Layout follows common app conventions (ADR 0057):
    a header bar, a navigation bar, a notice banner and a centred content column; forms stack labels above full-width fields;
    lists of things are cards; the main action of a form is the one filled button. */
 :root {

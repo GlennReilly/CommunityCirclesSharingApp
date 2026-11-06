@@ -24,7 +24,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 |---|---|---|
 | Config events (ADR 0051) and the owner's minimum tier on the item form | M | Lets the pilot tune thresholds without a release. |
 | ~~Photos on items~~ | done (ADR 0060) | Up to 3 per item, thumbnails in the list; the browser export now carries the sealed photos (up to 200 MiB, any that cannot be fetched are counted in the notice). |
-| ~~QR codes: member fingerprint check and item tags~~ | done (ADR 0062) | Read with the phone camera app; there is no scanner inside Circles. |
+| ~~QR codes: member fingerprint check and item tags~~ | done (ADR 0062) | Read with the phone camera app; there is no scanner inside Lendger. |
 | ~~`standing.note` contribution events~~ | done (ADR 0053) | The sponsor nudge for upheld damage disputes was already in (ADR 0043). |
 | ~~Passkey (WebAuthn PRF) unlock~~ | done (ADR 0063) | Tried only with Chrome's virtual authenticator: try a real phone, laptop or security key. |
 | ~~Appearance settings (text size, colours)~~ | done | Standard, large, largest text and light, dark or device colours, kept in the browser. Language is not offered: the pilot is English only. A contrast setting beyond light and dark is not built. |

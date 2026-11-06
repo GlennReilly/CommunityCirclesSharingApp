@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** Severity, lowest first. The wire names are what `CIRCLES_LOG_LEVEL` accepts (ADR 0016). */
+/** Severity, lowest first. The wire names are what `LENDGER_LOG_LEVEL` accepts (ADR 0016). */
 enum class LogLevel(val wire: String) {
     DEBUG("debug"),
     INFO("info"),

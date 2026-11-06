@@ -2,7 +2,7 @@ package circles.web
 
 /** The v1 screens (spec section 6). Routing is by URL fragment, so no server-side routes are needed. */
 enum class Screen(val path: String, val title: String) {
-    Welcome("welcome", "Welcome to Circles"),
+    Welcome("welcome", "Welcome to Lendger"),
     StartCircle("start", "Start a circle"),
     JoinCircle("join", "Join a circle"),
     PairDevice("pair-device", "Add this device"),
