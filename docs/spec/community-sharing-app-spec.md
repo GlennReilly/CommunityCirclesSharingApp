@@ -48,14 +48,14 @@ Decide: Compose Multiplatform for Web is optional later; v1 UI is Preact + TypeS
 Identifiers: `MemberId`, `DeviceId`, `CircleId`, `ItemId`, `EventId` as value classes over strings. `EventId` is lowercase hex of BLAKE2b-256 over the canonical bytes of the signed envelope fields (section 3).
 
 Enums:
-- `Tier`: NEWCOMER(0), NEIGHBOUR(1), TRUSTED(2), STEWARD(3). Derived, never persisted.
-- `ItemClass`: ESSENTIAL, EVERYDAY, VALUABLE, HIGH_VALUE. Default minimum tiers: NEWCOMER, NEWCOMER, NEIGHBOUR, TRUSTED.
+- `Tier`: NEW(0), REGULAR(1), TRUSTED(2), STEWARD(3). Derived, never persisted.
+- `ItemClass`: ESSENTIAL, EVERYDAY, VALUABLE, HIGH_VALUE. Default minimum tiers: NEW, NEW, REGULAR, TRUSTED.
 - `EventType` (plaintext on envelope): see section 3.3.
 
 Circle config (plaintext inside an encrypted `config.update` payload; defaults below):
-- thresholds: NEIGHBOUR 3.0, TRUSTED 10.0, STEWARD 25.0 (STEWARD tier is advisory; actual steward role is granted by `steward.add`). Must be strictly increasing (C5).
+- thresholds: REGULAR 3.0, TRUSTED 10.0, STEWARD 25.0 (STEWARD tier is advisory; actual steward role is granted by `steward.add`). Must be strictly increasing (C5).
 - halfLifeDays: 180
-- vouchesForNeighbour: 2, voucherMinTier: NEIGHBOUR, vouchValidityDays: 180 (caps the author's `expiresDay`, C1)
+- vouchesForRegular: 2, voucherMinTier: REGULAR, vouchValidityDays: 180 (caps the author's `expiresDay`, C1)
 - reviewersForPause: 3, pauseReviewerMinTier: TRUSTED, defaultPauseDays: 30
 - returnGraceDays: 7, promptConfirmDays: 3, damageClaimDays: 30 (3.3)
 - incidentCooldownDays: 90 (C7)
@@ -65,7 +65,7 @@ Circle config (plaintext inside an encrypted `config.update` payload; defaults b
 
 Policy (implemented in `shared/policy`):
 - `StandingCalculator.compute(member, config, events, vouches, tierOf, today)`: exponential decay in integer days, clamp at zero, per-counterpart credit cap, vouch on-ramp, incident cooldown, reasons list.
-- `StandingCalculator.computeAll(...)`: the two-pass tier computation (base tiers without vouching, then with vouching using the vouchers' base tiers). A member vouched in to NEIGHBOUR cannot vouch for others until they earn NEIGHBOUR through points. Document and test this.
+- `StandingCalculator.computeAll(...)`: the two-pass tier computation (base tiers without vouching, then with vouching using the vouchers' base tiers). A member vouched in to REGULAR cannot vouch for others until they earn REGULAR through points. Document and test this.
 - `AccessPolicy.canBorrow(...)`: returns `Eligible | NotYet(howToUnlock) | Paused | OwnItem`. Essentials always eligible. Owner can raise the minimum tier for their item, never lower it.
 - Add `EventKind` weights as config (defaults in `CircleAccess.kt`), stored in `config.update`.
 - Config comes from events and is untrusted: run `CircleConfig.validate()` at fold time and fall back to defaults if it reports issues.
@@ -76,18 +76,18 @@ Each row is a defect found in review of the v0.1 sketch, the fix now in `CircleA
 
 | ID | Defect in v0.1 | Fix | Test |
 |---|---|---|---|
-| C1 | Vouches were counted with `count`, so one voucher vouching twice gave two vouches. Future-dated vouches and self-vouches counted. An author could set any `expiresDay`. | Count distinct vouchers. Ignore vouches dated after today and self-vouches. Effective expiry is `min(expiresDay, day + vouchValidityDays)`. | Alice vouches for Cal twice: Cal stays NEWCOMER. Alice and Bea vouch: Cal is NEIGHBOUR. Vouch dated tomorrow is ignored. Vouch with `expiresDay` far in the future expires at `day + vouchValidityDays`. Self-vouch is ignored. |
+| C1 | Vouches were counted with `count`, so one voucher vouching twice gave two vouches. Future-dated vouches and self-vouches counted. An author could set any `expiresDay`. | Count distinct vouchers. Ignore vouches dated after today and self-vouches. Effective expiry is `min(expiresDay, day + vouchValidityDays)`. | Alice vouches for Cal twice: Cal stays NEW. Alice and Bea vouch: Cal is REGULAR. Vouch dated tomorrow is ignored. Vouch with `expiresDay` far in the future expires at `day + vouchValidityDays`. Self-vouch is ignored. |
 | C2 | `sponsorPenalty` used `now` for the event time and vouch liveness, so folding on different days gave different histories. | `sponsorNudges` uses `event.day` for both the nudge time and vouch liveness, and nudges each voucher once. | Same inputs folded with `today` = day 100 and day 101 give nudges with the same `day`. A vouch that had expired by the incident day produces no nudge. Two vouches from one voucher produce one nudge. |
 | C3 | The owner could borrow their own item (and the demo only "worked" because of it). | `canBorrow` returns `OwnItem` when borrower is the owner. | Owner asking for their own HIGH_VALUE item gets `OwnItem`, not `Eligible` or `NotYet`. |
-| C4 | `howToUnlock` always offered the vouch route, though vouching only opens NEIGHBOUR. A stray string interpolation was left in. | The vouch route is listed only when the item needs NEIGHBOUR or lower. | NEWCOMER asking for a VALUABLE item sees the vouch route. NEWCOMER asking for a HIGH_VALUE item does not. |
-| C5 | Thresholds that were not increasing could yield a tier whose lower thresholds were not met. | `CircleConfig.validate()` returns issues for non-increasing or missing thresholds and non-positive durations or counts. `validatedOrDefault()` falls back to defaults. | Thresholds NEIGHBOUR 10, TRUSTED 3 are reported invalid and fall back to defaults. Each non-positive duration or count is reported. Defaults are valid. |
-| C6 | The demo used 12 weekly-ish events, so "established" Alice was only NEIGHBOUR. | The demo uses enough events that Alice and Bea are TRUSTED, and shows the own-item and cooldown cases. | The demo's expectations are encoded as tests: Alice TRUSTED, Cal NEIGHBOUR via vouches, Dee NEWCOMER. |
-| C7 | Clamping at zero meant the "only sizeable negative" cost a low-standing member nothing. | An unreported incident starts a cooldown (`incidentCooldownDays`): VALUABLE and HIGH_VALUE items are on hold, essentials and everyday items stay open. Points are still clamped. The reason text says it is a pause, not a ban, and when it ends. | NEWCOMER with an unreported incident yesterday: ESSENTIAL and EVERYDAY eligible, VALUABLE `NotYet` with days remaining. After `incidentCooldownDays`, the hold is gone. A TRUSTED member with an incident is also on hold for VALUABLE. |
+| C4 | `howToUnlock` always offered the vouch route, though vouching only opens REGULAR. A stray string interpolation was left in. | The vouch route is listed only when the item needs REGULAR or lower. | NEW asking for a VALUABLE item sees the vouch route. NEW asking for a HIGH_VALUE item does not. |
+| C5 | Thresholds that were not increasing could yield a tier whose lower thresholds were not met. | `CircleConfig.validate()` returns issues for non-increasing or missing thresholds and non-positive durations or counts. `validatedOrDefault()` falls back to defaults. | Thresholds REGULAR 10, TRUSTED 3 are reported invalid and fall back to defaults. Each non-positive duration or count is reported. Defaults are valid. |
+| C6 | The demo used 12 weekly-ish events, so "established" Alice was only REGULAR. | The demo uses enough events that Alice and Bea are TRUSTED, and shows the own-item and cooldown cases. | The demo's expectations are encoded as tests: Alice TRUSTED, Cal REGULAR via vouches, Dee NEW. |
+| C7 | Clamping at zero meant the "only sizeable negative" cost a low-standing member nothing. | An unreported incident starts a cooldown (`incidentCooldownDays`): VALUABLE and HIGH_VALUE items are on hold, essentials and everyday items stay open. Points are still clamped. The reason text says it is a pause, not a ban, and when it ends. | NEW with an unreported incident yesterday: ESSENTIAL and EVERYDAY eligible, VALUABLE `NotYet` with days remaining. After `incidentCooldownDays`, the hold is gone. A TRUSTED member with an incident is also on hold for VALUABLE. |
 | C8 | Two accomplices could farm points by repeatedly lending each other trivial items. | Positive events with a counterpart are credited at most `maxCreditedPerCounterpart` times per `counterpartWindowDays`, taking events in day order. | 10 positive events with the same counterpart inside the window credit only 3. Events with 10 different counterparts all credit. Result is the same for any event order. |
-| C9 | Any three reviewers (even newcomers) could place a pause, and the duration was hard-coded. | `tryPause` counts only reviewers at `pauseReviewerMinTier` or above, excludes the subject, uses `defaultPauseDays`, and returns a sealed `PauseResult`. | Three NEWCOMER reviewers: `Rejected`. Three TRUSTED reviewers: `Placed` with `defaultPauseDays`. Subject among reviewers is not counted. Blank reason: `Rejected`. |
+| C9 | Any three reviewers (even new members) could place a pause, and the duration was hard-coded. | `tryPause` counts only reviewers at `pauseReviewerMinTier` or above, excludes the subject, uses `defaultPauseDays`, and returns a sealed `PauseResult`. | Three NEW reviewers: `Rejected`. Three TRUSTED reviewers: `Placed` with `defaultPauseDays`. Subject among reviewers is not counted. Blank reason: `Rejected`. |
 | C10 | `java.time` and `String.format` are not available in Kotlin/JS. Floating point could differ between JVM and JS at a threshold. | Integer days throughout. A `format1` helper. Points rounded to two decimals before tier comparison. | Points exactly at a threshold after rounding give the higher tier. `format1(3.0)` is "3.0" and `format1(-0.5)` is "-0.5". The same test vectors pass on JVM and JS. |
 | C11 | The config lacked the spec's fields; weights were not configurable. | `CircleConfig` has all fields in section 2 and a `weights` map. | A config with a changed weight changes points. A config with a missing weight key falls back to the enum default. |
-| C12 | The tier snapshot lived in the demo. | `computeAll` in the library, with the rule documented. | A voucher who is only NEIGHBOUR through vouches does not count as a valid voucher. A voucher with NEIGHBOUR points does. |
+| C12 | The tier snapshot lived in the demo. | `computeAll` in the library, with the rule documented. | A voucher who is only REGULAR through vouches does not count as a valid voucher. A voucher with REGULAR points does. |
 | C13 | No kind for prompt owner confirmation. | New `EventKind.CONFIRMED_RETURN_PROMPTLY` (+0.25). | The kind is credited with the configured weight and decays like others. |
 
 Existing tests in this section (decay at 0, 1 and 2 half-lives, clamp at zero, and so on) still apply and now use integer days.
@@ -170,7 +170,7 @@ Consequences:
 | `loan.return` | borrower | Borrower reports the outcome: OK, LATE, DAMAGED_REPORTED, LOST_REPORTED. Counts automatically unless disputed (optimistic return, below) |
 | `loan.dispute` | owner | Disputes a return: within `returnGraceDays` of the return, or within `damageClaimDays` for damage found later. Withholds credit pending review |
 | `loan.resolve` | steward (not a party) | Resolves a dispute with an outcome |
-| `standing.note` | member | Contribution events: SKILL_SHARE_HELPED, HOSTED_OR_ORGANISED, MENTORED_NEWCOMER (confirmed by the other party via `standing.confirm`) |
+| `standing.note` | member | Contribution events: SKILL_SHARE_HELPED, HOSTED_OR_ORGANISED, MENTORED_NEW_MEMBER (confirmed by the other party via `standing.confirm`) |
 | `standing.confirm` | counterpart | Confirms a `standing.note`, or a `loan.return` (owner) |
 | `pause.propose` / `pause.review` / `pause.lift` / `pause.appeal` | member / steward | Pause lifecycle; takes effect only when `reviewersForPause` distinct reviewers (not the subject) have reviewed |
 

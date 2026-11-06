@@ -345,9 +345,9 @@ internal class MarketFold(
         if (v.with == author) return "a note must name someone else"
         if (author !in members() || v.with !in members()) return "both people must be in the circle"
         if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days"
-        if (v.kind == ContributionKind.MENTORED_NEWCOMER &&
-            StandingRules.standingOf(v.with, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier != circles.policy.Tier.NEWCOMER
-        ) return "only a newcomer can be mentored"
+        if (v.kind == ContributionKind.MENTORED_NEW_MEMBER &&
+            StandingRules.standingOf(v.with, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier != circles.policy.Tier.NEW
+        ) return "only a new member can be mentored"
         notes[v.note] = ContributionState(v.note, author, v.with, v.kind, v.text, day)
         return null
     }
@@ -445,7 +445,7 @@ internal class MarketFold(
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
         if (v.vouchee == author) return "a member cannot vouch for themselves"
         if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a neighbour or above may vouch"
+        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a Regular member or above may vouch"
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }

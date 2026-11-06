@@ -24,7 +24,7 @@ class StandingCalculatorTest {
     fun pointsClampAtZero() {
         val s = standingWith(ALICE, listOf(event(ALICE, EventKind.RETURNED_LATE), event(ALICE, EventKind.RETURNED_LATE)))
         assertEquals(0.0, s.points)
-        assertEquals(Tier.NEWCOMER, s.tier)
+        assertEquals(Tier.NEW, s.tier)
     }
 
     @Test
@@ -61,16 +61,16 @@ class StandingCalculatorTest {
     fun vouchExpiresOnItsExpiryDay() {
         val expiredToday = Vouch(ALICE, CAL, CIRCLE, TODAY - 10, TODAY)
         val liveTomorrow = Vouch(ANN, CAL, CIRCLE, TODAY - 10, TODAY + 1)
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = listOf(expiredToday, liveTomorrow)).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = listOf(expiredToday, liveTomorrow)).tier)
         val bothLive = listOf(liveTomorrow, Vouch(ALICE, CAL, CIRCLE, TODAY - 10, TODAY + 1))
-        assertEquals(Tier.NEIGHBOUR, standingWith(CAL, vouches = bothLive).tier)
+        assertEquals(Tier.REGULAR, standingWith(CAL, vouches = bothLive).tier)
     }
 
     @Test
     fun voucherBelowMinTierIsIgnored() {
         val vouches = listOf(vouch(ALICE, CAL), vouch(ANN, CAL))
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = vouches, tierOf = { Tier.NEWCOMER }).tier)
-        assertEquals(Tier.NEIGHBOUR, standingWith(CAL, vouches = vouches, tierOf = { Tier.NEIGHBOUR }).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = vouches, tierOf = { Tier.NEW }).tier)
+        assertEquals(Tier.REGULAR, standingWith(CAL, vouches = vouches, tierOf = { Tier.REGULAR }).tier)
     }
 
     // ---- C1: vouch counting ----
@@ -78,34 +78,34 @@ class StandingCalculatorTest {
     @Test
     fun c1_oneVoucherVouchingTwiceCountsOnce() {
         val vouches = listOf(vouch(ALICE, CAL, daysAgo = 10), vouch(ALICE, CAL, daysAgo = 5))
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = vouches).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = vouches).tier)
     }
 
     @Test
-    fun c1_twoDistinctVouchersOpenNeighbour() {
+    fun c1_twoDistinctVouchersOpenRegular() {
         val vouches = listOf(vouch(ALICE, CAL), vouch(ANN, CAL))
-        assertEquals(Tier.NEIGHBOUR, standingWith(CAL, vouches = vouches).tier)
+        assertEquals(Tier.REGULAR, standingWith(CAL, vouches = vouches).tier)
     }
 
     @Test
     fun c1_futureDatedVouchIsIgnored() {
         val future = Vouch(ANN, CAL, CIRCLE, TODAY + 1, TODAY + 100)
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = listOf(vouch(ALICE, CAL), future)).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = listOf(vouch(ALICE, CAL), future)).tier)
     }
 
     @Test
     fun c1_selfVouchIsIgnored() {
         val vouches = listOf(vouch(ALICE, CAL), vouch(CAL, CAL))
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = vouches).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = vouches).tier)
     }
 
     @Test
     fun c1_authorExpiryIsCappedByValidityWindow() {
         // Dated 200 days ago with an expiry far in the future: capped at day + 180, so it ended 20 days ago.
         val longVouch = { voucher: MemberId -> Vouch(voucher, CAL, CIRCLE, TODAY - 200, TODAY + 10_000) }
-        assertEquals(Tier.NEWCOMER, standingWith(CAL, vouches = listOf(longVouch(ALICE), longVouch(ANN))).tier)
+        assertEquals(Tier.NEW, standingWith(CAL, vouches = listOf(longVouch(ALICE), longVouch(ANN))).tier)
         val recent = { voucher: MemberId -> Vouch(voucher, CAL, CIRCLE, TODAY - 100, TODAY + 10_000) }
-        assertEquals(Tier.NEIGHBOUR, standingWith(CAL, vouches = listOf(recent(ALICE), recent(ANN))).tier)
+        assertEquals(Tier.REGULAR, standingWith(CAL, vouches = listOf(recent(ALICE), recent(ANN))).tier)
     }
 
     // ---- C2: sponsor nudges are deterministic ----
@@ -144,8 +144,8 @@ class StandingCalculatorTest {
         val all = StandingCalculator.computeAll(listOf(ALICE, BEA, CAL, DEE), CFG, events, vouches, TODAY)
         assertEquals(Tier.TRUSTED, all.getValue(ALICE).tier)
         assertEquals(Tier.TRUSTED, all.getValue(BEA).tier)
-        assertEquals(Tier.NEIGHBOUR, all.getValue(CAL).tier)
-        assertEquals(Tier.NEWCOMER, all.getValue(DEE).tier)
+        assertEquals(Tier.REGULAR, all.getValue(CAL).tier)
+        assertEquals(Tier.NEW, all.getValue(DEE).tier)
     }
 
     @Test
@@ -153,16 +153,16 @@ class StandingCalculatorTest {
         val events = trustedHistory(ALICE) + trustedHistory(ANN)
         val members = listOf(ALICE, ANN, BEA, CAL)
         val vouches = listOf(
-            vouch(ALICE, BEA), vouch(ANN, BEA),   // Bea becomes NEIGHBOUR through vouches only
+            vouch(ALICE, BEA), vouch(ANN, BEA),   // Bea becomes REGULAR through vouches only
             vouch(BEA, CAL), vouch(ALICE, CAL)    // Bea's vouch for Cal must not count
         )
         val all = StandingCalculator.computeAll(members, CFG, events, vouches, TODAY)
-        assertEquals(Tier.NEIGHBOUR, all.getValue(BEA).tier)
-        assertEquals(Tier.NEWCOMER, all.getValue(CAL).tier)
+        assertEquals(Tier.REGULAR, all.getValue(BEA).tier)
+        assertEquals(Tier.NEW, all.getValue(CAL).tier)
 
         val withTwoRealVouchers = vouches + vouch(ANN, CAL)
         val all2 = StandingCalculator.computeAll(members, CFG, events, withTwoRealVouchers, TODAY)
-        assertEquals(Tier.NEIGHBOUR, all2.getValue(CAL).tier)
+        assertEquals(Tier.REGULAR, all2.getValue(CAL).tier)
     }
 
     // ---- C7: incident cooldown ----
@@ -215,11 +215,11 @@ class StandingCalculatorTest {
     @Test
     fun c10_pointsAtThresholdAfterRoundingGiveTheHigherTier() {
         val exact = CFG.copy(weights = mapOf(EventKind.HOSTED_OR_ORGANISED to 3.0))
-        assertEquals(Tier.NEIGHBOUR, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = exact).tier)
+        assertEquals(Tier.REGULAR, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = exact).tier)
         val nearly = CFG.copy(weights = mapOf(EventKind.HOSTED_OR_ORGANISED to 2.996))
-        assertEquals(Tier.NEIGHBOUR, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = nearly).tier)
+        assertEquals(Tier.REGULAR, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = nearly).tier)
         val below = CFG.copy(weights = mapOf(EventKind.HOSTED_OR_ORGANISED to 2.99))
-        assertEquals(Tier.NEWCOMER, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = below).tier)
+        assertEquals(Tier.NEW, standingWith(ALICE, listOf(event(ALICE, EventKind.HOSTED_OR_ORGANISED)), cfg = below).tier)
     }
 
     @Test

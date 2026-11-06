@@ -1,10 +1,10 @@
 # Lendger
 
-A local-first sharing network for community groups, or a group of neighbours: lend tools, offer skills, and help each other without money, credit scores or a central company. See [the design doc](docs/spec/community-sharing-app-design.md) for the why and [the spec](docs/spec/community-sharing-app-spec.md) for what to build.
+A local-first sharing network for community groups: lend tools, offer skills, and help each other without money, credit scores or a central company. See [the design doc](docs/spec/community-sharing-app-design.md) for the why and [the spec](docs/spec/community-sharing-app-spec.md) for what to build.
 
 ## What Lendger is for
 
-Neighbours and community groups already lend drills, ladders and prams, and swap skills like bike repair or tax help. Today that usually runs on group chats and spreadsheets, or on platforms that want money, personal data or an account. Nobody can see who has what. It is hard to know whom to trust. And a central company holds everyone's details.
+Community groups, clubs and friends already lend drills, ladders and prams, and swap skills like bike repair or tax help. Today that usually runs on group chats and spreadsheets, or on platforms that want money, personal data or an account. Nobody can see who has what. It is hard to know whom to trust. And a central company holds everyone's details.
 
 Lendger is a web app for one group (a "circle") to do this for itself, with no money, no ratings, no ads and no company in the middle.
 
@@ -22,8 +22,8 @@ Lendger is a web app for one group (a "circle") to do this for itself, with no m
 
 ### Trust that grows, with no bans
 
-- Newcomers can borrow lightly. As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
-- Members can vouch for a newcomer. Contribution notes (for example, helping at a working bee) also count.
+- New members can borrow lightly. Members have one of three tiers, New, Regular and Trusted ([ADR 0067](docs/adr/0067-tier-names-new-regular-trusted.md)). As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
+- Members can vouch for a new member. Contribution notes (for example, helping at a working bee) also count.
 - There are no star ratings. Owners decide who borrows their things; standing is advice shown to them.
 - As a last resort, trusted members can pause someone. A pause needs several reviewers, has an end date and an appeal, and keeps essentials open ([ADR 0050](docs/adr/0050-pauses.md)). Nobody is banned for good.
 

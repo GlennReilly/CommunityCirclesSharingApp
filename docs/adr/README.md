@@ -70,6 +70,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0064](0064-bundle-budget-300-kib.md) | Script budget raised to 300 KiB | Accepted |
 | [0065](0065-recovery-share-set-id.md) | A recovery share names its set | Accepted |
 | [0066](0066-rename-to-lendger.md) | The product is called Lendger | Accepted |
+| [0067](0067-tier-names-new-regular-trusted.md) | Tier names are New, Regular and Trusted | Accepted |
 
 ## Open decisions still to record
 

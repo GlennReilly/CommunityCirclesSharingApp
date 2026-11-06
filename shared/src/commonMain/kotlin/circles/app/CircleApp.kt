@@ -1519,7 +1519,7 @@ class CircleApp(
         return ItemResult.Saved(item)
     }
 
-    /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at Neighbour or above can. */
+    /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at Regular or above can. */
     suspend fun vouchFor(member: MemberId): VouchResult {
         val s = session ?: return VouchResult.NotAllowed
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
@@ -1884,7 +1884,7 @@ class CircleApp(
         }
         val gap = ((cfg.thresholds[next] ?: 0.0) - standing.points).coerceAtLeast(0.0)
         add("About ${circles.policy.format1(gap)} more standing points opens ${next.name.lowercase()} access: lend items and get them back, or borrow and return them on time.")
-        if (next.rank <= Tier.NEIGHBOUR.rank) add("Or get ${cfg.vouchesForNeighbour} neighbours to vouch for you (on the Members page).")
+        if (next.rank <= Tier.REGULAR.rank) add("Or get ${cfg.vouchesForRegular} members (Regular or above) to vouch for you (on the Members page).")
     }
 
     /** The names typed when devices were added: from the sealed label of each `device.add`. */

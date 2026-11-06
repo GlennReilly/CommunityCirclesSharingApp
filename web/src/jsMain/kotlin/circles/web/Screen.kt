@@ -35,10 +35,10 @@ enum class Screen(val path: String, val title: String) {
             entries.firstOrNull { FRAGMENT_PREFIX + it.path == fragment } ?: Home
 
         /** Pages for a browser with no identity yet: a choice, then one page per choice. */
-        val newcomer: Set<Screen> = setOf(Welcome, StartCircle, JoinCircle, PairDevice, Restore)
+        val signedOut: Set<Screen> = setOf(Welcome, StartCircle, JoinCircle, PairDevice, Restore)
 
-        /** Pages that are not part of the circle itself: the newcomer pages and the unlock page. */
-        val beforeSignIn: Set<Screen> = newcomer + SignIn
+        /** Pages that are not part of the circle itself: the signed-out pages and the unlock page. */
+        val beforeSignIn: Set<Screen> = signedOut + SignIn
 
         /** Pages reached from another page, not from the navigation bar. */
         val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares, Pauses, AddSkill, EditSkill, Verify, ItemTag)

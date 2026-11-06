@@ -332,7 +332,7 @@ abstract class MarketContract {
     }
 
     @Test
-    fun aNewcomerMayAskForEssentialsAndEverydayItemsButNotValuableOnes() = runTest {
+    fun aNewMemberMayAskForEssentialsAndEverydayItemsButNotValuableOnes() = runTest {
         val w = world()
         val (essential, _) = w.share(w.founder, ItemClass.ESSENTIAL)
         val (everyday, _) = w.share(w.founder, ItemClass.EVERYDAY)
@@ -342,8 +342,8 @@ abstract class MarketContract {
         val refused = w.reasons(listOf(w.requestOf(w.bea, valuable), w.requestOf(w.bea, highValue)))
         assertEquals(2, refused.size)
         assertTrue(refused.all { it.startsWith("access check: ") }, refused.toString())
-        assertTrue(refused[0].contains("needs NEIGHBOUR") && refused[1].contains("needs TRUSTED"), refused.toString())
-        assertTrue(refused[0].contains("vouch"), "a newcomer is told the vouch route")
+        assertTrue(refused[0].contains("needs REGULAR") && refused[1].contains("needs TRUSTED"), refused.toString())
+        assertTrue(refused[0].contains("vouch"), "a new member is told the vouch route")
     }
 
     @Test
@@ -377,21 +377,21 @@ abstract class MarketContract {
         val w = World(newCrypto(), newCipher())
         w.start()
         val founderVouch = w.founder.vouch(w.circle, DAY, w.carol.identity.member, DAY + 100)
-        val byNewcomer = w.bea.vouch(w.circle, DAY, w.carol.identity.member, DAY + 100)
+        val byNewMember = w.bea.vouch(w.circle, DAY, w.carol.identity.member, DAY + 100)
         val ofSelf = w.founder.vouch(w.circle, DAY, w.founder.identity.member, DAY + 100)
         val ofStranger = w.founder.vouch(w.circle, DAY, newMemberId(w.crypto), DAY + 100)
-        w.log += listOf(founderVouch, byNewcomer, ofSelf, ofStranger)
+        w.log += listOf(founderVouch, byNewMember, ofSelf, ofStranger)
         val view = w.foldAs(w.founder)
         assertEquals(listOf(w.founder.identity.member to w.carol.identity.member), view.market.vouches.map { it.voucher to it.vouchee })
         val reasons = view.rejected.associate { it.id to it.reason }
-        assertTrue(reasons.getValue(byNewcomer.eventId(w.crypto)).contains("neighbour or above"))
+        assertTrue(reasons.getValue(byNewMember.eventId(w.crypto)).contains("Regular member or above"))
         assertTrue(reasons.getValue(ofSelf.eventId(w.crypto)).contains("themselves"))
         assertTrue(reasons.getValue(ofStranger.eventId(w.crypto)).contains("not in the circle"))
         assertFalse(founderVouch.eventId(w.crypto) in reasons)
     }
 
     @Test
-    fun twoVouchesFromQualifiedMembersOpenNeighbourAccessUntilTheyExpire() = runTest {
+    fun twoVouchesFromQualifiedMembersOpenRegularAccessUntilTheyExpire() = runTest {
         val w = World(newCrypto(), newCipher())
         w.start(StewardSettings(quorum = 1))
         w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
@@ -407,7 +407,7 @@ abstract class MarketContract {
         w.log += lapsed
         val rejected = w.foldAs(w.founder).rejected.map { it.id }
         assertTrue(oneVouch.eventId(w.crypto) in rejected, "one vouch is not enough")
-        assertFalse(twoVouches.eventId(w.crypto) in rejected, "two stewards' vouches open Neighbour access")
+        assertFalse(twoVouches.eventId(w.crypto) in rejected, "two stewards' vouches open Regular access")
         assertTrue(lapsed.eventId(w.crypto) in rejected, "expired vouches no longer count")
     }
 
@@ -427,7 +427,7 @@ abstract class MarketContract {
         val view = w.foldAs(w.founder)
         val rejected = view.rejected.map { it.id }
         assertTrue(tooSoon.eventId(w.crypto) in rejected, "before the grace period the returns do not count")
-        assertFalse(afterGrace.eventId(w.crypto) in rejected, "four good loans reach Neighbour")
+        assertFalse(afterGrace.eventId(w.crypto) in rejected, "four good loans reach Regular")
         assertEquals(4, view.market.loans.values.count { it.status == LoanStatus.RETURNED && it.returnedDay == DAY + 2 })
     }
 
@@ -546,7 +546,7 @@ abstract class MarketContract {
         w.log += w.bea.vouch(w.circle, DAY, w.carol.identity.member, DAY + 400)
         val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
         val (everyday, _) = w.share(w.founder, ItemClass.EVERYDAY)
-        // Carol, made a neighbour by two vouches, borrows a founder item and brings it back; the founder disputes it and
+        // Carol, made Regular by two vouches, borrows a founder item and brings it back; the founder disputes it and
         // bea, a steward who is not a party, upholds the claim.
         val (lent, lentKey) = w.share(w.founder, ItemClass.EVERYDAY)
         val loan = newLoanId(w.crypto)
@@ -622,12 +622,12 @@ abstract class MarketContract {
     fun vouchesByAMemberWhoHasLeftStopCountingFromTheDayTheyLeft() = runTest {
         val w = World(newCrypto(), newCipher())
         w.start()
-        // Bea earns Neighbour by lending four times (good returns on DAY + 2 count from DAY + 2 + the grace period).
+        // Bea earns Regular by lending four times (good returns on DAY + 2 count from DAY + 2 + the grace period).
         val (lent, lentKey) = w.share(w.bea, ItemClass.EVERYDAY)
         listOf(w.carol, w.carol, w.founder, w.founder).forEach { w.goodLoan(w.bea, it, lent, lentKey, DAY, DAY + 2) }
         val day = DAY + 2 + RETURN_GRACE_DAYS
         val (valuable, _) = w.share(w.founder, ItemClass.VALUABLE)
-        // Two vouches for a newcomer (the steward's and the neighbour's) open Neighbour access.
+        // Two vouches for a new member (the steward's and the Regular member's) open Regular access.
         val dee = w.person().also { it.keyRing = KeyRing.EMPTY.with(FIRST_EPOCH, w.circleKey) }
         val invite = InviteKey(w.crypto.generateSigningKeyPair())
         val inviteEvent = w.founder.invite(w.circle, invite, day + 60, 1, day)
@@ -759,7 +759,7 @@ abstract class MarketContract {
     @Test
     fun aCircleWithTooFewTrustedMembersCannotPauseAnyone() = runTest {
         val w = World(newCrypto(), newCipher())
-        w.start(StewardSettings(quorum = 1)) // only the founder is a steward, bea and carol are newcomers
+        w.start(StewardSettings(quorum = 1)) // only the founder is a steward, bea and carol are new members
         val id = newPauseId(w.crypto)
         assertEquals(
             listOf("the circle has too few trusted members to review a pause"),
@@ -775,13 +775,13 @@ abstract class MarketContract {
     fun aConfigTakesEffectFromTheDayItWasAgreedAndEarlierDaysKeepTheOldRules() = runTest {
         val w = World(newCrypto(), newCipher())
         w.start(StewardSettings(quorum = 1))
-        val changed = w.defaults().copy(halfLifeDays = 90, vouchesForNeighbour = 3)
+        val changed = w.defaults().copy(halfLifeDays = 90, vouchesForRegular = 3)
         w.log += w.founder.configUpdate(w.circle, DAY + 10, changed)
         val view = w.foldAs(w.founder)
         assertEquals(emptyList(), view.rejected)
         assertEquals(180, view.market.configOn(w.circle, DAY + 9).halfLifeDays, "before the day it took effect")
         assertEquals(90, view.market.configOn(w.circle, DAY + 10).halfLifeDays)
-        assertEquals(3, view.market.configOn(w.circle, DAY + 400).vouchesForNeighbour)
+        assertEquals(3, view.market.configOn(w.circle, DAY + 400).vouchesForRegular)
         assertEquals(listOf(ConfigVersion(DAY + 10, changed)), view.market.configs)
         // A later change replaces it from its own day on.
         val later = changed.copy(halfLifeDays = 60)
@@ -801,7 +801,7 @@ abstract class MarketContract {
         assertEquals(listOf("those are already the circle's rules"), rejected(w.founder, d))
         assertEquals(listOf("halfLifeDays must be from 30 to 730"), rejected(w.founder, d.copy(halfLifeDays = 10)))
         assertEquals(listOf("reviewersForPause must be from 2 to 9"), rejected(w.founder, d.copy(reviewersForPause = 1)))
-        assertEquals(listOf("thresholds must be positive and strictly increasing"), rejected(w.founder, d.copy(neighbourTenths = d.trustedTenths)))
+        assertEquals(listOf("thresholds must be positive and strictly increasing"), rejected(w.founder, d.copy(regularTenths = d.trustedTenths)))
         assertEquals(listOf("thresholds must be from 0.1 to 10000 points"), rejected(w.founder, d.copy(stewardTenths = 0)))
         assertEquals(listOf("incidentCooldownDays must be from 0 to 365"), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
     }
@@ -904,9 +904,9 @@ abstract class MarketContract {
             by.standingNote(w.circle, day, newNoteId(w.crypto), kind, with.identity.member, "")
         assertEquals(listOf("a note must name someone else"), w.reasons(listOf(note(w.bea, w.bea))))
         assertEquals(listOf("both people must be in the circle"), w.reasons(listOf(w.bea.standingNote(w.circle, DAY, newNoteId(w.crypto), ContributionKind.HOSTED_OR_ORGANISED, MemberId("9".repeat(32)), ""))))
-        // The founder is a steward, so counts as trusted: only a newcomer can be mentored.
-        assertEquals(listOf("only a newcomer can be mentored"), w.reasons(listOf(note(w.bea, w.founder, kind = ContributionKind.MENTORED_NEWCOMER))))
-        assertEquals(emptyList(), w.reasons(listOf(note(w.founder, w.carol, kind = ContributionKind.MENTORED_NEWCOMER))))
+        // The founder is a steward, so counts as trusted: only a new member can be mentored.
+        assertEquals(listOf("only a new member can be mentored"), w.reasons(listOf(note(w.bea, w.founder, kind = ContributionKind.MENTORED_NEW_MEMBER))))
+        assertEquals(emptyList(), w.reasons(listOf(note(w.founder, w.carol, kind = ContributionKind.MENTORED_NEW_MEMBER))))
         // Three notes in 30 days; the fourth waits until the first is 30 days old.
         val first = note(w.bea, w.carol, DAY)
         w.log += first; w.log += note(w.bea, w.carol, DAY + 1); w.log += note(w.bea, w.founder, DAY + 2)

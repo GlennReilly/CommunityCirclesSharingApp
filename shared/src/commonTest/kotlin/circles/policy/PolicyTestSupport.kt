@@ -37,7 +37,7 @@ internal fun standingWith(
     vouches: List<Vouch> = emptyList(),
     cfg: CircleConfig = CFG,
     today: Day = TODAY,
-    tierOf: (MemberId) -> Tier = { Tier.NEIGHBOUR }
+    tierOf: (MemberId) -> Tier = { Tier.REGULAR }
 ): Standing = StandingCalculator.compute(member, cfg, events, vouches, tierOf, today)
 
 /** A member with plenty of recent activity: TRUSTED by points alone. */

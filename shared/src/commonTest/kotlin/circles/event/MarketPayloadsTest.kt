@@ -29,7 +29,7 @@ class MarketPayloadsTest {
 
     @Test
     fun everyPayloadRoundTripsThroughItsBuilderAndReader() {
-        val upsert = ItemUpsert(item, "Ladder", ItemClass.ESSENTIAL, Tier.NEIGHBOUR, keyId, listOf(wrap))
+        val upsert = ItemUpsert(item, "Ladder", ItemClass.ESSENTIAL, Tier.REGULAR, keyId, listOf(wrap))
         assertEquals(upsert, ok(MarketPayloads.parseItemUpsert(MarketPayloads.itemUpsert(upsert))))
         assertEquals(upsert.copy(minTier = null), ok(MarketPayloads.parseItemUpsert(MarketPayloads.itemUpsert(upsert.copy(minTier = null)))))
         assertEquals(ItemRetire(item), ok(MarketPayloads.parseItemRetire(MarketPayloads.itemRetire(ItemRetire(item)))))
@@ -79,9 +79,9 @@ class MarketPayloadsTest {
     fun anOwnerMayRaiseButNeverLowerTheMinimumTier() {
         fun upsert(itemClass: ItemClass, tier: Tier?) = MarketPayloads.parseItemUpsert(MarketPayloads.itemUpsert(ItemUpsert(item, "Drill", itemClass, tier, keyId, listOf(wrap))))
         assertIs<Parsed.Ok<*>>(upsert(ItemClass.VALUABLE, Tier.TRUSTED))
-        assertIs<Parsed.Ok<*>>(upsert(ItemClass.VALUABLE, Tier.NEIGHBOUR))
-        assertIs<Parsed.Invalid>(upsert(ItemClass.VALUABLE, Tier.NEWCOMER))
-        assertIs<Parsed.Invalid>(upsert(ItemClass.HIGH_VALUE, Tier.NEIGHBOUR))
+        assertIs<Parsed.Ok<*>>(upsert(ItemClass.VALUABLE, Tier.REGULAR))
+        assertIs<Parsed.Invalid>(upsert(ItemClass.VALUABLE, Tier.NEW))
+        assertIs<Parsed.Invalid>(upsert(ItemClass.HIGH_VALUE, Tier.REGULAR))
     }
 
     @Test

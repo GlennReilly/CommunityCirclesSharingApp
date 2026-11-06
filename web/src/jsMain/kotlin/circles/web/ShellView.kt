@@ -313,7 +313,7 @@ fun FlowContent.shell(state: AppState) {
                     +"Opening your circle"
                 }
             }
-            AppModel.NoIdentity -> newcomer(state)
+            AppModel.NoIdentity -> signedOutPage(state)
             is AppModel.Locked -> signIn(model.passkey)
             is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
@@ -446,7 +446,7 @@ private fun FlowContent.backToWelcome() {
 }
 
 /** A browser with no identity: a choice first, then one page for each choice. */
-private fun FlowContent.newcomer(state: AppState) {
+private fun FlowContent.signedOutPage(state: AppState) {
     when (state.screen) {
         Screen.StartCircle -> startCircle()
         Screen.JoinCircle -> joinCircle(state)
@@ -458,7 +458,7 @@ private fun FlowContent.newcomer(state: AppState) {
 
 private fun FlowContent.welcome() {
     h1 { +Screen.Welcome.title }
-    p { +"Lendger is a way for neighbours to share things and skills. Everything is encrypted on your own device." }
+    p { +"Lendger is a way for a community group to share things and skills. Everything is encrypted on your own device." }
     // Two clear choices, each a button with a line saying who it is for.
     div {
         classes = setOf("choices")
@@ -662,7 +662,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
         }
     }
     p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
-    p { +"Vouching tells the circle you know this person. Two neighbours who vouch open neighbour access for a newcomer. Only vouch for people you know." }
+    p { +"Vouching tells the circle you know this person. ${home.rules.current.vouchesForRegular} vouches from members at Regular or above give a new member Regular access. Only vouch for people you know." }
     if (home.needsRotation) {
         section {
             h2 { +"Change the key" }
@@ -868,7 +868,7 @@ private fun FlowContent.itemForm(existing: ItemSummary?) {
                 selected = existing?.ownerMinTier == null
                 +"Whoever the circle's rules allow for this kind"
             }
-            for (tier in listOf(Tier.NEIGHBOUR, Tier.TRUSTED)) option {
+            for (tier in listOf(Tier.REGULAR, Tier.TRUSTED)) option {
                 value = tier.name
                 selected = existing?.ownerMinTier == tier
                 +"${tierLabel(tier)} and above"
@@ -1353,8 +1353,8 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
 }
 
 private fun tierLabel(tier: Tier): String = when (tier) {
-    Tier.NEWCOMER -> "Newcomer"
-    Tier.NEIGHBOUR -> "Neighbour"
+    Tier.NEW -> "New"
+    Tier.REGULAR -> "Regular"
     Tier.TRUSTED -> "Trusted"
     Tier.STEWARD -> "Steward level"
 }
@@ -1368,7 +1368,7 @@ private fun FlowContent.standing(standing: StandingSummary?, home: HomeData? = n
     }
     p { +"Your tier: ${tierLabel(standing.tier)}" }
     p { +"Standing points: ${standing.points}" }
-    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below newcomer, and nobody is ever banned for low standing." }
+    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below New, and nobody is ever banned for low standing." }
     section {
         h2 { +"Why" }
         ul { for (reason in standing.reasons) li { +reason } }
@@ -1486,9 +1486,9 @@ private fun FlowContent.stewards(home: HomeData) {
         val rules = home.rules
         val now = rules.current
         ul {
-            li { +"Points for Neighbour, Trusted and Steward level: ${tenthsText(now.neighbourTenths)}, ${tenthsText(now.trustedTenths)} and ${tenthsText(now.stewardTenths)}" }
+            li { +"Points for Regular, Trusted and Steward level: ${tenthsText(now.regularTenths)}, ${tenthsText(now.trustedTenths)} and ${tenthsText(now.stewardTenths)}" }
             li { +"Points fade by half every ${now.halfLifeDays} days" }
-            li { +"Vouches needed to become a Neighbour: ${now.vouchesForNeighbour}, each lasting up to ${now.vouchValidityDays} days" }
+            li { +"Vouches needed to become Regular: ${now.vouchesForRegular}, each lasting up to ${now.vouchValidityDays} days" }
             li { +"Reviewers needed for a pause: ${now.reviewersForPause}; a pause lasts ${now.defaultPauseDays} days unless chosen otherwise" }
             li { +"Days higher-value items are on hold after an unreported incident: ${now.incidentCooldownDays}" }
         }
@@ -1496,12 +1496,12 @@ private fun FlowContent.stewards(home: HomeData) {
         for (proposal in rules.proposals) {
             val s = proposal.settings
             p {
-                +"Proposed: thresholds ${tenthsText(s.neighbourTenths)} / ${tenthsText(s.trustedTenths)} / ${tenthsText(s.stewardTenths)}, half-life ${s.halfLifeDays}, vouches ${s.vouchesForNeighbour} for ${s.vouchValidityDays} days, pause reviewers ${s.reviewersForPause} for ${s.defaultPauseDays} days, cooldown ${s.incidentCooldownDays}. ${proposal.agreeing} of ${proposal.needed} stewards agree."
+                +"Proposed: thresholds ${tenthsText(s.regularTenths)} / ${tenthsText(s.trustedTenths)} / ${tenthsText(s.stewardTenths)}, half-life ${s.halfLifeDays}, vouches ${s.vouchesForRegular} for ${s.vouchValidityDays} days, pause reviewers ${s.reviewersForPause} for ${s.defaultPauseDays} days, cooldown ${s.incidentCooldownDays}. ${proposal.agreeing} of ${proposal.needed} stewards agree."
             }
             if (proposal.canAgree) {
                 button(type = ButtonType.button) {
                     attributes[ATTR_ACTION] = ACTION_RULES_AGREE
-                    attributes[ATTR_RULES] = listOf(s.neighbourTenths, s.trustedTenths, s.stewardTenths, s.halfLifeDays, s.vouchesForNeighbour, s.vouchValidityDays, s.reviewersForPause, s.defaultPauseDays, s.incidentCooldownDays).joinToString(":")
+                    attributes[ATTR_RULES] = listOf(s.regularTenths, s.trustedTenths, s.stewardTenths, s.halfLifeDays, s.vouchesForRegular, s.vouchValidityDays, s.reviewersForPause, s.defaultPauseDays, s.incidentCooldownDays).joinToString(":")
                     +"Agree to these rules"
                 }
             }
@@ -1513,11 +1513,11 @@ private fun FlowContent.stewards(home: HomeData) {
                 form {
                     id = FORM_RULES
                     for ((field, label, step, value) in listOf(
-                        Quad("rules-neighbour", "Points for Neighbour: ", "0.5", tenthsText(now.neighbourTenths)),
+                        Quad("rules-regular", "Points for Regular: ", "0.5", tenthsText(now.regularTenths)),
                         Quad("rules-trusted", "Points for Trusted: ", "0.5", tenthsText(now.trustedTenths)),
                         Quad("rules-steward", "Points for Steward level: ", "0.5", tenthsText(now.stewardTenths)),
                         Quad("rules-halflife", "Days for points to fade by half: ", "1", now.halfLifeDays.toString()),
-                        Quad("rules-vouches", "Vouches needed for Neighbour: ", "1", now.vouchesForNeighbour.toString()),
+                        Quad("rules-vouches", "Vouches needed for Regular: ", "1", now.vouchesForRegular.toString()),
                         Quad("rules-vouch-days", "Days a vouch lasts: ", "1", now.vouchValidityDays.toString()),
                         Quad("rules-reviewers", "Reviewers needed for a pause: ", "1", now.reviewersForPause.toString()),
                         Quad("rules-pause-days", "Days a pause lasts: ", "1", now.defaultPauseDays.toString()),
@@ -2045,7 +2045,7 @@ private fun tenthsText(tenths: Int): String = "${tenths / 10}.${tenths % 10}"
 private fun contributionPhrase(kind: ContributionKind, mine: Boolean): String = when (kind) {
     ContributionKind.SKILL_SHARE_HELPED -> if (mine) "helped them with a skill" else "helped you with a skill"
     ContributionKind.HOSTED_OR_ORGANISED -> if (mine) "hosted or organised something with them" else "hosted or organised something with you"
-    ContributionKind.MENTORED_NEWCOMER -> if (mine) "mentored them as a newcomer" else "mentored you as a newcomer"
+    ContributionKind.MENTORED_NEW_MEMBER -> if (mine) "mentored them as a new member" else "mentored you as a new member"
 }
 
 /** Contribution notes (ADR 0053): thank-yous that count once the other person confirms them. */

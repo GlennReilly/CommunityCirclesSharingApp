@@ -1,6 +1,6 @@
 /**
  * CircleAccess.kt - v0.2 implementation of a non-punitive, access-based trust model for a
- * neighbourhood lending / skill-share network.
+ * community lending / skill-share network.
  *
  * v0.2 implements the policy corrections C1-C13 in the spec (section 2.1). Compared with
  * v0.1: integer days instead of java.time (so it compiles for Kotlin/JS), no String.format,
@@ -12,7 +12,7 @@
  *  - Trust is local: standing is computed per circle, never as one global score.
  *  - Access is graded (tiers). The floor tier is never "banned".
  *  - Standing decays toward neutral, it does not go negative.
- *  - Vouching gives newcomers an on-ramp; the sponsor shares a little of the risk.
+ *  - Vouching gives new members an on-ramp; the sponsor shares a little of the risk.
  *  - Essentials are always borrowable by any member (need never depends on contribution).
  *  - Owners always keep consent over their own items.
  *  - Every decision carries human-readable reasons (no opaque scores).
@@ -33,11 +33,11 @@ import kotlin.math.floor
 private const val POINTS_SCALE = 100.0          // points are rounded to 1/100 before comparing (C10)
 private const val TENTHS_SCALE = 10.0
 private const val HALF = 0.5
-private const val DEFAULT_NEIGHBOUR_POINTS = 3.0
+private const val DEFAULT_REGULAR_POINTS = 3.0
 private const val DEFAULT_TRUSTED_POINTS = 10.0
 private const val DEFAULT_STEWARD_POINTS = 25.0
 private const val DEFAULT_HALF_LIFE_DAYS = 180
-private const val DEFAULT_VOUCHES_FOR_NEIGHBOUR = 2
+private const val DEFAULT_VOUCHES_FOR_REGULAR = 2
 private const val DEFAULT_VOUCH_VALIDITY_DAYS = 180
 private const val DEFAULT_REVIEWERS_FOR_PAUSE = 3
 private const val DEFAULT_PAUSE_DAYS = 30
@@ -56,13 +56,13 @@ typealias Day = Int
 
 data class Member(val id: MemberId, val name: String)
 
-enum class Tier(val rank: Int) { NEWCOMER(0), NEIGHBOUR(1), TRUSTED(2), STEWARD(3) }
+enum class Tier(val rank: Int) { NEW(0), REGULAR(1), TRUSTED(2), STEWARD(3) }
 
 /** What kind of thing is being shared. Drives the minimum tier needed. */
 enum class ItemClass(val minTier: Tier, val heldDuringCooldown: Boolean) {
-    ESSENTIAL(Tier.NEWCOMER, heldDuringCooldown = false),   // ladder, jump leads: always open to members
-    EVERYDAY(Tier.NEWCOMER, heldDuringCooldown = false),    // crockpot, air mattress
-    VALUABLE(Tier.NEIGHBOUR, heldDuringCooldown = true),    // power tools, camping gear
+    ESSENTIAL(Tier.NEW, heldDuringCooldown = false),   // ladder, jump leads: always open to members
+    EVERYDAY(Tier.NEW, heldDuringCooldown = false),    // crockpot, air mattress
+    VALUABLE(Tier.REGULAR, heldDuringCooldown = true),    // power tools, camping gear
     HIGH_VALUE(Tier.TRUSTED, heldDuringCooldown = true)     // trailer, chainsaw, generator
 }
 
@@ -80,10 +80,10 @@ data class Item(
 
 enum class EventKind(val weight: Double) {
     LENT_ITEM_RETURNED_OK(1.0),
-    BORROWED_AND_RETURNED_OK(0.5),   // good borrowing counts, so newcomers can climb
+    BORROWED_AND_RETURNED_OK(0.5),   // good borrowing counts, so new members can climb
     SKILL_SHARE_HELPED(1.5),
     HOSTED_OR_ORGANISED(2.0),
-    MENTORED_NEWCOMER(1.5),
+    MENTORED_NEW_MEMBER(1.5),
     CONFIRMED_RETURN_PROMPTLY(0.25), // owner confirmed a return within promptConfirmDays (C13); never a penalty for not doing so
     RETURNED_LATE(-0.5),             // small and recoverable; decays like everything else
     DAMAGED_OR_LOST_UNREPORTED(-2.0); // the only sizeable negative; honest reporting is NOT penalised
@@ -95,17 +95,17 @@ enum class EventKind(val weight: Double) {
 data class CircleConfig(
     val id: CircleId,
     val name: String,
-    /** Standing points needed for each tier above NEWCOMER. Must be strictly increasing (C5). */
+    /** Standing points needed for each tier above NEW. Must be strictly increasing (C5). */
     val thresholds: Map<Tier, Double> = mapOf(
-        Tier.NEIGHBOUR to DEFAULT_NEIGHBOUR_POINTS,
+        Tier.REGULAR to DEFAULT_REGULAR_POINTS,
         Tier.TRUSTED to DEFAULT_TRUSTED_POINTS,
         Tier.STEWARD to DEFAULT_STEWARD_POINTS
     ),
-    /** Standing points fade by half this often, so quiet members drift back to NEWCOMER, not below. */
+    /** Standing points fade by half this often, so quiet members drift back to NEW, not below. */
     val halfLifeDays: Int = DEFAULT_HALF_LIFE_DAYS,
-    /** How many distinct vouchers (at least [voucherMinTier]) lift a newcomer to NEIGHBOUR. */
-    val vouchesForNeighbour: Int = DEFAULT_VOUCHES_FOR_NEIGHBOUR,
-    val voucherMinTier: Tier = Tier.NEIGHBOUR,
+    /** How many distinct vouchers (at least [voucherMinTier]) lift a new member to REGULAR. */
+    val vouchesForRegular: Int = DEFAULT_VOUCHES_FOR_REGULAR,
+    val voucherMinTier: Tier = Tier.REGULAR,
     /** Caps a vouch's author-supplied expiry (C1). */
     val vouchValidityDays: Int = DEFAULT_VOUCH_VALIDITY_DAYS,
     /** Distinct reviewers needed to place any pause; protects against one person acting alone. */
@@ -125,16 +125,16 @@ data class CircleConfig(
 
     /** Returns a list of problems; empty means the config is usable (C5). */
     fun validate(): List<String> = buildList {
-        val neighbour = thresholds[Tier.NEIGHBOUR]
+        val regular = thresholds[Tier.REGULAR]
         val trusted = thresholds[Tier.TRUSTED]
         val steward = thresholds[Tier.STEWARD]
-        if (neighbour == null || trusted == null || steward == null) {
-            add("thresholds must define NEIGHBOUR, TRUSTED and STEWARD")
-        } else if (!(0.0 < neighbour && neighbour < trusted && trusted < steward)) {
+        if (regular == null || trusted == null || steward == null) {
+            add("thresholds must define REGULAR, TRUSTED and STEWARD")
+        } else if (!(0.0 < regular && regular < trusted && trusted < steward)) {
             add("thresholds must be positive and strictly increasing")
         }
         if (halfLifeDays <= 0) add("halfLifeDays must be positive")
-        if (vouchesForNeighbour < 1) add("vouchesForNeighbour must be at least 1")
+        if (vouchesForRegular < 1) add("vouchesForRegular must be at least 1")
         if (vouchValidityDays <= 0) add("vouchValidityDays must be positive")
         if (reviewersForPause < 1) add("reviewersForPause must be at least 1")
         if (defaultPauseDays <= 0) add("defaultPauseDays must be positive")
@@ -244,20 +244,20 @@ object StandingCalculator {
 
         // Tier from points. Thresholds are strictly increasing once validated.
         var tier = Tier.entries
-            .filter { it != Tier.NEWCOMER }
+            .filter { it != Tier.NEW }
             .sortedByDescending { it.rank }
             .firstOrNull { t -> points >= (cfg.thresholds[t] ?: Double.MAX_VALUE) }
-            ?: Tier.NEWCOMER
+            ?: Tier.NEW
 
-        // Vouching on-ramp: enough distinct, live vouchers of sufficient tier lift to NEIGHBOUR (C1).
+        // Vouching on-ramp: enough distinct, live vouchers of sufficient tier lift to REGULAR (C1).
         val liveVouchers = vouches
             .filter { it.vouchee == member && it.circle == cfg.id && it.isLiveOn(today, cfg) }
             .map { it.voucher }
             .distinct()
             .count { tierOf(it).rank >= cfg.voucherMinTier.rank }
-        if (tier.rank < Tier.NEIGHBOUR.rank && liveVouchers >= cfg.vouchesForNeighbour) {
-            tier = Tier.NEIGHBOUR
-            reasons += "$liveVouchers neighbours vouched for this member, which opens Neighbour access."
+        if (tier.rank < Tier.REGULAR.rank && liveVouchers >= cfg.vouchesForRegular) {
+            tier = Tier.REGULAR
+            reasons += "$liveVouchers members vouched for this member, which opens Regular access."
         }
 
         // Incident cooldown: the clamp means points alone cannot carry a consequence (C7).
@@ -274,7 +274,7 @@ object StandingCalculator {
 
     /**
      * Two-pass tiers (C12). Pass 1: tiers from points only. Pass 2: vouching, using each voucher's pass-1 tier.
-     * A member who is NEIGHBOUR only through vouches cannot vouch for others until they earn it through points.
+     * A member who is REGULAR only through vouches cannot vouch for others until they earn it through points.
      */
     fun computeAll(
         members: Collection<MemberId>,
@@ -284,10 +284,10 @@ object StandingCalculator {
         today: Day
     ): Map<MemberId, Standing> {
         val baseTier = members.associateWith {
-            compute(it, cfg, events, emptyList(), { Tier.NEWCOMER }, today).tier
+            compute(it, cfg, events, emptyList(), { Tier.NEW }, today).tier
         }
         return members.associateWith {
-            compute(it, cfg, events, vouches, { m -> baseTier[m] ?: Tier.NEWCOMER }, today)
+            compute(it, cfg, events, vouches, { m -> baseTier[m] ?: Tier.NEW }, today)
         }
     }
 
@@ -390,7 +390,7 @@ object AccessPolicy {
         }
 
         // 5. Tier check. Owner may raise the bar for their own item, never lower it.
-        val needed = maxOf(item.itemClass.minTier, item.ownerMinTier ?: Tier.NEWCOMER, compareBy { it.rank })
+        val needed = maxOf(item.itemClass.minTier, item.ownerMinTier ?: Tier.NEW, compareBy { it.rank })
         if (standing.tier.rank >= needed.rank) {
             return AccessDecision.Eligible(
                 standing.reasons + "Your tier (${standing.tier}) meets what ${item.name} needs ($needed)."
@@ -402,9 +402,9 @@ object AccessPolicy {
             standing.reasons + "${item.name} needs $needed; you are ${standing.tier}.",
             buildList {
                 add("Borrow and return everyday items; about ${format1(gap.coerceAtLeast(0.0))} more points opens it.")
-                // Vouching only opens NEIGHBOUR (C4).
-                if (needed.rank <= Tier.NEIGHBOUR.rank) {
-                    add("Or get ${circle.vouchesForNeighbour} neighbours of tier ${circle.voucherMinTier} or above to vouch for you.")
+                // Vouching only opens REGULAR (C4).
+                if (needed.rank <= Tier.REGULAR.rank) {
+                    add("Or get ${circle.vouchesForRegular} members of tier ${circle.voucherMinTier} or above to vouch for you.")
                 }
                 add("Or offer a skill share or help at a circle event.")
             }

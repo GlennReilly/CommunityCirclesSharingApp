@@ -423,7 +423,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 }
                 FORM_RULES -> {
                     fun tenths(name: String): Int? = field(name).toDoubleOrNull()?.let { (it * 10 + 0.5).toInt() }
-                    val numbers = listOf(tenths("rules-neighbour"), tenths("rules-trusted"), tenths("rules-steward")) +
+                    val numbers = listOf(tenths("rules-regular"), tenths("rules-trusted"), tenths("rules-steward")) +
                         listOf("rules-halflife", "rules-vouches", "rules-vouch-days", "rules-reviewers", "rules-pause-days", "rules-cooldown").map { field(it).toIntOrNull() }
                     if (numbers.any { it == null }) dispatch(AppAction.Notice("Fill in every number."))
                     else reportRules(circleApp.proposeRules(rulesOf(numbers.map { it!! })))

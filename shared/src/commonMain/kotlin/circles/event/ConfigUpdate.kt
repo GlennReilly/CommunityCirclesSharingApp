@@ -10,8 +10,8 @@ private const val ROUND_UP = 0.5
 const val MAX_THRESHOLD_TENTHS = 100_000
 const val MIN_HALF_LIFE_DAYS = 30
 const val MAX_HALF_LIFE_DAYS = 730
-const val MIN_VOUCHES_FOR_NEIGHBOUR = 1
-const val MAX_VOUCHES_FOR_NEIGHBOUR = 5
+const val MIN_VOUCHES_FOR_REGULAR = 1
+const val MAX_VOUCHES_FOR_REGULAR = 5
 const val MIN_VOUCH_VALIDITY_DAYS = 30
 const val MAX_VOUCH_VALIDITY_DAYS = 730
 const val MIN_REVIEWERS_FOR_PAUSE = 2
@@ -23,11 +23,11 @@ const val MAX_INCIDENT_COOLDOWN_DAYS = 365
  * numbers only. Everything else about standing (event weights, counterpart caps) keeps the library defaults.
  */
 data class ConfigSettings(
-    val neighbourTenths: Int,
+    val regularTenths: Int,
     val trustedTenths: Int,
     val stewardTenths: Int,
     val halfLifeDays: Int,
-    val vouchesForNeighbour: Int,
+    val vouchesForRegular: Int,
     val vouchValidityDays: Int,
     val reviewersForPause: Int,
     val defaultPauseDays: Int,
@@ -35,9 +35,9 @@ data class ConfigSettings(
 ) {
     /** The first thing wrong with these values, or null. Ranges first, then the library's own check on the resulting config. */
     fun problem(base: CircleConfig): String? = when {
-        listOf(neighbourTenths, trustedTenths, stewardTenths).any { it !in 1..MAX_THRESHOLD_TENTHS } -> "thresholds must be from 0.1 to ${MAX_THRESHOLD_TENTHS / 10} points"
+        listOf(regularTenths, trustedTenths, stewardTenths).any { it !in 1..MAX_THRESHOLD_TENTHS } -> "thresholds must be from 0.1 to ${MAX_THRESHOLD_TENTHS / 10} points"
         halfLifeDays !in MIN_HALF_LIFE_DAYS..MAX_HALF_LIFE_DAYS -> "halfLifeDays must be from $MIN_HALF_LIFE_DAYS to $MAX_HALF_LIFE_DAYS"
-        vouchesForNeighbour !in MIN_VOUCHES_FOR_NEIGHBOUR..MAX_VOUCHES_FOR_NEIGHBOUR -> "vouchesForNeighbour must be from $MIN_VOUCHES_FOR_NEIGHBOUR to $MAX_VOUCHES_FOR_NEIGHBOUR"
+        vouchesForRegular !in MIN_VOUCHES_FOR_REGULAR..MAX_VOUCHES_FOR_REGULAR -> "vouchesForRegular must be from $MIN_VOUCHES_FOR_REGULAR to $MAX_VOUCHES_FOR_REGULAR"
         vouchValidityDays !in MIN_VOUCH_VALIDITY_DAYS..MAX_VOUCH_VALIDITY_DAYS -> "vouchValidityDays must be from $MIN_VOUCH_VALIDITY_DAYS to $MAX_VOUCH_VALIDITY_DAYS"
         reviewersForPause !in MIN_REVIEWERS_FOR_PAUSE..MAX_REVIEWERS_FOR_PAUSE -> "reviewersForPause must be from $MIN_REVIEWERS_FOR_PAUSE to $MAX_REVIEWERS_FOR_PAUSE"
         defaultPauseDays !in MIN_PAUSE_DAYS..MAX_PAUSE_DAYS -> "defaultPauseDays must be from $MIN_PAUSE_DAYS to $MAX_PAUSE_DAYS"
@@ -46,9 +46,9 @@ data class ConfigSettings(
     }
 
     fun applyTo(base: CircleConfig): CircleConfig = base.copy(
-        thresholds = mapOf(Tier.NEIGHBOUR to neighbourTenths / TENTHS, Tier.TRUSTED to trustedTenths / TENTHS, Tier.STEWARD to stewardTenths / TENTHS),
+        thresholds = mapOf(Tier.REGULAR to regularTenths / TENTHS, Tier.TRUSTED to trustedTenths / TENTHS, Tier.STEWARD to stewardTenths / TENTHS),
         halfLifeDays = halfLifeDays,
-        vouchesForNeighbour = vouchesForNeighbour,
+        vouchesForRegular = vouchesForRegular,
         vouchValidityDays = vouchValidityDays,
         reviewersForPause = reviewersForPause,
         defaultPauseDays = defaultPauseDays,
@@ -58,11 +58,11 @@ data class ConfigSettings(
     companion object {
         /** The settings a config currently holds. */
         fun of(config: CircleConfig): ConfigSettings = ConfigSettings(
-            neighbourTenths = tenths(config.thresholds[Tier.NEIGHBOUR] ?: 0.0),
+            regularTenths = tenths(config.thresholds[Tier.REGULAR] ?: 0.0),
             trustedTenths = tenths(config.thresholds[Tier.TRUSTED] ?: 0.0),
             stewardTenths = tenths(config.thresholds[Tier.STEWARD] ?: 0.0),
             halfLifeDays = config.halfLifeDays,
-            vouchesForNeighbour = config.vouchesForNeighbour,
+            vouchesForRegular = config.vouchesForRegular,
             vouchValidityDays = config.vouchValidityDays,
             reviewersForPause = config.reviewersForPause,
             defaultPauseDays = config.defaultPauseDays,

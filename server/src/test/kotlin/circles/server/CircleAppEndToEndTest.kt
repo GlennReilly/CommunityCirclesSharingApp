@@ -378,22 +378,22 @@ class CircleAppEndToEndTest {
         val ladder = (bea.app.addItem("Ladder", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
         alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
 
-        // The founder is a steward, so counts as trusted; Bea starts as a newcomer and is told why and how to change that.
+        // The founder is a steward, so counts as trusted; Bea starts as a new member and is told why and how to change that.
         assertEquals(Tier.TRUSTED, home(alice.app).standing!!.tier)
         assertTrue(home(alice.app).canVouch)
         val before = home(bea.app)
-        assertEquals(Tier.NEWCOMER, before.standing!!.tier)
+        assertEquals(Tier.NEW, before.standing!!.tier)
         assertFalse(before.canVouch)
         val drillAccess = before.items.single { it.item == drill }.access!!
         assertFalse(drillAccess.canAsk)
-        assertTrue(drillAccess.reasons.any { it.contains("needs NEIGHBOUR") })
+        assertTrue(drillAccess.reasons.any { it.contains("needs REGULAR") })
         assertTrue(drillAccess.howToUnlock.any { it.contains("vouch") })
         assertNull(before.items.single { it.item == ladder }.access, "no access line on your own item")
         assertTrue(before.standing!!.howToUnlock.isNotEmpty())
         val refused = assertIs<LoanResult.NotYet>(bea.app.requestLoan(drill, day + 1, day + 2, ""))
-        assertTrue(refused.reasons.any { it.contains("needs NEIGHBOUR") })
+        assertTrue(refused.reasons.any { it.contains("needs REGULAR") })
         assertEquals(0, home(bea.app).changesWaiting, "a request that would be ignored is not even queued")
-        assertEquals(VouchResult.NotAllowed, bea.app.vouchFor(home(bea.app).people.single { !it.isMe }.member), "a newcomer cannot vouch")
+        assertEquals(VouchResult.NotAllowed, bea.app.vouchFor(home(bea.app).people.single { !it.isMe }.member), "a new member cannot vouch")
         assertEquals(VouchResult.NotAllowed, alice.app.vouchFor(home(alice.app).me), "nobody vouches for themselves")
 
         // Alice borrows Bea's ladder three times and returns it each time; Bea, as the lender, earns 1.0 per good return.
@@ -408,20 +408,20 @@ class CircleAppEndToEndTest {
             alice.app.syncOnce(); bea.app.syncOnce()
         }
         assertEquals(0, home(alice.app).refusedChanges)
-        assertEquals(Tier.NEWCOMER, home(bea.app).standing!!.tier, "returns count only after the grace period")
+        assertEquals(Tier.NEW, home(bea.app).standing!!.tier, "returns count only after the grace period")
 
         day += 7
         server.clock.advanceSeconds(7L * 24 * 60 * 60) // the server refuses events dated in its future
         bea.app.syncOnce(); alice.app.syncOnce()
         val after = home(bea.app)
-        assertEquals(Tier.NEIGHBOUR, after.standing!!.tier)
+        assertEquals(Tier.REGULAR, after.standing!!.tier)
         assertEquals("3.0", after.standing!!.points)
         assertTrue(after.canVouch)
         assertTrue(after.items.single { it.item == drill }.access!!.canAsk)
         assertIs<LoanResult.Done>(bea.app.requestLoan(drill, day + 1, day + 2, "at last"))
         assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
 
-        // Vouching: Alice (steward) vouches for Bea; the Members page shows it until the expiry; Bea (now a neighbour) may too.
+        // Vouching: Alice (steward) vouches for Bea; the Members page shows it until the expiry; Bea (now Regular) may too.
         val vouched = assertIs<VouchResult.Done>(alice.app.vouchFor(home(bea.app).me))
         assertEquals(day + 180, vouched.expiresDay)
         assertEquals(day + 180, home(alice.app).people.single { !it.isMe }.vouchedByMeUntil)
@@ -1155,7 +1155,7 @@ class CircleAppEndToEndTest {
         assertEquals(TODAY, earlier.startedDay); assertEquals(TODAY, earlier.endedDay)
         assertEquals(PauseRole.REVIEWER, home(carol.app).pauseHistory.single().role)
         assertEquals(emptyList(), home(dave.app).pauses)
-        assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""), "no longer paused, though still a newcomer")
+        assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""), "no longer paused, though still a new member")
         listOf(alice, bea, carol, dave).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 
@@ -1174,20 +1174,20 @@ class CircleAppEndToEndTest {
 
         // The circle starts on the defaults, which everyone sees.
         val defaults = home(bea.app).rules.current
-        assertEquals(30, defaults.neighbourTenths); assertEquals(180, defaults.halfLifeDays)
+        assertEquals(30, defaults.regularTenths); assertEquals(180, defaults.halfLifeDays)
         // Only a steward proposes; bad numbers are explained; the lone steward's vote is enough.
         assertEquals(RulesResult.NotAllowed, bea.app.proposeRules(defaults.copy(halfLifeDays = 90)))
         assertEquals(RulesResult.Refused("those are already the circle's rules"), alice.app.proposeRules(defaults))
         assertEquals(RulesResult.Refused("halfLifeDays must be from 30 to 730"), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
         assertEquals(RulesResult.Refused("thresholds must be positive and strictly increasing"), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
-        val changed = defaults.copy(halfLifeDays = 90, vouchesForNeighbour = 1)
+        val changed = defaults.copy(halfLifeDays = 90, vouchesForRegular = 1)
         assertEquals(RulesResult.Sent(takesEffect = true), alice.app.proposeRules(changed))
         alice.app.syncOnce(); bea.app.syncOnce()
         assertEquals(changed, home(bea.app).rules.current)
         assertEquals(changed, home(alice.app).rules.current)
         assertEquals(emptyList(), home(alice.app).rules.proposals)
 
-        // An owner may raise who can ask for an item (never lower it): a newcomer cannot ask for this everyday item.
+        // An owner may raise who can ask for an item (never lower it): a new member cannot ask for this everyday item.
         val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "", circles.policy.Tier.TRUSTED) as ItemResult.Saved).item
         val open = (alice.app.addItem("Crockpot", ItemClass.EVERYDAY, "") as ItemResult.Saved).item
         alice.app.syncOnce(); bea.app.syncOnce()
@@ -1195,8 +1195,8 @@ class CircleAppEndToEndTest {
         assertEquals(null, home(bea.app).items.single { it.item == open }.ownerMinTier)
         assertIs<LoanResult.NotYet>(bea.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
         assertIs<LoanResult.Done>(bea.app.requestLoan(open, TODAY, TODAY + 1, ""))
-        // Asking for less than the class default is ignored: a valuable item stays at least Neighbour.
-        val valuable = (alice.app.addItem("Drill", ItemClass.VALUABLE, "", circles.policy.Tier.NEWCOMER) as ItemResult.Saved).item
+        // Asking for less than the class default is ignored: a valuable item stays at least Regular.
+        val valuable = (alice.app.addItem("Drill", ItemClass.VALUABLE, "", circles.policy.Tier.NEW) as ItemResult.Saved).item
         alice.app.syncOnce(); bea.app.syncOnce()
         assertEquals(null, home(bea.app).items.single { it.item == valuable }.ownerMinTier)
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
@@ -1262,7 +1262,7 @@ class CircleAppEndToEndTest {
 
         // Bea says she helped Alice with a skill. It is waiting; nothing counts yet. A steward cannot be "mentored".
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "fixed the gate"))
-        assertEquals(NoteResult.Refused("only a newcomer can be mentored"), bea.app.addContribution(ContributionKind.MENTORED_NEWCOMER, aliceId, ""))
+        assertEquals(NoteResult.Refused("only a new member can be mentored"), bea.app.addContribution(ContributionKind.MENTORED_NEW_MEMBER, aliceId, ""))
         assertEquals(NoteResult.Refused("keep it to 140 characters"), bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "x".repeat(141)))
         sync()
         assertEquals("0.0", home(bea.app).standing!!.points)

@@ -13,19 +13,19 @@ class CircleConfigTest {
 
     @Test
     fun c5_nonIncreasingThresholdsAreReportedAndFallBackToDefaults() {
-        val bad = CFG.copy(thresholds = mapOf(Tier.NEIGHBOUR to 10.0, Tier.TRUSTED to 3.0, Tier.STEWARD to 25.0))
+        val bad = CFG.copy(thresholds = mapOf(Tier.REGULAR to 10.0, Tier.TRUSTED to 3.0, Tier.STEWARD to 25.0))
         assertTrue(bad.validate().isNotEmpty())
         assertEquals(CFG.thresholds, bad.validatedOrDefault().thresholds)
     }
 
     @Test
     fun c5_missingThresholdsAreReported() {
-        assertTrue(CFG.copy(thresholds = mapOf(Tier.NEIGHBOUR to 3.0)).validate().isNotEmpty())
+        assertTrue(CFG.copy(thresholds = mapOf(Tier.REGULAR to 3.0)).validate().isNotEmpty())
     }
 
     @Test
     fun c5_equalThresholdsAreReported() {
-        val equal = CFG.copy(thresholds = mapOf(Tier.NEIGHBOUR to 3.0, Tier.TRUSTED to 3.0, Tier.STEWARD to 25.0))
+        val equal = CFG.copy(thresholds = mapOf(Tier.REGULAR to 3.0, Tier.TRUSTED to 3.0, Tier.STEWARD to 25.0))
         assertTrue(equal.validate().isNotEmpty())
     }
 
@@ -33,7 +33,7 @@ class CircleConfigTest {
     fun c5_everyNonPositiveDurationOrCountIsReported() {
         val broken = listOf(
             CFG.copy(halfLifeDays = 0),
-            CFG.copy(vouchesForNeighbour = 0),
+            CFG.copy(vouchesForRegular = 0),
             CFG.copy(vouchValidityDays = 0),
             CFG.copy(reviewersForPause = 0),
             CFG.copy(defaultPauseDays = 0),

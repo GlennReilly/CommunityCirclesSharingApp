@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 class AccessPolicyTest {
 
-    private val newcomer = standingWith(DEE)
+    private val newMember = standingWith(DEE)
     private val trusted = standingWith(ALICE, trustedHistory(ALICE))
 
     private fun decide(
@@ -24,35 +24,35 @@ class AccessPolicyTest {
     @Test
     fun essentialsAreAlwaysOpenEvenDuringAPause() {
         val pause = Pause(DEE, CIRCLE, "test", setOf(ANN, BEA, CAL), TODAY - 1, TODAY + 10)
-        assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.ESSENTIAL), newcomer, listOf(pause)))
-        assertIs<AccessDecision.Paused>(decide(DEE, item(ALICE, ItemClass.EVERYDAY), newcomer, listOf(pause)))
+        assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.ESSENTIAL), newMember, listOf(pause)))
+        assertIs<AccessDecision.Paused>(decide(DEE, item(ALICE, ItemClass.EVERYDAY), newMember, listOf(pause)))
     }
 
     @Test
     fun pauseEndsOnItsUntilDay() {
         val pause = Pause(DEE, CIRCLE, "test", setOf(ANN, BEA, CAL), TODAY - 10, TODAY)
-        assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.EVERYDAY), newcomer, listOf(pause)))
+        assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.EVERYDAY), newMember, listOf(pause)))
     }
 
     @Test
     fun ownerCannotLowerTheClassMinimum() {
-        val valuable = item(ALICE, ItemClass.VALUABLE, ownerMinTier = Tier.NEWCOMER)
-        assertIs<AccessDecision.NotYet>(decide(DEE, valuable, newcomer))
+        val valuable = item(ALICE, ItemClass.VALUABLE, ownerMinTier = Tier.NEW)
+        assertIs<AccessDecision.NotYet>(decide(DEE, valuable, newMember))
     }
 
     @Test
     fun ownerCanRaiseTheMinimum() {
-        val neighbour = standingWith(BEA, listOf(event(BEA, EventKind.HOSTED_OR_ORGANISED), event(BEA, EventKind.HOSTED_OR_ORGANISED)))
-        assertEquals(Tier.NEIGHBOUR, neighbour.tier)
+        val regular = standingWith(BEA, listOf(event(BEA, EventKind.HOSTED_OR_ORGANISED), event(BEA, EventKind.HOSTED_OR_ORGANISED)))
+        assertEquals(Tier.REGULAR, regular.tier)
         val strict = item(ALICE, ItemClass.EVERYDAY, ownerMinTier = Tier.TRUSTED)
-        assertIs<AccessDecision.NotYet>(decide(BEA, strict, neighbour))
-        assertIs<AccessDecision.Eligible>(decide(BEA, item(ALICE, ItemClass.EVERYDAY), neighbour))
+        assertIs<AccessDecision.NotYet>(decide(BEA, strict, regular))
+        assertIs<AccessDecision.Eligible>(decide(BEA, item(ALICE, ItemClass.EVERYDAY), regular))
     }
 
     @Test
     fun itemNotSharedInTheCircleIsNotYet() {
         val elsewhere = item(ALICE, ItemClass.EVERYDAY).copy(circles = setOf(CircleId("other")))
-        assertIs<AccessDecision.NotYet>(decide(DEE, elsewhere, newcomer))
+        assertIs<AccessDecision.NotYet>(decide(DEE, elsewhere, newMember))
     }
 
     // ---- C3: own item ----
@@ -66,16 +66,16 @@ class AccessPolicyTest {
 
     @Test
     fun c4_vouchRouteIsOfferedOnlyWhereVouchingHelps() {
-        val forValuable = decide(DEE, item(ALICE, ItemClass.VALUABLE), newcomer) as AccessDecision.NotYet
+        val forValuable = decide(DEE, item(ALICE, ItemClass.VALUABLE), newMember) as AccessDecision.NotYet
         assertTrue(forValuable.howToUnlock.any { "vouch" in it })
-        val forHighValue = decide(DEE, item(ALICE, ItemClass.HIGH_VALUE), newcomer) as AccessDecision.NotYet
+        val forHighValue = decide(DEE, item(ALICE, ItemClass.HIGH_VALUE), newMember) as AccessDecision.NotYet
         assertFalse(forHighValue.howToUnlock.any { "vouch" in it })
     }
 
     // ---- C7: incident cooldown holds higher-value items only ----
 
     @Test
-    fun c7_newcomerWithAnIncidentKeepsEssentialsAndEverydayItems() {
+    fun c7_newMemberWithAnIncidentKeepsEssentialsAndEverydayItems() {
         val s = standingWith(DEE, listOf(event(DEE, EventKind.DAMAGED_OR_LOST_UNREPORTED, daysAgo = 1)))
         assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.ESSENTIAL), s))
         assertIs<AccessDecision.Eligible>(decide(DEE, item(ALICE, ItemClass.EVERYDAY), s))
@@ -101,12 +101,12 @@ class AccessPolicyTest {
 
     private val tiers = mapOf(
         ALICE to Tier.TRUSTED, ANN to Tier.TRUSTED, BEA to Tier.TRUSTED,
-        CAL to Tier.NEWCOMER, DEE to Tier.NEWCOMER, BOB to Tier.NEIGHBOUR
+        CAL to Tier.NEW, DEE to Tier.NEW, BOB to Tier.REGULAR
     )
-    private fun tierOf(m: MemberId): Tier = tiers[m] ?: Tier.NEWCOMER
+    private fun tierOf(m: MemberId): Tier = tiers[m] ?: Tier.NEW
 
     @Test
-    fun c9_newcomerReviewersDoNotCount() {
+    fun c9_newMemberReviewersDoNotCount() {
         val result = AccessPolicy.tryPause(BOB, CFG, "reason", setOf(CAL, DEE, MemberId("x")), ::tierOf, TODAY)
         assertIs<PauseResult.Rejected>(result)
     }

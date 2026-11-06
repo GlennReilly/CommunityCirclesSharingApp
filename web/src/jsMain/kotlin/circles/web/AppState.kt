@@ -145,8 +145,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
 private fun allowed(model: AppModel, screen: Screen): Screen = when (model) {
     is AppModel.Open -> if (screen in Screen.beforeSignIn) Screen.Home else screen
     is AppModel.Locked -> Screen.SignIn
-    AppModel.NoIdentity -> if (screen in Screen.newcomer) screen else Screen.Welcome
-    AppModel.Loading -> if (screen in Screen.newcomer) screen else Screen.Welcome
+    AppModel.NoIdentity -> if (screen in Screen.signedOut) screen else Screen.Welcome
+    AppModel.Loading -> if (screen in Screen.signedOut) screen else Screen.Welcome
     is AppModel.AwaitingApproval -> Screen.PairDevice
 }
 

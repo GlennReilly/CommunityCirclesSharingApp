@@ -63,7 +63,7 @@ private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVE
 private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null, access = AccessSummary(true, emptyList(), emptyList()))
 private val locked = drill.copy(
     item = ItemId("3".repeat(32)), name = "Trailer", itemClass = ItemClass.HIGH_VALUE,
-    access = AccessSummary(false, listOf("Trailer needs TRUSTED; you are NEWCOMER."), listOf("Or get 2 neighbours to vouch for you.")),
+    access = AccessSummary(false, listOf("Trailer needs TRUSTED; you are NEW."), listOf("Or get 2 members (Regular or above) to vouch for you.")),
 )
 
 private fun loan(
@@ -89,12 +89,12 @@ class ScreenTest {
         for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
         for (screen in Screen.subPages) assertFalse(screen in Screen.navigation, screen.name)
         assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size, Screen.navigation.size)
-        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice, Screen.Restore), Screen.newcomer)
+        assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice, Screen.Restore), Screen.signedOut)
     }
 }
 
 class ReduceTest {
-    @Test fun aBrowserWithNoIdentityMayOnlySeeTheNewcomerPages() {
+    @Test fun aBrowserWithNoIdentityMayOnlySeeTheSignedOutPages() {
         val fresh = AppState(model = AppModel.NoIdentity)
         assertEquals(Screen.Welcome, reduce(fresh, AppAction.Navigate(Screen.Items)).screen)
         assertEquals(Screen.Welcome, reduce(fresh, AppAction.Navigate(Screen.SignIn)).screen)
@@ -204,10 +204,10 @@ class ShellViewTest {
         assertFalse("<nav" in html)
     }
 
-    private fun newcomer(screen: Screen, invite: InviteLink? = null) = render(AppState(screen = screen, model = AppModel.NoIdentity, pendingInvite = invite))
+    private fun signedOut(screen: Screen, invite: InviteLink? = null) = render(AppState(screen = screen, model = AppModel.NoIdentity, pendingInvite = invite))
 
     @Test fun theWelcomePageOffersTwoChoicesAndNoForm() {
-        val html = newcomer(Screen.Welcome)
+        val html = signedOut(Screen.Welcome)
         assertTrue("""href="${Screen.StartCircle.fragment}"""" in html)
         assertTrue("""href="${Screen.JoinCircle.fragment}"""" in html)
         assertFalse("<form" in html)
@@ -216,7 +216,7 @@ class ShellViewTest {
     }
 
     @Test fun startingACircleHasItsOwnPageWithOnlyThePassphraseForm() {
-        val html = newcomer(Screen.StartCircle)
+        val html = signedOut(Screen.StartCircle)
         assertTrue("""id="$FORM_START"""" in html)
         assertFalse("""id="$FORM_LINK"""" in html)
         assertFalse("""id="$FORM_JOIN"""" in html)
@@ -225,11 +225,11 @@ class ShellViewTest {
     }
 
     @Test fun joiningAsksForTheLinkFirstAndThenForAPassphrase() {
-        val first = newcomer(Screen.JoinCircle)
+        val first = signedOut(Screen.JoinCircle)
         assertTrue("""id="$FORM_LINK"""" in first)
         assertFalse("""id="$FORM_JOIN"""" in first)
         assertFalse("Start a circle" in first, "the join page has no start button")
-        val second = newcomer(Screen.JoinCircle, link)
+        val second = signedOut(Screen.JoinCircle, link)
         assertTrue("""id="$FORM_JOIN"""" in second)
         assertFalse("""id="$FORM_LINK"""" in second)
         assertFalse("Start a circle" in second)
@@ -245,7 +245,7 @@ class ShellViewTest {
 
     @Test fun everyTextEntryLabelEndsWithAColonAndASpace() {
         val pages = listOf(
-            newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle), newcomer(Screen.JoinCircle, link),
+            signedOut(Screen.StartCircle), signedOut(Screen.JoinCircle), signedOut(Screen.JoinCircle, link),
             render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
             render(open().copy(screen = Screen.Members, newInvite = "https://x")),
             render(open().copy(screen = Screen.AddItem)),
@@ -267,7 +267,7 @@ class ShellViewTest {
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
         val pages = listOf(
-            newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle, link),
+            signedOut(Screen.StartCircle), signedOut(Screen.JoinCircle, link),
             render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))),
         )
         for (html in pages) {
@@ -277,7 +277,7 @@ class ShellViewTest {
     }
 
     @Test fun theLinkFormButtonAlsoWaitsForSomeInput() {
-        val html = newcomer(Screen.JoinCircle)
+        val html = signedOut(Screen.JoinCircle)
         val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value ?: error("no button")
         assertTrue("hidden" in button)
         assertTrue("""$ATTR_MIN="1"""" in html)
@@ -285,12 +285,12 @@ class ShellViewTest {
     }
 
     @Test fun theMinimumLengthOfEveryRequiredFieldIsMarked() {
-        assertTrue("""$ATTR_MIN="12"""" in newcomer(Screen.StartCircle))
+        assertTrue("""$ATTR_MIN="12"""" in signedOut(Screen.StartCircle))
         assertTrue("""$ATTR_MIN="1"""" in render(open().copy(screen = Screen.AddItem)))
     }
 
     @Test fun passphraseFieldsAreLabelledMinLengthAndNeverAutofilledAsAnotherSite() {
-        val join = newcomer(Screen.JoinCircle, link)
+        val join = signedOut(Screen.JoinCircle, link)
         assertTrue("""for="$FIELD_PASSPHRASE"""" in join)
         assertTrue("""type="password"""" in join)
         assertTrue("""minlength="12"""" in join)
@@ -630,16 +630,16 @@ class ShellViewTest {
         assertTrue("""$ATTR_ITEM="${drill.item.v}"""" in html)
         assertFalse("""$ATTR_ITEM="${locked.item.v}"""" in html)
         assertTrue("Not yet." in html)
-        assertTrue("Trailer needs TRUSTED; you are NEWCOMER." in html)
-        assertTrue("Or get 2 neighbours to vouch for you." in html)
+        assertTrue("Trailer needs TRUSTED; you are NEW." in html)
+        assertTrue("Or get 2 members (Regular or above) to vouch for you." in html)
         assertTrue("Why, and how to unlock" in html)
     }
 
-    private val myStanding = StandingSummary(Tier.NEIGHBOUR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens trusted access."))
+    private val myStanding = StandingSummary(Tier.REGULAR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens trusted access."))
 
     @Test fun theStandingPageShowsOnlyYourOwnTierPointsReasonsAndNextSteps() {
         val html = render(open(home().copy(standing = myStanding)).copy(screen = Screen.Standing))
-        assertTrue("Your tier: Neighbour" in html && "Standing points: 3.5" in html)
+        assertTrue("Your tier: Regular" in html && "Standing points: 3.5" in html)
         assertTrue("Activity in this circle gives 3.5 standing points." in html)
         assertTrue("About 6.5 more standing points opens trusted access." in html)
         assertTrue("nobody is ever banned for low standing" in html)
@@ -659,7 +659,7 @@ class ShellViewTest {
         val already = members(home(people = listOf(mine, theirs.copy(vouchedByMeUntil = 20_939))).copy(canVouch = true))
         assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in already)
         assertTrue("You vouch for them until 2027-05-01." in already)
-        assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in members(home(people = listOf(mine, theirs)).copy(canVouch = false)), "newcomers see no vouch button")
+        assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in members(home(people = listOf(mine, theirs)).copy(canVouch = false)), "new members see no vouch button")
     }
 
     private fun returned(role: LoanRole, vararg tweak: (LoanSummary) -> LoanSummary): LoanSummary =
@@ -856,7 +856,7 @@ class ShellViewTest {
     }
 
     @Test fun thePairPageAsksForAPassphraseOnlyWhenALinkWasOpenedAndHasNoStartOption() {
-        val without = newcomer(Screen.PairDevice)
+        val without = signedOut(Screen.PairDevice)
         assertFalse("""id="$FORM_PAIR"""" in without)
         assertTrue("open the link shown on your other device" in without)
         val withLink = render(AppState(screen = Screen.PairDevice, model = AppModel.NoIdentity, pendingDevice = deviceLink))
@@ -1005,7 +1005,7 @@ class ShellViewTest {
     }
 
     @Test fun nothingSecretIsPutInTheMarkupExceptTheInviteTheUserAskedFor() {
-        val html = newcomer(Screen.JoinCircle, link)
+        val html = signedOut(Screen.JoinCircle, link)
         assertFalse(link.secretSeed.toBase64Url() in html)
     }
 
@@ -1129,7 +1129,7 @@ class ShellViewTest {
         val changed = defaultRules.copy(halfLifeDays = 90)
         val summary = circles.app.RulesSummary(defaultRules, listOf(circles.app.RulesProposal(changed, 1, 2, iAgree = false, canAgree = true)))
         val html = render(open(home().copy(rules = summary, stewardCount = 2)).copy(screen = Screen.Stewards))
-        assertTrue("Points for Neighbour, Trusted and Steward level: 3.0, 10.0 and 25.0" in html)
+        assertTrue("Points for Regular, Trusted and Steward level: 3.0, 10.0 and 25.0" in html)
         assertTrue("Points fade by half every 180 days" in html)
         assertTrue("1 of 2 stewards agree." in html)
         assertTrue("""$ATTR_ACTION="$ACTION_RULES_AGREE" $ATTR_RULES="30:100:250:90:2:180:3:30:90"""" in html)
@@ -1148,8 +1148,8 @@ class ShellViewTest {
     @Test fun theItemFormOffersToRaiseWhoMayAskButNotLowerIt() {
         val html = render(open(home()).copy(screen = Screen.AddItem))
         assertTrue("""for="$FIELD_MIN_TIER"""" in html && "Who may ask: " in html)
-        assertTrue("Neighbour and above" in html && "Trusted and above" in html)
-        assertFalse("Newcomer and above" in html)
+        assertTrue("Regular and above" in html && "Trusted and above" in html)
+        assertFalse("New and above" in html)
     }
 
     // ---- loan windows (ADR 0052) ----
@@ -1171,7 +1171,7 @@ class ShellViewTest {
     // ---- contribution notes (ADR 0053) ----
 
     private fun standingPage(c: circles.app.ContributionsSummary) =
-        render(open(home().copy(contributions = c, standing = StandingSummary(circles.policy.Tier.NEWCOMER, "0.0", emptyList(), emptyList()))).copy(screen = Screen.Standing))
+        render(open(home().copy(contributions = c, standing = StandingSummary(circles.policy.Tier.NEW, "0.0", emptyList(), emptyList()))).copy(screen = Screen.Standing))
 
     @Test fun theStandingPageOffersToLogAContributionAndListsNotesToConfirm() {
         val note = circles.app.NoteSummary(circles.event.NoteId("d".repeat(32)), circles.event.ContributionKind.SKILL_SHARE_HELPED, bea, "fixed the gate", 20_759, circles.app.NoteStatus.WAITING)
@@ -1179,7 +1179,7 @@ class ShellViewTest {
         assertTrue("Waiting for your confirmation" in html && "says they helped you with a skill." in html && "fixed the gate" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_NOTE_CONFIRM" $ATTR_NOTE_ID="${note.note.v}"""" in html)
         assertTrue("""id="$FORM_NOTE_ADD"""" in html && "You can make 2 more in the next 30 days." in html)
-        assertTrue("I mentored them as a newcomer" in html)
+        assertTrue("I mentored them as a new member" in html)
         assertTrue("confirmed and counted." in html)
     }
 
@@ -1230,7 +1230,7 @@ class ShellViewTest {
     }
 
     @Test fun everyPassphraseFieldHasAShowHideButtonAndPagesOfferPasswordManagersAUsername() {
-        for (html in listOf(newcomer(Screen.StartCircle), newcomer(Screen.JoinCircle, link), render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))))) {
+        for (html in listOf(signedOut(Screen.StartCircle), signedOut(Screen.JoinCircle, link), render(AppState(screen = Screen.SignIn, model = AppModel.Locked(circle))))) {
             assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_TOGGLE_SECRET"""").findAll(html).count())
             assertTrue("""$ATTR_TARGET="$FIELD_PASSPHRASE"""" in html && """aria-label="Show passphrase"""" in html && """aria-pressed="false"""" in html)
             assertFalse(">Show<" in html, "an icon, not a word")
@@ -1238,8 +1238,8 @@ class ShellViewTest {
         }
         val settings = render(open(home()).copy(screen = Screen.Settings))
         assertEquals(2, Regex("""$ATTR_ACTION="$ACTION_TOGGLE_SECRET"""").findAll(settings).count(), "current and new passphrase")
-        assertFalse("You type it each time" in newcomer(Screen.StartCircle))
-        assertTrue("password manager" in newcomer(Screen.StartCircle))
+        assertFalse("You type it each time" in signedOut(Screen.StartCircle))
+        assertTrue("password manager" in signedOut(Screen.StartCircle))
     }
 
     @Test fun theHeaderHasIconOnlySyncAndLockButtonsWithSpokenNames() {

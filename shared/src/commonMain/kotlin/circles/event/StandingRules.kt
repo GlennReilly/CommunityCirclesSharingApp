@@ -94,7 +94,7 @@ object StandingRules {
         val events = eventsFrom(loans, cfg.id, day, vouches, cfg, contributions)
         // A voucher counts by the tier their points earn (plus the steward floor), never by being vouched for (C12).
         val voucherTier = { who: MemberId ->
-            floored(who, StandingCalculator.compute(who, cfg, events, emptyList(), { Tier.NEWCOMER }, day).tier, stewards)
+            floored(who, StandingCalculator.compute(who, cfg, events, emptyList(), { Tier.NEW }, day).tier, stewards)
         }
         val own = StandingCalculator.compute(member, cfg, events, vouches, voucherTier, day)
         val tier = floored(member, own.tier, stewards)
@@ -104,7 +104,7 @@ object StandingRules {
     /** May [voucher] vouch on [day]? Their tier must reach `voucherMinTier`. */
     fun mayVouch(voucher: MemberId, cfg: CircleConfig, loans: Collection<LoanState>, vouches: List<Vouch>, stewards: Set<MemberId>, day: Int, contributions: List<ContributionState> = emptyList()): Boolean {
         val events = eventsFrom(loans, cfg.id, day, cfg = cfg, contributions = contributions)
-        val base = floored(voucher, StandingCalculator.compute(voucher, cfg, events, emptyList(), { Tier.NEWCOMER }, day).tier, stewards)
+        val base = floored(voucher, StandingCalculator.compute(voucher, cfg, events, emptyList(), { Tier.NEW }, day).tier, stewards)
         return base.rank >= cfg.voucherMinTier.rank
     }
 

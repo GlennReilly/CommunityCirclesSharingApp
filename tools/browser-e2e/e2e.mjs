@@ -184,22 +184,22 @@ try {
   await checkAccessibility(alice, 'settings at the largest text size, dark');
   await alice.evaluate('(() => { const f = document.getElementById("appearance-form"); f.elements.namedItem("text-size").value = "standard"; f.elements.namedItem("theme").value = "system"; f.requestSubmit(); return true; })()');
   await until(alice, 'document.documentElement.dataset.text === "standard" && getComputedStyle(document.documentElement).fontSize === "16px"', 'appearance back to standard'); ok('appearance back to standard');
-  // Standing: a valuable item is not open to a newcomer; the steward counts as trusted.
+  // Standing: a valuable item is not open to a new member; the steward counts as trusted.
   await alice.evaluate('location.hash = "#/items/add"'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add page for the drill');
   await setField(alice, 'item-add-form', 'name', 'Drill'); await alice.evaluate('document.getElementById("item-add-form").elements.namedItem("kind").value = "VALUABLE"');
   await alice.evaluate('document.getElementById("item-add-form").requestSubmit()'); await until(alice, has(alice, 'Drill'), 'drill listed');
   await until(bea, has(bea, 'Drill') + ' && ' + has(bea, 'Not yet.'), 'bea sees the drill as not yet open', 15000);
   const drillButtons = await bea.evaluate('[...document.querySelectorAll("li")].filter(li => li.innerText.includes("Drill") && li.querySelector("[data-action=borrow-item]")).length');
-  if (drillButtons !== 0) throw new Error('bea is offered to borrow the drill'); ok('a newcomer sees the drill as "Not yet" with no borrow button');
+  if (drillButtons !== 0) throw new Error('bea is offered to borrow the drill'); ok('a new member sees the drill as "Not yet" with no borrow button');
   await checkAccessibility(bea, 'items, a locked item with reasons');
-  const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("NEIGHBOUR")) || ""');
+  const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("REGULAR")) || ""');
   if (!why.includes('vouch')) throw new Error('no vouch route in: ' + why); ok('the reasons name the vouch route');
-  await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your tier: Newcomer'), 'bea standing');
-  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your tier: Trusted'), 'alice standing'); ok('standing pages: bea is a newcomer, alice (steward) counts as trusted');
+  await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your tier: New'), 'bea standing');
+  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your tier: Trusted'), 'alice standing'); ok('standing pages: bea is new, alice (steward) counts as trusted');
   await checkAccessibility(alice, 'my standing');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
-  if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a newcomer is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
+  if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a new member is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
   // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
   await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'This circle has one steward'), 'steward page'); ok('a lone steward is told the circle needs another');
   await checkAccessibility(alice, 'stewards');
@@ -304,6 +304,8 @@ try {
 
   // A working button shows a spinner (ADR 0057): mark one busy by hand and read the spinner's animation back.
   await alice.evaluate('location.hash = "#/home"'); await until(alice, 'document.querySelector("[data-action=sync]") !== null', 'sync button');
+  // Let the changes made by the restored browser arrive first: a re-render during the keyboard walk below would move focus away.
+  await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice up to date'); await sleep(2000);
   const spinner = await alice.evaluate('(() => { const b = document.querySelector("[data-action=sync]"); b.setAttribute("aria-busy", "true"); const a = getComputedStyle(b, "::after"); return JSON.stringify([a.animationName, a.content]); })()');
   await checkAccessibility(alice, 'home with a busy button'); await alice.evaluate('document.querySelector("[data-action=sync]").removeAttribute("aria-busy")');
   if (!spinner.includes('spin')) throw new Error('no spinner on a busy button: ' + spinner); ok('a busy button shows a spinner');
