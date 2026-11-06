@@ -23,7 +23,7 @@ Lendger is a web app for one group (a "circle") to do this for itself, with no m
 ### Trust that grows, with no bans
 
 - New members can borrow lightly. Members are at Level 1, 2 or 3: Level 1 for new people, higher levels as they take part ([ADR 0070](docs/adr/0070-level-numbers.md)). As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
-- Members choose the name others see. A member at Level 2 or above (or a steward) who has checked someone's key fingerprint in person can confirm their name, and every page then shows it as "confirmed"; changing the name clears that ([ADR 0068](docs/adr/0068-verified-display-names.md)).
+- Members choose the name others see. A member at Level 2 or above (or a steward) who has met someone and checked them, by scanning their QR code or, with no camera, reading a few characters out to each other, can confirm their identity; every page then shows "(identity confirmed)", and changing the name clears it ([ADR 0068](docs/adr/0068-verified-display-names.md), [ADR 0071](docs/adr/0071-checking-identity-in-person.md)). Stewards let new people in the same way.
 - Members can vouch for a new member. Contribution notes (for example, helping at a working bee) also count.
 - There are no star ratings. Owners decide who borrows their things; standing is advice shown to them.
 - As a last resort, members at Level 3 can pause someone. A pause needs several reviewers, has an end date and an appeal, and keeps essentials open ([ADR 0050](docs/adr/0050-pauses.md)). Nobody is banned for good.
@@ -38,7 +38,7 @@ Lendger is a web app for one group (a "circle") to do this for itself, with no m
 
 - You do not sign up. Your keys are made in your browser and stay there, locked by a passphrase. You can also unlock with your device's passkey or fingerprint where the browser supports it.
 - A 12-word recovery code lets you get back in if you lose a device. Stewards can also hold pieces of the circle's key, so the group can recover it together.
-- You join through an invite link. You can add a second device (your phone and your laptop) after checking a short fingerprint.
+- You join through an invite link. You can add a second device (your phone and your laptop) after comparing a few characters on both screens.
 
 ### Works offline, installs like an app
 

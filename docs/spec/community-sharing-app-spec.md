@@ -154,7 +154,7 @@ Consequences:
 | `member.invite` | member | Invite with a public invite key; secret travels in link fragment |
 | `member.join` | invitee | Redeems invite, registers first device key, pending until keys are wrapped |
 | `member.profile` | member | Display name (ADR 0068: 1 to 40 characters, rules there; a change clears confirmations). Contact preferences and coarse area are not built |
-| `member.name.confirm` | member at REGULAR or above, or a steward | Confirms another member's current name after checking their key fingerprint in person; binds the `member.profile` event id and the name (ADR 0068) |
+| `member.name.confirm` | member at REGULAR or above, or a steward | Confirms another member's identity (their current name) after checking them in person, by QR code or by reading the key fingerprint out (shown as "Confirm identity", ADR 0071); binds the `member.profile` event id and the name (ADR 0068) |
 | `device.add` / `device.revoke` | member or steward | Register or revoke a device |
 | `key.wrap` | member or steward | Circle key (epoch N) wrapped to a device |
 | `key.rotate` | steward | New epoch; wraps to all current devices |

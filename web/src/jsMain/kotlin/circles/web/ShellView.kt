@@ -3,6 +3,7 @@ package circles.web
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MemberSummary
+import circles.app.WaitingDevice
 import circles.event.MAX_DISPLAY_NAME_CODE_POINTS
 import circles.policy.MemberId
 import circles.app.PauseHistoryEntry
@@ -117,7 +118,7 @@ const val FIELD_LINK = "invite-link"
 const val SUBMIT_ID = "submit"
 const val ACTION_INVITE = "invite"
 const val ACTION_COPY = "copy-invite"
-const val ACTION_ADMIT = "admit"
+const val ACTION_CHECK_PERSON = "check-person"
 const val ACTION_LOCK = "lock"
 const val ACTION_SYNC = "sync"
 const val ACTION_ERASE = "erase"
@@ -219,7 +220,7 @@ const val FORM_ADD_DEVICE = "add-device-form"
 const val FIELD_DEVICE_CODE = "device-code"
 const val FIELD_DEVICE_NAME = "device-name"
 const val FIELD_CHECKED = "fingerprints-match"
-const val ID_DEVICE_PREVIEW = "device-preview"
+const val FORM_CONFIRM_DEVICE = "confirm-device-form"
 const val ID_DEVICE_LINK = "device-link"
 const val ID_THIS_DEVICE_CODE = "this-device-code"
 const val ACTION_REMOVE_MEMBER = "remove-member"
@@ -247,14 +248,19 @@ const val ATTR_DEVICE = "data-device"
 private const val ID_INVITE_OUTPUT = "invite-output"
 /** How a member without a name shows until they choose one (ADR 0068). */
 const val UNNAMED_MEMBER = "New member (waiting for a name)"
-const val NAME_CONFIRMED = "(confirmed)"
-const val NAME_NOT_CONFIRMED = "(not confirmed yet)"
+/** Whether someone checked in person that this member is who they say (ADR 0068, worded per ADR 0071). */
+const val NAME_CONFIRMED = "(identity confirmed)"
+const val NAME_NOT_CONFIRMED = "(identity not confirmed yet)"
 const val FORM_MY_NAME = "name-form"
 const val FORM_RENAME = "rename-form"
 const val ID_NAME_REFUSAL = "name-refusal"
 const val FIELD_DISPLAY_NAME = "display-name"
 const val FORM_CONFIRM_NAME_PREFIX = "confirm-name-"
 const val FIELD_NAME_CHECKED = "name-checked"
+const val FORM_LET_IN_PREFIX = "let-in-"
+const val FIELD_LET_IN_CHECKED = "let-in-checked"
+/** The tick every in-person check asks for (ADR 0071). */
+const val CHECKED_IN_PERSON = "I checked this person's identity in person"
 /** A tick box that must be ticked before its form's submit button shows. */
 const val ATTR_MUST_CHECK = "data-must-check"
 
@@ -354,7 +360,7 @@ fun FlowContent.shell(state: AppState) {
             is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
                 Screen.YourName -> yourNamePage(model.home.nameRefusal)
-                Screen.Home -> home(model.home)
+                Screen.Home -> home(model.home, state)
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home, state)
                 Screen.RecoveryCode -> recoveryCodePage(state)
@@ -364,6 +370,8 @@ fun FlowContent.shell(state: AppState) {
                 Screen.RecoveryShares -> recoverySharesPage(model.home, state)
                 Screen.Items -> items(model.home, state)
                 Screen.Verify -> verifyPage(model.home, state)
+                Screen.CheckIdentity -> checkIdentityPage(model.home, state)
+                Screen.CheckDevice -> checkDevicePage(state)
                 Screen.ItemTag -> itemTagPage(model.home, state)
                 Screen.Skills -> skills(model.home)
                 Screen.AddSkill -> skillForm(null)
@@ -584,12 +592,19 @@ private fun FlowContent.signIn(passkey: Boolean) {
     }
 }
 
-private fun FlowContent.home(home: HomeData) {
+private fun FlowContent.home(home: HomeData, state: AppState) {
     h1 { +Screen.Home.title }
     if (!home.canRead) {
         p {
             role = "status"
             +"You are in the circle. A steward needs to let you in before you can see anything."
+        }
+        // The steward checks this device in person before letting it in (ADR 0071): show them the code.
+        home.people.firstOrNull { it.isMe }?.let { me ->
+            section {
+                h2 { +"Show a steward who you are" }
+                myCode(home, me.fingerprint, state)
+            }
         }
     }
     ul {
@@ -676,30 +691,102 @@ private fun FlowContent.yourNamePage(refusal: String?) {
     }
 }
 
+/** A tick box that must be ticked before its form's button shows: the box first, then its sentence (no colon). */
+private fun FlowContent.mustTick(name: String, id: String, text: String) {
+    div {
+        classes = setOf("check-row")
+        input(type = InputType.checkBox, name = name) {
+            this.id = id
+            required = true
+            attributes[ATTR_MUST_CHECK] = "true"
+        }
+        label {
+            attributes["for"] = id
+            +text
+        }
+    }
+}
+
+/** The characters two people compare when there is no camera: big, spaced, easy to read out (ADR 0071). */
+private fun FlowContent.fingerprintText(fingerprint: String) {
+    p {
+        classes = setOf("fingerprint")
+        +fingerprint
+    }
+}
+
 /**
- * Confirming another member's name (ADR 0068): the fingerprint is on the same card or page, and the button only shows
- * once the box saying it was checked in person is ticked.
+ * Confirming another member's identity (ADR 0068, 0071). It sits only on the check pages, never on a card, and the
+ * button shows once the box saying it was checked in person is ticked.
  */
-private fun FlowContent.confirmNameForm(person: MemberSummary) {
-    val box = "$FIELD_NAME_CHECKED-${person.member.v}"
+private fun FlowContent.confirmIdentityForm(person: MemberSummary) {
     form {
         id = FORM_CONFIRM_NAME_PREFIX + person.member.v
         attributes[ATTR_MEMBER] = person.member.v
-        p { +"Confirm this name only if you know this person and compared the key fingerprint ${person.fingerprint} with the one on their own device." }
-        div {
-            classes = setOf("check-row")
-            input(type = InputType.checkBox, name = FIELD_NAME_CHECKED) {
-                id = box
-                required = true
-                attributes[ATTR_MUST_CHECK] = "true"
-            }
-            label {
-                attributes["for"] = box
-                +"I checked this person's key fingerprint in person"
-            }
-        }
-        formSubmit("Confirm their name")
+        p { +"Confirm their identity only if you know this person and checked their QR code or characters with them in person." }
+        mustTick(FIELD_NAME_CHECKED, "$FIELD_NAME_CHECKED-${person.member.v}", CHECKED_IN_PERSON)
+        formSubmit("Confirm identity")
     }
+}
+
+/** A steward lets a waiting device in, after checking the person in person (ADR 0071). */
+private fun FlowContent.letInForm(waiting: WaitingDevice) {
+    form {
+        id = FORM_LET_IN_PREFIX + waiting.device.v
+        attributes[ATTR_DEVICE] = waiting.device.v
+        p { +"Letting them in gives this device the circle's key. Do it only after checking them in person." }
+        mustTick(FIELD_LET_IN_CHECKED, "$FIELD_LET_IN_CHECKED-${waiting.device.v}", CHECKED_IN_PERSON)
+        formSubmit("Let them in")
+    }
+}
+
+/** The vouch button, or how long my vouch lasts. Only on the check pages, so the check is one glance away (ADR 0071). */
+private fun FlowContent.vouchPart(home: HomeData, person: MemberSummary) {
+    val vouchedUntil = person.vouchedByMeUntil
+    if (vouchedUntil != null) {
+        p { +"You vouch for them until ${CalendarDay.format(vouchedUntil)}." }
+    } else if (home.canVouch) {
+        p { +"Vouch only for people you know. ${home.rules.current.vouchesForRegular} vouches from members at ${TierText.orAbove(Tier.REGULAR)} give a new member ${TierText.label(Tier.REGULAR)} access." }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_VOUCH
+            attributes[ATTR_MEMBER] = person.member.v
+            +"Vouch for this person"
+        }
+    }
+}
+
+/**
+ * My own code for someone to check me (ADR 0062, 0071): the QR code of the verify link, the link, and below it the
+ * characters to read out when there is no camera.
+ */
+private fun FlowContent.myCode(home: HomeData, fingerprint: String, state: AppState) {
+    p { +"Let the other person point their phone's camera at this. The link opens in Lendger on their phone, where they must be signed in, and it checks your key for them." }
+    val link = VerifyLink(home.circle, home.me, Fingerprint.compact(fingerprint)).format(state.origin)
+    qrImage(link, "QR code of the link that checks your identity")
+    label {
+        attributes["for"] = ID_VERIFY_LINK
+        +"Or send them this link: "
+    }
+    input(type = InputType.text) {
+        id = ID_VERIFY_LINK
+        value = link
+        readonly = true
+    }
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_COPY_FIELD
+        attributes[ATTR_FROM] = ID_VERIFY_LINK
+        +"Copy"
+    }
+    p { +"No camera? Read these characters out to each other. They must match the ones on their screen:" }
+    fingerprintText(fingerprint)
+}
+
+/** One line under a member's name: whether someone checked their identity in person, in words (ADR 0071). */
+private fun identityLine(home: HomeData, person: MemberSummary): String = when {
+    person.nameConfirmed && person.iConfirmed -> "You confirmed their identity."
+    person.nameConfirmed -> "Identity confirmed by ${person.nameConfirmedBy.joinToString(", ") { nameOf(home, it) }}."
+    person.isMe -> "Nobody has confirmed your identity yet. Meet a member in person and let them check your QR code."
+    else -> "Nobody has confirmed their identity yet."
 }
 
 /** Who is in the circle, how to bring someone in, and (for stewards) who is waiting at the door. */
@@ -719,51 +806,18 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                         add(if (person.devices == 1) "1 device" else "${person.devices} devices")
                     }.joinToString(", ")
                 }
-                p { +"Key fingerprint: ${person.fingerprint}" }
-                if (person.displayName != null) {
-                    p {
-                        +when {
-                            person.nameConfirmed && person.iConfirmed -> "You confirmed this name."
-                            person.nameConfirmed -> "Name confirmed by ${person.nameConfirmedBy.joinToString(", ") { nameOf(home, it) }}."
-                            person.isMe -> "Nobody has confirmed your name yet. Show someone your fingerprint in person and ask them to confirm it."
-                            else -> "Nobody has confirmed this name yet."
-                        }
-                    }
-                }
-                if (person.canConfirmName) confirmNameForm(person)
+                if (person.displayName != null) p { +identityLine(home, person) }
                 if (person.isMe) {
                     details {
                         summary { +"Show my QR code" }
-                        p { +"Let the other person point their phone's camera at this. The link opens in Lendger on their phone, where they must be signed in, and it checks your key fingerprint for them." }
-                        val link = VerifyLink(home.circle, person.member, Fingerprint.compact(person.fingerprint)).format(state.origin)
-                        qrImage(link, "QR code of the link that checks your key fingerprint")
-                        label {
-                            attributes["for"] = ID_VERIFY_LINK
-                            +"Or send them this link: "
-                        }
-                        input(type = InputType.text) {
-                            id = ID_VERIFY_LINK
-                            value = link
-                            readonly = true
-                        }
-                        button(type = ButtonType.button) {
-                            attributes[ATTR_ACTION] = ACTION_COPY_FIELD
-                            attributes[ATTR_FROM] = ID_VERIFY_LINK
-                            +"Copy"
-                        }
-                        p { +"Or read your fingerprint out: ${person.fingerprint}" }
+                        myCode(home, person.fingerprint, state)
                     }
-                }
-                if (!person.isMe) {
-                    val vouchedUntil = person.vouchedByMeUntil
-                    if (vouchedUntil != null) {
-                        p { +"You vouch for them until ${CalendarDay.format(vouchedUntil)}." }
-                    } else if (home.canVouch) {
-                        button(type = ButtonType.button) {
-                            attributes[ATTR_ACTION] = ACTION_VOUCH
-                            attributes[ATTR_MEMBER] = person.member.v
-                            +"Vouch for this person"
-                        }
+                } else {
+                    person.vouchedByMeUntil?.let { p { +"You vouch for them until ${CalendarDay.format(it)}." } }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
+                        attributes[ATTR_MEMBER] = person.member.v
+                        +"Check identity"
                     }
                 }
                 if (person.canRemove) {
@@ -780,8 +834,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
             }
         }
     }
-    p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
-    p { +"Vouching tells the circle you know this person. ${home.rules.current.vouchesForRegular} vouches from members at ${TierText.orAbove(Tier.REGULAR)} give a new member ${TierText.label(Tier.REGULAR)} access. Only vouch for people you know." }
+    p { +"To confirm who someone is, or to vouch for them, meet in person and choose Check identity on their card." }
     if (home.needsRotation) {
         section {
             h2 { +"Change the key" }
@@ -802,11 +855,12 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                 for (waiting in home.waiting) {
                     li {
                         personName(home, waiting.member)
-                        +". Key fingerprint: ${home.people.firstOrNull { it.member == waiting.member }?.fingerprint.orEmpty()} "
+                        +" "
                         button(type = ButtonType.button) {
-                            attributes[ATTR_ACTION] = ACTION_ADMIT
+                            attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
+                            attributes[ATTR_MEMBER] = waiting.member.v
                             attributes[ATTR_DEVICE] = waiting.device.v
-                            +"Let in"
+                            +"Check and let in"
                         }
                     }
                 }
@@ -834,6 +888,70 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                 attributes[ATTR_ACTION] = ACTION_COPY
                 +"Copy"
             }
+        }
+    }
+}
+
+/**
+ * Checking a member in person (ADR 0071): the QR route first, the characters as the fallback, then what the check is
+ * for. With a waiting device it is the steward's let-in step; otherwise confirming identity and vouching.
+ */
+private fun FlowContent.checkIdentityPage(home: HomeData, state: AppState) {
+    h1 { +Screen.CheckIdentity.title }
+    val check = state.checking
+    val person = check?.let { c -> home.people.firstOrNull { it.member == c.member } }
+    val waiting = check?.device?.let { device -> home.waiting.firstOrNull { it.device == device } }
+    when {
+        check == null || person == null -> p { +"This person is not in the circle any more." }
+        check.device != null && (waiting == null || !home.isSteward) -> p { +"Nobody is waiting with that device any more: they have been let in, or left." }
+        person.isMe -> p { +"That is you. To be checked by someone else, show them your QR code on the Members page." }
+        else -> {
+            p {
+                +(if (waiting != null) "Letting in: " else "Checking: ")
+                personName(home, person.member)
+            }
+            section {
+                h2 { +"With a camera" }
+                p {
+                    +(
+                        if (waiting != null) "Meet them in person. Their Circle home page shows a QR code. Point your phone's camera at it: Lendger opens on your phone and says whether it matches."
+                        else "Meet them in person. Ask them to open Members and Show my QR code, then point your phone's camera at it. Lendger opens on your phone and says whether it matches."
+                    )
+                }
+            }
+            section {
+                h2 { +"No camera?" }
+                p { +"Read these characters out to each other. They must match the ones under their QR code exactly:" }
+                fingerprintText(waiting?.fingerprint ?: person.fingerprint)
+            }
+            identityActions(home, person, listOfNotNull(waiting))
+        }
+    }
+    p { a(href = Screen.Members.fragment) { +"Back to members" } }
+}
+
+/** What can follow a successful check: letting [letIn] in, confirming identity, vouching. Each keeps its own rules. */
+private fun FlowContent.identityActions(home: HomeData, person: MemberSummary, letIn: List<WaitingDevice>) {
+    if (letIn.isNotEmpty()) {
+        section {
+            h2 { +"Let them in" }
+            for (waiting in letIn) letInForm(waiting)
+        }
+        return
+    }
+    section {
+        h2 { +"Confirm identity" }
+        when {
+            person.canConfirmName -> confirmIdentityForm(person)
+            person.displayName == null -> p { +"They have not chosen a name yet, so there is nothing to confirm." }
+            person.nameConfirmed -> p { +identityLine(home, person) }
+            else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm someone's identity." }
+        }
+    }
+    if (person.vouchedByMeUntil != null || home.canVouch) {
+        section {
+            h2 { +"Vouch" }
+            vouchPart(home, person)
         }
     }
 }
@@ -1165,10 +1283,7 @@ private fun FlowContent.borrow(home: HomeData) {
                     if (loan.role == LoanRole.OWNER && loan.toDay < home.today) {
                         details {
                             summary { +"Ask them to return it" }
-                            p {
-                                val fingerprint = home.people.firstOrNull { it.member == loan.other }?.fingerprint ?: "not known yet"
-                                +"Ask ${who(home, loan)} in person, or wherever your group talks: Lendger sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
-                            }
+                            p { +"Ask ${who(home, loan)} in person, or wherever your group talks: Lendger sends nothing." }
                         }
                     }
                     if (loan.role == LoanRole.BORROWER) {
@@ -1388,7 +1503,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
             +"Others see you as: "
             personName(home, home.me)
         }
-        p { +"Changing your name clears its confirmations. Someone will need to check your fingerprint and confirm it again." }
+        p { +"If you change your name, your identity needs confirming again: someone will need to check you in person." }
         form {
             id = FORM_RENAME
             nameField("New name: ")
@@ -1758,8 +1873,8 @@ private fun FlowContent.awaiting(model: AppModel.AwaitingApproval) {
         attributes[ATTR_FROM] = ID_THIS_DEVICE_CODE
         +"Copy"
     }
-    p { +"Fingerprint: ${model.fingerprint}" }
-    p { +"Your other device will show a fingerprint too. Check that the two match before you add this device there." }
+    p { +"Your other device will then show characters to compare. They must match these exactly:" }
+    fingerprintText(model.fingerprint)
     p {
         role = "status"
         +"Waiting for your other device. This page checks every few seconds."
@@ -1819,7 +1934,7 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
             attributes[ATTR_FROM] = ID_DEVICE_LINK
             +"Copy"
         }
-        p { +"Then paste the code the other browser shows, and check that its fingerprint matches the one below." }
+        p { +"Then paste the code the other browser shows. Next, you compare a few characters on both screens." }
         form {
             id = FORM_ADD_DEVICE
             label {
@@ -1833,10 +1948,6 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
                 attributes["autocomplete"] = "off"
                 attributes["spellcheck"] = "false"
             }
-            p {
-                id = ID_DEVICE_PREVIEW
-                attributes["aria-live"] = "polite"
-            }
             label {
                 attributes["for"] = FIELD_DEVICE_NAME
                 +"Name of the device: "
@@ -1846,21 +1957,29 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
                 attributes["maxlength"] = MAX_DEVICE_NAME_CHARS.toString()
                 attributes["autocomplete"] = "off"
             }
-            // A tick box reads as "[ ] statement": the box first, then its sentence (no colon: it is not asking for typing).
-            div {
-                classes = setOf("check-row")
-                input(type = InputType.checkBox, name = FIELD_CHECKED) {
-                    id = FIELD_CHECKED
-                    required = true
-                }
-                label {
-                    attributes["for"] = FIELD_CHECKED
-                    +"The fingerprint above matches the one on the new device"
-                }
-            }
+            formSubmit("Next")
+        }
+    }
+}
+
+/** The pairing check (ADR 0046, 0071): the characters of the pasted keys, compared with the new device's screen. */
+private fun FlowContent.checkDevicePage(state: AppState) {
+    h1 { +Screen.CheckDevice.title }
+    val adding = state.addingDevice
+    if (adding == null) {
+        p { +"There is no device being added." }
+    } else {
+        p { +"Adding: ${adding.name.ifBlank { "Unnamed device" }}" }
+        p { +"Look at the new device's screen. Read its characters against these, group by group:" }
+        fingerprintText(adding.fingerprint)
+        p { +"If they do not match, do not add it: the code may have been changed on the way. Copy it again from the new device." }
+        form {
+            id = FORM_CONFIRM_DEVICE
+            mustTick(FIELD_CHECKED, FIELD_CHECKED, "These characters match the ones on the new device")
             formSubmit("Add this device")
         }
     }
+    p { a(href = Screen.Settings.fragment) { +"Back to settings" } }
 }
 
 /** Writing down a new recovery code, then proving it was copied (ADR 0047). */
@@ -2334,11 +2453,9 @@ private fun FlowContent.skills(home: HomeData) {
                         }
                     }
                 } else {
-                    val person = home.people.firstOrNull { it.member == skill.owner }
                     p {
                         +"Offered by "
                         personName(home, skill.owner)
-                        person?.let { +". Check who they are: ${it.fingerprint}" }
                     }
                 }
             }
@@ -2473,11 +2590,16 @@ private fun FlowContent.qrImage(text: String, description: String) {
 
 private const val QR_QUIET_MODULES = 4
 
-/** What opening a member's QR code link says (ADR 0062): the page works out the member's fingerprint itself and compares. */
+/**
+ * What opening a member's QR code link says (ADR 0062): the page works out the member's key itself and compares. After a
+ * match it offers what the check is for (ADR 0071): letting a matching waiting device in, confirming identity, vouching.
+ */
 private fun FlowContent.verifyPage(home: HomeData, state: AppState) {
     h1 { +Screen.Verify.title }
     val link = state.verifying
     val person = link?.let { l -> home.people.firstOrNull { it.member == l.member } }
+    val waiting = if (link == null || !home.isSteward) emptyList()
+    else home.waiting.filter { it.member == link.member && Fingerprint.compact(it.fingerprint) == link.fingerprint }
     when {
         link == null -> p { +"Nothing to check." }
         link.circle != home.circle -> p { +"This code is for a different circle." }
@@ -2488,14 +2610,12 @@ private fun FlowContent.verifyPage(home: HomeData, state: AppState) {
                 role = "status"
                 +"Matches. This is ${nameOf(home, person.member)}: the key you hold for them is the one in their code."
             }
-            p { +"Their key fingerprint: ${person.fingerprint}" }
-            if (person.canConfirmName) confirmNameForm(person)
-            if (person.vouchedByMeUntil == null && home.canVouch) p { +"If you know them, you can vouch for them on the Members page." }
+            identityActions(home, person, waiting)
         }
         else -> {
             p {
                 role = "alert"
-                +"Does not match. The code says this key fingerprint is ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for ${nameOf(home, person.member)} is ${person.fingerprint}. Do not trust this person until you have compared fingerprints in person."
+                +"Does not match. The code says ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for ${nameOf(home, person.member)} reads ${person.fingerprint}. Do not trust this person until you have checked them in person."
             }
         }
     }

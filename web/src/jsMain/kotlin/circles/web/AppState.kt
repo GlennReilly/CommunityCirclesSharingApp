@@ -24,6 +24,10 @@ data class AppState(
     val editing: ItemId? = null,
     /** A member to check, from a QR code the phone's camera opened (ADR 0062). */
     val verifying: circles.app.VerifyLink? = null,
+    /** The member (and, for letting in, the waiting device) on the Check identity page (ADR 0071). */
+    val checking: PersonCheck? = null,
+    /** A device pasted on Settings, waiting for its characters to be compared on Check the new device (ADR 0071). */
+    val addingDevice: DeviceToAdd? = null,
     /** An item opened from its printed tag: the Items page shows just this one until told otherwise. */
     val focusItem: ItemId? = null,
     /** The item whose tag is being shown for printing. */
@@ -48,6 +52,12 @@ data class AppState(
     val signedIn: Boolean get() = model is AppModel.Open
 }
 
+/** Who is being checked in person: a member, and the device a steward is about to let in, if any (ADR 0071). */
+data class PersonCheck(val member: circles.policy.MemberId, val device: circles.event.DeviceId? = null)
+
+/** A pasted device code with its name and the characters to compare before adding it (ADR 0046, 0071). */
+data class DeviceToAdd(val code: String, val name: String, val fingerprint: String)
+
 sealed interface AppAction {
     data class Navigate(val screen: Screen) : AppAction
     data class ModelChanged(val model: AppModel) : AppAction
@@ -63,6 +73,8 @@ sealed interface AppAction {
     data class InviteMade(val link: String?) : AppAction
     data class EditItem(val item: ItemId) : AppAction
     data class VerifyLinkSeen(val link: circles.app.VerifyLink) : AppAction
+    data class CheckPerson(val check: PersonCheck) : AppAction
+    data class CheckNewDevice(val device: DeviceToAdd?) : AppAction
     data class ItemLinkSeen(val item: ItemId) : AppAction
     data class TagItem(val item: ItemId) : AppAction
     data object ShowAllItems : AppAction
@@ -77,10 +89,14 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     is AppAction.Navigate -> state.copy(
         // A link's target only lives while its page is on show.
         verifying = if (!state.signedIn || action.screen == Screen.Verify) state.verifying else null,
+        checking = if (action.screen == Screen.CheckIdentity) state.checking else null,
+        addingDevice = if (action.screen == Screen.CheckDevice) state.addingDevice else null,
         focusItem = if (!state.signedIn || action.screen == Screen.Items) state.focusItem else null,
         screen = allowed(state.model, action.screen).let {
         when {
             it == Screen.Verify && state.verifying == null -> Screen.Members
+            it == Screen.CheckIdentity && state.checking == null -> Screen.Members
+            it == Screen.CheckDevice && state.addingDevice == null -> Screen.Settings
             it == Screen.ItemTag && state.tagging == null -> Screen.Items
             it == Screen.EditItem && state.editing == null -> Screen.Items
             it == Screen.EditSkill && state.editingSkill == null -> Screen.Skills
@@ -90,6 +106,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         }
     },
     )
+    is AppAction.CheckPerson -> if (state.signedIn) state.copy(checking = action.check, screen = Screen.CheckIdentity) else state
+    is AppAction.CheckNewDevice -> if (state.signedIn) state.copy(addingDevice = action.device, screen = if (action.device != null) Screen.CheckDevice else Screen.Settings) else state
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
     is AppAction.EditSkill -> if (state.signedIn) state.copy(editingSkill = action.skill, screen = Screen.EditSkill) else state
     is AppAction.EditItem -> if (state.signedIn) state.copy(editing = action.item, screen = Screen.EditItem) else state
@@ -113,6 +131,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             pendingDevice = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingDevice,
             pendingRestore = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingRestore,
             recoveryDraft = if (open) state.recoveryDraft else null,
+            checking = if (open) state.checking else null,
+            addingDevice = if (open) state.addingDevice else null,
             shareCodes = if (open) state.shareCodes else emptyMap(),
         )
     }

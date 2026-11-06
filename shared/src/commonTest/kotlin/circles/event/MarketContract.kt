@@ -1010,8 +1010,8 @@ abstract class MarketContract {
         val id = named.eventId(w.crypto)
         assertEquals(
             listOf(
-                "a member cannot confirm their own name",
-                "only a member at Level 2 or above, or a steward, may confirm a name",
+                "a member cannot confirm their own identity",
+                "only a member at Level 2 or above, or a steward, may confirm someone's identity",
                 "that member has not set a name",
             ),
             w.reasons(

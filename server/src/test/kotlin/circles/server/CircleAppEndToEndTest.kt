@@ -149,6 +149,9 @@ class CircleAppEndToEndTest {
         alice.app.syncOnce()
         val waiting = home(alice.app).waiting.single()
         assertEquals(beaHome.me, waiting.member)
+        // The steward compares the waiting device's own characters with the ones on Bea's screen (ADR 0071).
+        assertEquals(beaHome.people.single { it.isMe }.fingerprint, waiting.fingerprint)
+        assertTrue(Regex("[0-9a-f]{4}( [0-9a-f]{4}){4}").matches(waiting.fingerprint), waiting.fingerprint)
         assertTrue(alice.app.admit(waiting.device))
         alice.app.syncOnce()
         assertEquals(emptyList(), home(alice.app).waiting)
@@ -1539,8 +1542,8 @@ class CircleAppEndToEndTest {
         val seenByCarol = home(carol.app).people.single { it.member == beaId }
         assertEquals("Bea Lee", seenByCarol.displayName)
         assertFalse(seenByCarol.canConfirmName)
-        assertEquals(NameResult.Refused("only a member at Level 2 or above, or a steward, may confirm a name"), carol.app.confirmName(beaId))
-        assertEquals(NameResult.Refused("a member cannot confirm their own name"), bea.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("only a member at Level 2 or above, or a steward, may confirm someone's identity"), carol.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("a member cannot confirm their own identity"), bea.app.confirmName(beaId))
         // Alice is a steward: she checks Bea's fingerprint in person and confirms.
         assertTrue(home(alice.app).people.single { it.member == beaId }.canConfirmName)
         assertEquals(NameResult.Saved, alice.app.confirmName(beaId))

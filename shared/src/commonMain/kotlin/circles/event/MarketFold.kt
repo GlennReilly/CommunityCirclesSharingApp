@@ -367,12 +367,12 @@ internal class MarketFold(
      * names the profile event, so one made for an earlier name, or for the same text set again, is stale and refused.
      */
     private fun confirmName(author: MemberId, v: NameConfirmation, day: Int, id: EventId): String? {
-        if (v.member == author) return "a member cannot confirm their own name"
+        if (v.member == author) return "a member cannot confirm their own identity"
         val current = names[v.member] ?: return "that member has not set a name"
         if (v.profile != current.profile || v.name != current.name) return "the name has changed since"
         if (author in current.confirmations) return "already confirmed"
         val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
-        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, may confirm a name"
+        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, may confirm someone's identity"
         names[v.member] = current.copy(confirmations = current.confirmations + (author to day))
         return null
     }

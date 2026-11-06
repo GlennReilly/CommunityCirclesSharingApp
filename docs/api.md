@@ -30,7 +30,7 @@ Status codes: `401` missing or bad token, `403` the device is not in that circle
 
 ## Sealed event types
 
-Accepted from any registered, unrevoked device of the circle, with an empty `public` and a sealed payload the server cannot read (it checks only the sender, the epoch and that a payload exists): `item.upsert`, `item.retire`, `item.detail`, `loan.request`, `loan.respond`, `loan.handover`, `loan.return`, `loan.cancel`, `loan.dispute`, `loan.resolve`, `vouch`, `standing.note`, `standing.confirm`, `pause.propose`, `pause.review`, `pause.appeal`, `pause.lift`, `config.update`, `skill.upsert`, `skill.retire`, and since ADR 0068 `member.profile` (a member's display name) and `member.name.confirm` (another member confirms it). Clients apply the rules while folding. Every type declared in the spec is now accepted; anything else is refused with `unsupported_type`.
+Accepted from any registered, unrevoked device of the circle, with an empty `public` and a sealed payload the server cannot read (it checks only the sender, the epoch and that a payload exists): `item.upsert`, `item.retire`, `item.detail`, `loan.request`, `loan.respond`, `loan.handover`, `loan.return`, `loan.cancel`, `loan.dispute`, `loan.resolve`, `vouch`, `standing.note`, `standing.confirm`, `pause.propose`, `pause.review`, `pause.appeal`, `pause.lift`, `config.update`, `skill.upsert`, `skill.retire`, and since ADR 0068 `member.profile` (a member's display name) and `member.name.confirm` (another member confirms it; shown to people as confirming their identity, ADR 0071). Clients apply the rules while folding. Every type declared in the spec is now accepted; anything else is refused with `unsupported_type`.
 
 ## Rejection reasons
 

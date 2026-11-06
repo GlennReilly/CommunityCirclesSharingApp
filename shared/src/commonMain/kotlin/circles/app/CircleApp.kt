@@ -74,8 +74,11 @@ import kotlinx.coroutines.launch
 const val INVITE_VALID_DAYS = 14
 const val INVITE_USES = 1
 
-/** A device that has joined but has no circle key yet (a steward admits it by wrapping the key to it). */
-data class WaitingDevice(val device: DeviceId, val member: MemberId)
+/**
+ * A device that has joined but has no circle key yet (a steward admits it by wrapping the key to it). [fingerprint] is
+ * this device's own, which is what the steward compares in person before letting it in (ADR 0071).
+ */
+data class WaitingDevice(val device: DeviceId, val member: MemberId, val fingerprint: String)
 
 const val MAX_ITEM_DESCRIPTION_CHARS = 500
 
@@ -948,7 +951,7 @@ class CircleApp(
         return if (result is PauseResult.Refused && result.reason == circles.event.NAME_TAKEN_REASON) NameResult.NameTaken(tidy) else nameResult(result)
     }
 
-    /** Confirms [member]'s current name, after checking their key fingerprint in person (ADR 0068). */
+    /** Confirms [member]'s identity (their current name), after checking them in person (ADR 0068, 0071). */
     suspend fun confirmName(member: MemberId): NameResult {
         val (s, view) = pauseSession() ?: return NameResult.NotAllowed
         val current = view.market.names[member] ?: return NameResult.NotAllowed
@@ -1779,7 +1782,7 @@ class CircleApp(
         }.toSet()
         val waiting = if (view.currentEpoch < FIRST_EPOCH) emptyList() else view.devices.values
             .filter { !it.revoked && (it.registration.device to view.currentEpoch) !in wrapped }
-            .map { WaitingDevice(it.registration.device, it.registration.member) }
+            .map { WaitingDevice(it.registration.device, it.registration.member, fingerprint(it.registration.signPub)) }
         if (s.pairing && !view.devices.containsKey(s.identity.device)) {
             // Not registered yet: a new device of an existing member waits here until that member adds it (ADR 0046).
             val registration = s.identity.registration

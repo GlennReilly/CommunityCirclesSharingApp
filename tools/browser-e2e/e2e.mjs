@@ -52,8 +52,10 @@ try {
   await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '1 member'), 'alice home'); ok('alice started a circle and named herself');
   await until(alice, has(alice, 'Up to date'), 'alice synced'); ok('alice synced (status: Up to date)');
   await checkAccessibility(alice, 'home');
-  await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Key fingerprint: '), 'members page');
-  const fingerprint = await alice.evaluate('document.body.innerText.match(/Key fingerprint: ([0-9a-f ]+)/)[1].trim()'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(fingerprint)) throw new Error('fingerprint: ' + fingerprint); ok('members page shows alice with a fingerprint: ' + fingerprint);
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Show my QR code'), 'members page');
+  if (await alice.evaluate(has(alice, 'Key fingerprint'))) throw new Error('a key fingerprint is printed on the members page');
+  const fingerprint = await alice.evaluate('(document.querySelector("details p.fingerprint") || {}).textContent || ""'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(fingerprint)) throw new Error('fingerprint: ' + fingerprint);
+  ok('members page: no fingerprint on the cards; alice\'s characters sit only under her QR code: ' + fingerprint);
   await click(alice, 'invite');
   await until(alice, 'document.getElementById("invite-output") !== null', 'invite shown');
   const link = await alice.evaluate('document.getElementById("invite-output").value'); ok('invite link made: ' + link.replace(/\/[A-Za-z0-9_-]{43}$/, '/<secret>'));
@@ -65,15 +67,27 @@ try {
   const addr = await bea.evaluate('location.href'); if (addr.includes('#/join')) throw new Error('secret left in address bar: ' + addr); ok('invite secret removed from the address bar');
   await submit(bea, 'join-form', { passphrase: PASS });
   await until(bea, has(bea, 'A steward needs to let you in'), 'bea waiting'); ok('bea joined and is waiting for a steward');
+  await until(bea, has(bea, 'Show a steward who you are') + ' && document.querySelector("svg.qr") !== null && document.querySelector("p.fingerprint") !== null', 'bea shows her code');
+  const beaChars = await bea.evaluate('document.querySelector("p.fingerprint").textContent'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(beaChars)) throw new Error('bea characters: ' + beaChars);
+  ok('bea\'s home shows a QR code and, for no camera, her characters: ' + beaChars);
   await checkAccessibility(bea, 'home before being let in');
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
   await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting to be let in'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
-  const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Let in")) || ""');
-  if (!waitingLine.includes('New member (waiting for a name)') || !/Key fingerprint: [0-9a-f]{4}( [0-9a-f]{4}){4}/.test(waitingLine)) throw new Error('waiting line: ' + waitingLine);
-  ok('the waiting person shows as a new member waiting for a name, with their fingerprint');
+  const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Check and let in")) || ""');
+  if (!waitingLine.includes('New member (waiting for a name)') || /[0-9a-f]{4} [0-9a-f]{4}/.test(waitingLine)) throw new Error('waiting line: ' + waitingLine);
+  ok('the waiting person shows as a new member waiting for a name, with "Check and let in" and no characters');
   await checkAccessibility(alice, 'members with someone waiting');
-  await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
+  await click(alice, 'check-person', '[data-device]'); await until(alice, has(alice, 'Letting in: ') + ' && document.querySelector("form[id^=let-in-]") !== null', 'the let-in check page');
+  const shownChars = await alice.evaluate('document.querySelector("p.fingerprint").textContent');
+  if (shownChars !== beaChars) throw new Error('the check page shows ' + shownChars + ', bea shows ' + beaChars); ok('the check page shows the same characters as bea\'s screen, for reading out');
+  const letIn = await alice.evaluate('document.querySelector("form[id^=let-in-]").id');
+  if (!(await buttonHidden(alice, letIn))) throw new Error('Let them in shows before the tick');
+  await checkAccessibility(alice, 'check identity, letting in');
+  await alice.evaluate(`(() => { const b = document.getElementById("${letIn}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  if (await buttonHidden(alice, letIn)) throw new Error('Let them in stays hidden after the tick'); ok('"Let them in" appears only after ticking that she checked bea in person');
+  await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'Let in. They can read the circle') + ' && location.hash === "#/members"', 'let in, back on members');
+  await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, 'document.getElementById("name-form") !== null', 'bea is asked for her name'); ok('bea can now read the circle and is asked for her name first');
   // ADR 0069: a name another member holds is taken, whatever the case, and the person is told so on the same page.
   await submit(bea, 'name-form', { 'display-name': 'ALICE SMITH' });
@@ -228,24 +242,29 @@ try {
   await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your level: 1'), 'bea standing');
   await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your level: 3') + ' && ' + has(alice, 'Stewards are treated as at least Level 3'), 'alice standing'); ok('standing pages: bea is at Level 1, alice (steward) counts as Level 3');
   await checkAccessibility(alice, 'my standing');
-  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
-  await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
-  if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a new member is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
-  // Names (ADR 0068): bea (a new member) cannot confirm names; alice (a steward) ticks that she checked bea's fingerprint in person, then confirms.
-  if (await bea.evaluate('document.querySelector("form[id^=confirm-name-]") !== null')) throw new Error('a new member is offered to confirm a name');
-  if (!(await bea.evaluate(has(bea, 'Bea (not confirmed yet) (you)')))) throw new Error('bea does not see her own name as not confirmed yet');
-  await until(alice, 'document.querySelector("form[id^=confirm-name-]") !== null', 'confirm form for bea');
+  // Checking identity (ADR 0071): the card has only "Check identity"; vouching and confirming live on the check page.
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=check-person]") !== null', 'check button for alice');
+  if (await alice.evaluate('document.querySelector("[data-action=vouch], form[id^=confirm-name-]") !== null')) throw new Error('vouch or confirm is still on the members card');
+  await bea.evaluate('location.hash = "#/members"'); await until(bea, 'document.querySelector("[data-action=check-person]") !== null', 'bea members');
+  if (!(await bea.evaluate(has(bea, 'Bea (identity not confirmed yet) (you)') + ' && ' + has(bea, 'Nobody has confirmed your identity yet.')))) throw new Error('bea does not see her own identity as not confirmed yet: ' + await text(bea));
+  await click(bea, 'check-person'); await until(bea, has(bea, 'Checking: ') + ' && document.querySelector("p.fingerprint") !== null', 'bea checks alice');
+  if (await bea.evaluate('document.querySelector("[data-action=vouch], form[id^=confirm-name-]") !== null')) throw new Error('a new member is offered Vouch or Confirm identity');
+  if (!(await bea.evaluate(has(bea, 'Only members at Level 2 or above, or a steward, can confirm someone')))) throw new Error('no explanation for a new member');
+  ok('a new member (Level 1) checking someone sees the characters but no Vouch and no Confirm identity');
+  await click(alice, 'check-person'); await until(alice, has(alice, 'Checking: ') + ' && document.querySelector("form[id^=confirm-name-]") !== null', 'alice checks bea');
+  if (await alice.evaluate('document.querySelector("[data-action=vouch]") === null')) throw new Error('alice is not offered Vouch on the check page'); ok('alice (a steward) is offered "Vouch for this person" on the check page');
+  if ((await alice.evaluate('document.querySelector("p.fingerprint").textContent')) !== beaChars) throw new Error('the check page does not show bea\'s characters');
   const confirmForm = await alice.evaluate('document.querySelector("form[id^=confirm-name-]").id');
-  if (!(await alice.evaluate(`document.getElementById("${confirmForm}").innerText.includes("Key fingerprint") || /[0-9a-f]{4}( [0-9a-f]{4}){4}/.test(document.getElementById("${confirmForm}").innerText)`))) throw new Error('no fingerprint beside the confirm button');
+  if (await alice.evaluate(`/[0-9a-f]{4}( [0-9a-f]{4}){4}/.test(document.getElementById("${confirmForm}").innerText)`)) throw new Error('characters inside the confirm form');
   if (!(await buttonHidden(alice, confirmForm))) throw new Error('the confirm button shows before the box is ticked');
   await alice.evaluate(`(() => { const b = document.getElementById("${confirmForm}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   if (await buttonHidden(alice, confirmForm)) throw new Error('the confirm button stays hidden after the tick');
-  ok('the confirm-name button appears only after "I checked this person\'s key fingerprint in person" is ticked');
-  await checkAccessibility(alice, 'members with a name to confirm');
+  ok('"Confirm identity" appears only after "I checked this person\'s identity in person" is ticked');
+  await checkAccessibility(alice, 'check identity, confirming');
   await alice.evaluate(`document.getElementById("${confirmForm}").requestSubmit()`);
-  await until(alice, has(alice, 'You confirmed this name.') + ' && ' + has(alice, 'Bea (confirmed)'), 'alice confirmed bea'); ok('alice confirmed bea\'s name');
+  await until(alice, has(alice, 'You confirmed their identity.') + ' && ' + has(alice, 'Bea (identity confirmed)'), 'alice confirmed bea'); ok('alice confirmed bea\'s identity');
   await syncUntil(alice, has(alice, 'Up to date'), 'alice pushed the confirmation');
-  await syncUntil(bea, has(bea, 'Bea (confirmed) (you)') + ' && ' + has(bea, 'Name confirmed by Alice Smith.'), 'bea sees her name confirmed'); ok('bea sees her name confirmed by Alice Smith');
+  await syncUntil(bea, 'location.hash = "#/members"; ' + has(bea, 'Bea (identity confirmed) (you)') + ' && ' + has(bea, 'Identity confirmed by Alice Smith.'), 'bea sees her identity confirmed'); ok('bea sees her identity confirmed by Alice Smith');
   // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
   await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'This circle has one steward'), 'steward page'); ok('a lone steward is told the circle needs another');
   await checkAccessibility(alice, 'stewards');
@@ -284,7 +303,7 @@ try {
   await click(alice, 'unlock-passkey'); await until(alice, has(alice, 'That did not unlock it'), 'failed check, no unlock', 30000); ok('when the fingerprint check fails the passkey button fails kindly and nothing opens');
   await alice.send('WebAuthn.setUserVerified', { authenticatorId: authId, isUserVerified: true });
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, 'document.querySelector("[data-action=passkey-off]") !== null', 'unlocked by passphrase again'); ok('the passphrase still works beside the passkey'); await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, '2 members'), 'home again');
-  // A second device: alice's phone is paired from her laptop, checks the fingerprint, reads her things, and is removed again.
+  // A second device: alice's phone is paired from her laptop, the characters are compared on the check page, it reads her things, and is removed again.
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.getElementById("device-link") !== null', 'settings with the device link');
   const deviceLink = await alice.evaluate('document.getElementById("device-link").value');
   if (!/\/#\/device\/[0-9a-f]{32}\/[0-9a-f]{32}$/.test(deviceLink)) throw new Error('device link: ' + deviceLink); ok('settings shows a device link of public ids only');
@@ -297,13 +316,21 @@ try {
   await until(phone, has(phone, 'Waiting for your other device') + ' && document.getElementById("this-device-code") !== null', 'phone waits'); ok('the new browser makes its keys and waits to be added');
   await checkAccessibility(phone, 'add this device, waiting');
   const code = await phone.evaluate('document.getElementById("this-device-code").value');
-  const phoneFingerprint = await phone.evaluate('document.body.innerText.match(/Fingerprint: ([0-9a-f ]+)/)[1].trim()');
-  await setField(alice, 'add-device-form', 'device-code', 'garbage'); await until(alice, has(alice, 'does not look like a device code'), 'bad code noticed');
-  await setField(alice, 'add-device-form', 'device-code', code); await until(alice, has(alice, 'Fingerprint of this code: ' + phoneFingerprint), 'fingerprints shown');
-  ok('the existing device shows the same fingerprint as the new one: ' + phoneFingerprint);
-  await setField(alice, 'add-device-form', 'device-name', 'Phone');
-  await alice.evaluate('(() => { const f = document.getElementById("add-device-form"); f.elements.namedItem("fingerprints-match").checked = true; f.requestSubmit(); return true; })()');
-  await until(alice, has(alice, 'Added. The new device will open'), 'device added'); await sleep(1500); await click(alice, 'sync');
+  const phoneFingerprint = await phone.evaluate('(document.querySelector("p.fingerprint") || {}).textContent || ""');
+  if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(phoneFingerprint)) throw new Error('phone characters: ' + phoneFingerprint);
+  if (await alice.evaluate('document.querySelector("#add-device-form input[type=checkbox], #add-device-form p.fingerprint") !== null')) throw new Error('the settings form still compares characters itself');
+  await submit(alice, 'add-device-form', { 'device-code': 'garbage' }); await until(alice, has(alice, 'does not look like a device code') + ' && location.hash === "#/settings"', 'bad code noticed');
+  await submit(alice, 'add-device-form', { 'device-code': code, 'device-name': 'Phone' });
+  await until(alice, has(alice, 'Check the new device') + ' && document.getElementById("confirm-device-form") !== null', 'the device check page');
+  const shownDevice = await alice.evaluate('document.querySelector("p.fingerprint").textContent');
+  if (shownDevice !== phoneFingerprint) throw new Error('check page shows ' + shownDevice + ', phone shows ' + phoneFingerprint);
+  ok('Next opens "Check the new device" with the same characters as the new one: ' + phoneFingerprint);
+  if (!(await buttonHidden(alice, 'confirm-device-form'))) throw new Error('Add this device shows before the tick');
+  await checkAccessibility(alice, 'check the new device');
+  await alice.evaluate('(() => { const b = document.getElementById("confirm-device-form").elements.namedItem("fingerprints-match"); b.checked = true; b.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
+  if (await buttonHidden(alice, 'confirm-device-form')) throw new Error('Add this device stays hidden after the tick'); ok('"Add this device" appears only after ticking that the characters match');
+  await alice.evaluate('document.getElementById("confirm-device-form").requestSubmit()');
+  await until(alice, has(alice, 'Added. The new device will open') + ' && location.hash === "#/settings"', 'device added'); await sleep(1500); await click(alice, 'sync');
   await click(phone, 'check-now'); await until(phone, has(phone, 'Circle home'), 'phone is in', 25000); ok('the phone was added and opened the circle');
   await phone.evaluate('location.hash = "#/items"'); await until(phone, has(phone, 'Drill') + ' && ' + has(phone, 'Yours'), 'phone sees alice\'s own items'); ok('the phone sees alice\'s own items as hers');
   await phone.evaluate('location.hash = "#/settings"'); await until(phone, has(phone, 'Phone (this device)'), 'phone names itself'); ok('the phone lists itself by the name alice gave it');
@@ -368,7 +395,7 @@ try {
   await alice.evaluate('(() => { const box = document.getElementById("skill-search"); box.value = "BRAKES"; box.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
   await until(alice, has(alice, '1 offer') + ' && document.querySelector("[data-skill-text]").hidden === false', 'search finds by details, any case'); ok('search matches the details and ignores case');
 
-  // QR codes (ADR 0062): bea shows her code (a link), alice opens it and is told it matches; a doctored fingerprint does not.
+  // QR codes (ADR 0062): bea shows her code (a link), alice opens it and is told it matches; a doctored code does not.
   await bea.evaluate('location.hash = "#/members"'); await until(bea, 'document.getElementById("verify-link") !== null', 'bea qr code section');
   await bea.evaluate('document.querySelector("details summary").click()'); await sleep(300);
   await checkAccessibility(bea, 'members with my qr code');
@@ -417,7 +444,7 @@ try {
   await alice.evaluate('location.hash = "#/members"');
   await syncUntil(alice, 'document.querySelector("[data-action=remove-member]") !== null', 'alice is offered Remove'); ok('alice is offered "Remove this person" once bea is not a steward');
   await alice.evaluate('document.querySelector("[data-action=remove-member]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key has been changed.'), 'removed');
-  await until(alice, '!document.querySelector("[data-action=remove-member]") && ' + has(alice, 'Key fingerprint'), 'bea gone from the list'); ok('alice removed bea; the key was changed in the same action');
+  await until(alice, '!document.querySelector("[data-action=remove-member]") && ' + has(alice, 'Show my QR code'), 'bea gone from the list'); ok('alice removed bea; the key was changed in the same action');
   if (await alice.evaluate(has(alice, 'Change the key'))) throw new Error('a rotation prompt after a removal that already rotated'); ok('no rotation prompt, because the removal rotated the key');
   await sleep(1500); await click(alice, 'sync'); await sleep(1500);
   await click(bea, 'sync'); await until(bea, has(bea, 'Cannot sign in to the circle. If you were removed, ask a steward'), 'bea cut off'); ok('bea is told she cannot sign in and to ask a steward');

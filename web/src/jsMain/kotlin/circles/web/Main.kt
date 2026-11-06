@@ -334,14 +334,6 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             }
             document.getElementById(ID_SKILL_COUNT)?.textContent = if (shown == 1) "1 offer" else "$shown offers"
         }
-        (event.target as? HTMLInputElement)?.takeIf { it.id == FIELD_DEVICE_CODE }?.let { field ->
-            val preview = app?.previewDeviceCode(field.value)
-            document.getElementById(ID_DEVICE_PREVIEW)?.textContent = when {
-                field.value.isBlank() -> ""
-                preview == null -> "That does not look like a device code."
-                else -> "Fingerprint of this code: ${preview.fingerprint}"
-            }
-        }
         val form = (event.target as? Element)?.closest("form") as? HTMLFormElement ?: return
         val button = form.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
         var ready = true
@@ -374,7 +366,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         busyLaunch((event.asDynamic().submitter as? Element) ?: form.querySelector("#$SUBMIT_ID")) {
             if (form.id.startsWith(FORM_CONFIRM_NAME_PREFIX)) {
                 val member = form.getAttribute(ATTR_MEMBER)?.let(::MemberId)
-                if (member != null) reportName(circleApp.confirmName(member), "Confirmed. Others now see that you checked this name.")
+                if (member != null) reportName(circleApp.confirmName(member), "Confirmed. Others now see that you checked their identity.")
+                return@busyLaunch
+            }
+            if (form.id.startsWith(FORM_LET_IN_PREFIX)) {
+                val device = form.getAttribute(ATTR_DEVICE)?.let(::DeviceId)
+                if (device != null && circleApp.admit(device)) {
+                    dispatch(AppAction.Notice("Let in. They can read the circle once their device syncs."))
+                    window.location.hash = Screen.Members.fragment
+                } else {
+                    dispatch(AppAction.Notice("Could not let them in just now. Try again after the next sync."))
+                }
                 return@busyLaunch
             }
             if (form.id.startsWith(FORM_DISPUTE_PREFIX)) {
@@ -525,10 +527,24 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     ),
                 )
                 FORM_PAIR -> state.pendingDevice?.let { report(circleApp.startOnNewDevice(it, field(FIELD_PASSPHRASE))) }
-                FORM_ADD_DEVICE -> dispatch(
+                FORM_ADD_DEVICE -> {
+                    val code = field(FIELD_DEVICE_CODE).trim()
+                    val preview = circleApp.previewDeviceCode(code)
+                    if (preview == null) dispatch(AppAction.Notice("That does not look like a device code. Copy the whole code shown on the new device."))
+                    else {
+                        dispatch(AppAction.Notice(null))
+                        dispatch(AppAction.CheckNewDevice(DeviceToAdd(code, field(FIELD_DEVICE_NAME).trim(), preview.fingerprint)))
+                        window.location.hash = Screen.CheckDevice.fragment
+                    }
+                }
+                FORM_CONFIRM_DEVICE -> state.addingDevice?.let { adding -> dispatch(
                     AppAction.Notice(
-                        when (val result = circleApp.addDevice(field(FIELD_DEVICE_CODE), field(FIELD_DEVICE_NAME))) {
-                            is AddDeviceResult.Added -> "Added. The new device will open as soon as it checks in."
+                        when (val result = circleApp.addDevice(adding.code, adding.name)) {
+                            is AddDeviceResult.Added -> {
+                                dispatch(AppAction.CheckNewDevice(null))
+                                window.location.hash = Screen.Settings.fragment
+                                "Added. The new device will open as soon as it checks in."
+                            }
                             AddDeviceResult.BadCode -> "That does not look like a device code. Copy the whole code shown on the new device."
                             AddDeviceResult.AlreadyKnown -> "That device is already part of the circle."
                             AddDeviceResult.NameTooLong -> "Keep the name to $MAX_DEVICE_NAME_CHARS characters or fewer."
@@ -536,7 +552,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             AddDeviceResult.NotAllowed -> "That cannot be done right now."
                         },
                     ),
-                )
+                ) }
                 FORM_RECOVERY_CHECK -> {
                     val draft = state.recoveryDraft
                     if (draft == null) dispatch(AppAction.Notice("There is no recovery code being made."))
@@ -841,6 +857,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.EditItem(ItemId(it)))
                     window.location.hash = Screen.EditItem.fragment
                 }
+                ACTION_CHECK_PERSON -> target.getAttribute(ATTR_MEMBER)?.let { member ->
+                    dispatch(AppAction.CheckPerson(PersonCheck(MemberId(member), target.getAttribute(ATTR_DEVICE)?.let(::DeviceId))))
+                    window.location.hash = Screen.CheckIdentity.fragment
+                }
                 ACTION_TAG_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.TagItem(ItemId(it)))
                     window.location.hash = Screen.ItemTag.fragment
@@ -860,9 +880,6 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_COPY -> state.newInvite?.let {
                     window.navigator.asDynamic().clipboard.writeText(it)
                     dispatch(AppAction.Notice("Link copied."))
-                }
-                ACTION_ADMIT -> target.getAttribute(ATTR_DEVICE)?.let { device ->
-                    if (circleApp?.admit(DeviceId(device)) != true) dispatch(AppAction.Notice("Could not let them in just now. Try again after the next sync."))
                 }
             }
         }
