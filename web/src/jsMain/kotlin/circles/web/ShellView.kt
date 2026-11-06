@@ -47,6 +47,7 @@ import circles.event.DAMAGE_CLAIM_DAYS
 import circles.event.DisputeClaim
 import circles.app.StandingSummary
 import circles.policy.Tier
+import circles.policy.TierText
 import circles.app.ItemSummary
 import circles.app.LoanRole
 import circles.app.LoanSummary
@@ -780,7 +781,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
         }
     }
     p { +"To check someone really is who they say, read the fingerprints out to each other in person." }
-    p { +"Vouching tells the circle you know this person. ${home.rules.current.vouchesForRegular} vouches from members at Regular or above give a new member Regular access. Only vouch for people you know." }
+    p { +"Vouching tells the circle you know this person. ${home.rules.current.vouchesForRegular} vouches from members at ${TierText.orAbove(Tier.REGULAR)} give a new member ${TierText.label(Tier.REGULAR)} access. Only vouch for people you know." }
     if (home.needsRotation) {
         section {
             h2 { +"Change the key" }
@@ -996,7 +997,7 @@ private fun FlowContent.itemForm(existing: ItemSummary?) {
             for (tier in listOf(Tier.REGULAR, Tier.TRUSTED)) option {
                 value = tier.name
                 selected = existing?.ownerMinTier == tier
-                +"${tierLabel(tier)} and above"
+                +TierText.orAbove(tier)
             }
         }
         label {
@@ -1495,23 +1496,16 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
     }
 }
 
-private fun tierLabel(tier: Tier): String = when (tier) {
-    Tier.NEW -> "New"
-    Tier.REGULAR -> "Regular"
-    Tier.TRUSTED -> "Trusted"
-    Tier.STEWARD -> "Steward level"
-}
-
-/** Only your own standing, in plain words with the reasons; nobody else's tier or points are ever shown (spec 6). */
+/** Only your own standing, in plain words with the reasons; nobody else's level or points are ever shown (spec 6). */
 private fun FlowContent.standing(standing: StandingSummary?, home: HomeData? = null) {
     h1 { +Screen.Standing.title }
     if (standing == null) {
         p { +"Your standing appears once the circle has been read." }
         return
     }
-    p { +"Your tier: ${tierLabel(standing.tier)}" }
+    p { +"Your level: ${TierText.number(standing.tier)}" }
     p { +"Standing points: ${standing.points}" }
-    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below New, and nobody is ever banned for low standing." }
+    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below ${TierText.label(Tier.NEW)}, and nobody is ever banned for low standing." }
     section {
         h2 { +"Why" }
         ul { for (reason in standing.reasons) li { +reason } }
@@ -1633,9 +1627,9 @@ private fun FlowContent.stewards(home: HomeData) {
         val rules = home.rules
         val now = rules.current
         ul {
-            li { +"Points for Regular, Trusted and Steward level: ${tenthsText(now.regularTenths)}, ${tenthsText(now.trustedTenths)} and ${tenthsText(now.stewardTenths)}" }
+            li { +"Points for ${TierText.label(Tier.REGULAR)}, ${TierText.label(Tier.TRUSTED)} and ${TierText.label(Tier.STEWARD)}: ${tenthsText(now.regularTenths)}, ${tenthsText(now.trustedTenths)} and ${tenthsText(now.stewardTenths)}" }
             li { +"Points fade by half every ${now.halfLifeDays} days" }
-            li { +"Vouches needed to become Regular: ${now.vouchesForRegular}, each lasting up to ${now.vouchValidityDays} days" }
+            li { +"Vouches needed to reach ${TierText.label(Tier.REGULAR)}: ${now.vouchesForRegular}, each lasting up to ${now.vouchValidityDays} days" }
             li { +"Reviewers needed for a pause: ${now.reviewersForPause}; a pause lasts ${now.defaultPauseDays} days unless chosen otherwise" }
             li { +"Days higher-value items are on hold after an unreported incident: ${now.incidentCooldownDays}" }
         }
@@ -1643,7 +1637,7 @@ private fun FlowContent.stewards(home: HomeData) {
         for (proposal in rules.proposals) {
             val s = proposal.settings
             p {
-                +"Proposed: thresholds ${tenthsText(s.regularTenths)} / ${tenthsText(s.trustedTenths)} / ${tenthsText(s.stewardTenths)}, half-life ${s.halfLifeDays}, vouches ${s.vouchesForRegular} for ${s.vouchValidityDays} days, pause reviewers ${s.reviewersForPause} for ${s.defaultPauseDays} days, cooldown ${s.incidentCooldownDays}. ${proposal.agreeing} of ${proposal.needed} stewards agree."
+                +"Proposed: points for levels ${TierText.number(Tier.REGULAR)}, ${TierText.number(Tier.TRUSTED)} and ${TierText.number(Tier.STEWARD)} ${tenthsText(s.regularTenths)} / ${tenthsText(s.trustedTenths)} / ${tenthsText(s.stewardTenths)}, half-life ${s.halfLifeDays}, vouches ${s.vouchesForRegular} for ${s.vouchValidityDays} days, pause reviewers ${s.reviewersForPause} for ${s.defaultPauseDays} days, cooldown ${s.incidentCooldownDays}. ${proposal.agreeing} of ${proposal.needed} stewards agree."
             }
             if (proposal.canAgree) {
                 button(type = ButtonType.button) {
@@ -1660,11 +1654,11 @@ private fun FlowContent.stewards(home: HomeData) {
                 form {
                     id = FORM_RULES
                     for ((field, label, step, value) in listOf(
-                        Quad("rules-regular", "Points for Regular: ", "0.5", tenthsText(now.regularTenths)),
-                        Quad("rules-trusted", "Points for Trusted: ", "0.5", tenthsText(now.trustedTenths)),
-                        Quad("rules-steward", "Points for Steward level: ", "0.5", tenthsText(now.stewardTenths)),
+                        Quad("rules-regular", "Points for ${TierText.label(Tier.REGULAR)}: ", "0.5", tenthsText(now.regularTenths)),
+                        Quad("rules-trusted", "Points for ${TierText.label(Tier.TRUSTED)}: ", "0.5", tenthsText(now.trustedTenths)),
+                        Quad("rules-steward", "Points for ${TierText.label(Tier.STEWARD)}: ", "0.5", tenthsText(now.stewardTenths)),
                         Quad("rules-halflife", "Days for points to fade by half: ", "1", now.halfLifeDays.toString()),
-                        Quad("rules-vouches", "Vouches needed for Regular: ", "1", now.vouchesForRegular.toString()),
+                        Quad("rules-vouches", "Vouches needed for ${TierText.label(Tier.REGULAR)}: ", "1", now.vouchesForRegular.toString()),
                         Quad("rules-vouch-days", "Days a vouch lasts: ", "1", now.vouchValidityDays.toString()),
                         Quad("rules-reviewers", "Reviewers needed for a pause: ", "1", now.reviewersForPause.toString()),
                         Quad("rules-pause-days", "Days a pause lasts: ", "1", now.defaultPauseDays.toString()),
@@ -2131,7 +2125,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
     if (home.canProposePause && home.pauseCandidates.isNotEmpty()) {
         section {
             h2 { +"Propose a pause" }
-            p { +"You count as the first reviewer. It takes effect when enough other trusted members agree within 14 days, and the member is told at once." }
+            p { +"You count as the first reviewer. It takes effect when enough other reviewers (${TierText.orAbove(Tier.TRUSTED)}) agree within 14 days, and the member is told at once." }
             form {
                 id = FORM_PAUSE_PROPOSE
                 label {

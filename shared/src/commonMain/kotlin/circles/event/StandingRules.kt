@@ -98,7 +98,7 @@ object StandingRules {
         }
         val own = StandingCalculator.compute(member, cfg, events, vouches, voucherTier, day)
         val tier = floored(member, own.tier, stewards)
-        return if (tier == own.tier) own else own.copy(tier = tier, reasons = own.reasons + "Stewards are treated as at least ${tier.name.lowercase()} in this circle.")
+        return if (tier == own.tier) own else own.copy(tier = tier, reasons = own.reasons + "Stewards are treated as at least ${circles.policy.TierText.label(tier)} in this circle.")
     }
 
     /** May [voucher] vouch on [day]? Their tier must reach `voucherMinTier`. */

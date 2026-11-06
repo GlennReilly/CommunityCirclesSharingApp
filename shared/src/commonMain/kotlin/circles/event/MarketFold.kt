@@ -363,7 +363,7 @@ internal class MarketFold(
     }
 
     /**
-     * A member at Regular or above (stewards count as Trusted) confirms another member's current name. The confirmation
+     * A member at REGULAR or above (stewards count as TRUSTED) confirms another member's current name. The confirmation
      * names the profile event, so one made for an earlier name, or for the same text set again, is stale and refused.
      */
     private fun confirmName(author: MemberId, v: NameConfirmation, day: Int, id: EventId): String? {
@@ -372,7 +372,7 @@ internal class MarketFold(
         if (v.profile != current.profile || v.name != current.name) return "the name has changed since"
         if (author in current.confirmations) return "already confirmed"
         val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
-        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a Regular member or above, or a steward, may confirm a name"
+        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, may confirm a name"
         names[v.member] = current.copy(confirmations = current.confirmations + (author to day))
         return null
     }
@@ -425,13 +425,13 @@ internal class MarketFold(
     private fun proposePause(author: MemberId, v: PauseProposal, day: Int, id: EventId): String? {
         if (pauses.containsKey(v.pause)) return "pause id already used"
         val eligible = reviewers(day, id)
-        if (author !in eligible) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may propose a pause"
+        if (author !in eligible) return "only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} may propose a pause"
         if (v.subject == author) return "a member cannot propose pausing themselves"
         if (v.subject !in members()) return "the subject is not in the circle"
         if (v.subject in stewardsAt(id)) return "a steward is not paused: the steward rules apply"
         if (pauses.values.any { it.subject == v.subject && it.statusOn(day).let { s -> s == PauseStatus.PROPOSED || s == PauseStatus.LIVE } }) return "that member already has a pause or a proposal"
         val needed = reviewersNeeded(v.subject, day, eligible)
-        if (needed < MIN_PAUSE_REVIEWERS) return "the circle has too few trusted members to review a pause"
+        if (needed < MIN_PAUSE_REVIEWERS) return "the circle has too few members at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} to review a pause"
         pauses[v.pause] = PauseState(v.pause, v.subject, author, v.reason, v.days, day, mapOf(author to true), needed)
         return null
     }
@@ -443,7 +443,7 @@ internal class MarketFold(
         val status = pause.statusOn(day)
         if (status == PauseStatus.LAPSED || status == PauseStatus.ENDED) return "the pause is over"
         val eligible = reviewers(day, id)
-        if (author !in eligible) return "only a ${config(day).pauseReviewerMinTier.name.lowercase()} member or above may review"
+        if (author !in eligible) return "only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} may review"
         if (pause.liveFrom != null) {
             // Once in force, only a reviewer who agreed may step back; stepping back below the number needed ends the pause.
             if (v.agree || author !in pause.agreeing) return "the pause is already in force"
@@ -484,7 +484,7 @@ internal class MarketFold(
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
         if (v.vouchee == author) return "a member cannot vouch for themselves"
         if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a Regular member or above may vouch"
+        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a member at ${circles.policy.TierText.orAbove(config(day).voucherMinTier)} may vouch"
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }

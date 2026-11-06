@@ -48,7 +48,7 @@ Decide: Compose Multiplatform for Web is optional later; v1 UI is Preact + TypeS
 Identifiers: `MemberId`, `DeviceId`, `CircleId`, `ItemId`, `EventId` as value classes over strings. `EventId` is lowercase hex of BLAKE2b-256 over the canonical bytes of the signed envelope fields (section 3).
 
 Enums:
-- `Tier`: NEW(0), REGULAR(1), TRUSTED(2), STEWARD(3). Derived, never persisted.
+- `Tier`: NEW(0), REGULAR(1), TRUSTED(2), STEWARD(3). Derived, never persisted. Shown to people only as "Level rank + 1" through `TierText` (ADR 0070); the identifiers never appear on screen.
 - `ItemClass`: ESSENTIAL, EVERYDAY, VALUABLE, HIGH_VALUE. Default minimum tiers: NEW, NEW, REGULAR, TRUSTED.
 - `EventType` (plaintext on envelope): see section 3.3.
 
@@ -300,13 +300,13 @@ Core screens (v1):
 3. Items (list, detail, add/edit, QR tag printing)
 4. Skills (search is local and client-side)
 5. Borrow flow (request -> owner approves -> hand-over -> return, with explicit "reported damage" option that carries no penalty)
-6. My standing (tier, points, plain-language reasons, how to unlock more)
+6. My standing (level, points, plain-language reasons, how to unlock more)
 7. Members and vouching (invite, vouch, in-person verification via QR/fingerprint)
 8. Stewards (config, pauses, key rotation, recovery shares, export)
 9. Settings (devices, export circle, language, accessibility, delete my data on this device)
 
 UI rules:
-- Show the reasons and "how to unlock" text from `AccessDecision`. Never show a numeric ranking of members to other members; show only your own standing and tier labels.
+- Show the reasons and "how to unlock" text from `AccessDecision`. Never show a numeric ranking of members to other members; show only your own standing and level ("Level 2"; ADR 0070).
 - Essentials are always shown as borrowable.
 - Pause screens name the appeal route and expiry.
 

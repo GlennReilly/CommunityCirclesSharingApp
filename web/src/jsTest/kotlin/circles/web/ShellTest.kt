@@ -70,7 +70,7 @@ private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVE
 private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null, access = AccessSummary(true, emptyList(), emptyList()))
 private val locked = drill.copy(
     item = ItemId("3".repeat(32)), name = "Trailer", itemClass = ItemClass.HIGH_VALUE,
-    access = AccessSummary(false, listOf("Trailer needs TRUSTED; you are NEW."), listOf("Or get 2 members (Regular or above) to vouch for you.")),
+    access = AccessSummary(false, listOf("Trailer needs Level 3; you are Level 1."), listOf("Or get 2 members at Level 2 or above to vouch for you.")),
 )
 
 private fun loan(
@@ -638,18 +638,19 @@ class ShellViewTest {
         assertTrue("""$ATTR_ITEM="${drill.item.v}"""" in html)
         assertFalse("""$ATTR_ITEM="${locked.item.v}"""" in html)
         assertTrue("Not yet." in html)
-        assertTrue("Trailer needs TRUSTED; you are NEW." in html)
-        assertTrue("Or get 2 members (Regular or above) to vouch for you." in html)
+        assertTrue("Trailer needs Level 3; you are Level 1." in html)
+        assertTrue("Or get 2 members at Level 2 or above to vouch for you." in html)
         assertTrue("Why, and how to unlock" in html)
     }
 
-    private val myStanding = StandingSummary(Tier.REGULAR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens trusted access."))
+    private val myStanding = StandingSummary(Tier.REGULAR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens Level 3 access."))
 
     @Test fun theStandingPageShowsOnlyYourOwnTierPointsReasonsAndNextSteps() {
         val html = render(open(home().copy(standing = myStanding)).copy(screen = Screen.Standing))
-        assertTrue("Your tier: Regular" in html && "Standing points: 3.5" in html)
+        assertTrue("Your level: 2" in html && "Standing points: 3.5" in html)
+        assertTrue("It never drops below Level 1," in html)
         assertTrue("Activity in this circle gives 3.5 standing points." in html)
-        assertTrue("About 6.5 more standing points opens trusted access." in html)
+        assertTrue("About 6.5 more standing points opens Level 3 access." in html)
         assertTrue("nobody is ever banned for low standing" in html)
         assertFalse("This screen is not built yet." in html)
     }
@@ -1137,7 +1138,9 @@ class ShellViewTest {
         val changed = defaultRules.copy(halfLifeDays = 90)
         val summary = circles.app.RulesSummary(defaultRules, listOf(circles.app.RulesProposal(changed, 1, 2, iAgree = false, canAgree = true)))
         val html = render(open(home().copy(rules = summary, stewardCount = 2)).copy(screen = Screen.Stewards))
-        assertTrue("Points for Regular, Trusted and Steward level: 3.0, 10.0 and 25.0" in html)
+        assertTrue("Points for Level 2, Level 3 and Level 4: 3.0, 10.0 and 25.0" in html)
+        assertTrue("Vouches needed to reach Level 2: 2," in html)
+        assertTrue("Proposed: points for levels 2, 3 and 4 3.0 / 10.0 / 25.0," in html)
         assertTrue("Points fade by half every 180 days" in html)
         assertTrue("1 of 2 stewards agree." in html)
         assertTrue("""$ATTR_ACTION="$ACTION_RULES_AGREE" $ATTR_RULES="30:100:250:90:2:180:3:30:90"""" in html)
@@ -1156,8 +1159,10 @@ class ShellViewTest {
     @Test fun theItemFormOffersToRaiseWhoMayAskButNotLowerIt() {
         val html = render(open(home()).copy(screen = Screen.AddItem))
         assertTrue("""for="$FIELD_MIN_TIER"""" in html && "Who may ask: " in html)
-        assertTrue("Regular and above" in html && "Trusted and above" in html)
-        assertFalse("New and above" in html)
+        assertTrue(""">Level 2 or above<""" in html && """>Level 3 or above<""" in html)
+        // The option values stay the internal names (ADR 0070): only the words people read changed.
+        assertTrue("""value="REGULAR"""" in html && """value="TRUSTED"""" in html)
+        assertFalse("Level 1 or above" in html)
     }
 
     // ---- loan windows (ADR 0052) ----

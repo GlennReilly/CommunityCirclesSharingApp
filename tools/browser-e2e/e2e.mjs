@@ -213,7 +213,7 @@ try {
   await checkAccessibility(alice, 'settings at the largest text size, dark');
   await alice.evaluate('(() => { const f = document.getElementById("appearance-form"); f.elements.namedItem("text-size").value = "standard"; f.elements.namedItem("theme").value = "system"; f.requestSubmit(); return true; })()');
   await until(alice, 'document.documentElement.dataset.text === "standard" && getComputedStyle(document.documentElement).fontSize === "16px"', 'appearance back to standard'); ok('appearance back to standard');
-  // Standing: a valuable item is not open to a new member; the steward counts as trusted.
+  // Standing: a valuable item is not open to a new member (Level 1); the steward counts as Level 3 (ADR 0070).
   await alice.evaluate('location.hash = "#/items/add"'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add page for the drill');
   await setField(alice, 'item-add-form', 'name', 'Drill'); await alice.evaluate('document.getElementById("item-add-form").elements.namedItem("kind").value = "VALUABLE"');
   await alice.evaluate('document.getElementById("item-add-form").requestSubmit()'); await until(alice, has(alice, 'Drill'), 'drill listed');
@@ -221,10 +221,12 @@ try {
   const drillButtons = await bea.evaluate('[...document.querySelectorAll("li")].filter(li => li.innerText.includes("Drill") && li.querySelector("[data-action=borrow-item]")).length');
   if (drillButtons !== 0) throw new Error('bea is offered to borrow the drill'); ok('a new member sees the drill as "Not yet" with no borrow button');
   await checkAccessibility(bea, 'items, a locked item with reasons');
-  const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("REGULAR")) || ""');
-  if (!why.includes('vouch')) throw new Error('no vouch route in: ' + why); ok('the reasons name the vouch route');
-  await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your tier: New'), 'bea standing');
-  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your tier: Trusted'), 'alice standing'); ok('standing pages: bea is new, alice (steward) counts as trusted');
+  const why = await bea.evaluate('[...document.querySelectorAll("details")].map(d => d.textContent).find(t => t.includes("Drill needs Level 2; you are Level 1.")) || ""');
+  if (!why.includes('vouch') || !why.includes('members at Level 2 or above')) throw new Error('no vouch route in: ' + why);
+  if (/\b(NEW|REGULAR|TRUSTED|STEWARD|Regular|Trusted)\b/.test(await text(bea))) throw new Error('a tier identifier or old tier name on the items page: ' + await text(bea));
+  ok('the reasons say "Drill needs Level 2; you are Level 1." and name the vouch route, with no tier identifiers');
+  await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your level: 1'), 'bea standing');
+  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your level: 3') + ' && ' + has(alice, 'Stewards are treated as at least Level 3'), 'alice standing'); ok('standing pages: bea is at Level 1, alice (steward) counts as Level 3');
   await checkAccessibility(alice, 'my standing');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');

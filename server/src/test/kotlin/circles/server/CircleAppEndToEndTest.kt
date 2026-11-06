@@ -387,12 +387,12 @@ class CircleAppEndToEndTest {
         assertFalse(before.canVouch)
         val drillAccess = before.items.single { it.item == drill }.access!!
         assertFalse(drillAccess.canAsk)
-        assertTrue(drillAccess.reasons.any { it.contains("needs REGULAR") })
+        assertTrue(drillAccess.reasons.any { it.contains("needs Level 2") })
         assertTrue(drillAccess.howToUnlock.any { it.contains("vouch") })
         assertNull(before.items.single { it.item == ladder }.access, "no access line on your own item")
         assertTrue(before.standing!!.howToUnlock.isNotEmpty())
         val refused = assertIs<LoanResult.NotYet>(bea.app.requestLoan(drill, day + 1, day + 2, ""))
-        assertTrue(refused.reasons.any { it.contains("needs REGULAR") })
+        assertTrue(refused.reasons.any { it.contains("needs Level 2") })
         assertEquals(0, home(bea.app).changesWaiting, "a request that would be ignored is not even queued")
         assertEquals(VouchResult.NotAllowed, bea.app.vouchFor(home(bea.app).people.single { !it.isMe }.member), "a new member cannot vouch")
         assertEquals(VouchResult.NotAllowed, alice.app.vouchFor(home(alice.app).me), "nobody vouches for themselves")
@@ -1109,7 +1109,7 @@ class CircleAppEndToEndTest {
         // Who may propose: trusted members only, and not a steward as the subject.
         assertFalse(home(dave.app).canProposePause)
         assertEquals(emptyList(), home(dave.app).pauseCandidates)
-        assertTrue(assertIs<PauseResult.Refused>(dave.app.proposePause(home(bea.app).me, "no", 5)).reason.contains("trusted"))
+        assertTrue(assertIs<PauseResult.Refused>(dave.app.proposePause(home(bea.app).me, "no", 5)).reason.contains("Level 3 or above"))
         assertEquals(listOf(daveId), home(alice.app).pauseCandidates)
         assertTrue(assertIs<PauseResult.Refused>(alice.app.proposePause(home(bea.app).me, "x", 5)).reason.contains("steward"))
         assertEquals(PauseResult.Refused("give a reason of 1 to 280 characters"), alice.app.proposePause(daveId, " ", 5))
@@ -1179,8 +1179,8 @@ class CircleAppEndToEndTest {
         // Only a steward proposes; bad numbers are explained; the lone steward's vote is enough.
         assertEquals(RulesResult.NotAllowed, bea.app.proposeRules(defaults.copy(halfLifeDays = 90)))
         assertEquals(RulesResult.Refused("those are already the circle's rules"), alice.app.proposeRules(defaults))
-        assertEquals(RulesResult.Refused("halfLifeDays must be from 30 to 730"), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
-        assertEquals(RulesResult.Refused("thresholds must be positive and strictly increasing"), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
+        assertEquals(RulesResult.Refused("the days for points to fade by half must be from 30 to 730"), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
+        assertEquals(RulesResult.Refused("the points must rise from each level to the next"), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
         val changed = defaults.copy(halfLifeDays = 90, vouchesForRegular = 1)
         assertEquals(RulesResult.Sent(takesEffect = true), alice.app.proposeRules(changed))
         alice.app.syncOnce(); bea.app.syncOnce()
@@ -1539,7 +1539,7 @@ class CircleAppEndToEndTest {
         val seenByCarol = home(carol.app).people.single { it.member == beaId }
         assertEquals("Bea Lee", seenByCarol.displayName)
         assertFalse(seenByCarol.canConfirmName)
-        assertEquals(NameResult.Refused("only a Regular member or above, or a steward, may confirm a name"), carol.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("only a member at Level 2 or above, or a steward, may confirm a name"), carol.app.confirmName(beaId))
         assertEquals(NameResult.Refused("a member cannot confirm their own name"), bea.app.confirmName(beaId))
         // Alice is a steward: she checks Bea's fingerprint in person and confirms.
         assertTrue(home(alice.app).people.single { it.member == beaId }.canConfirmName)

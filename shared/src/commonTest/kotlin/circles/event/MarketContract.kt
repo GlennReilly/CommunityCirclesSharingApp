@@ -342,7 +342,7 @@ abstract class MarketContract {
         val refused = w.reasons(listOf(w.requestOf(w.bea, valuable), w.requestOf(w.bea, highValue)))
         assertEquals(2, refused.size)
         assertTrue(refused.all { it.startsWith("access check: ") }, refused.toString())
-        assertTrue(refused[0].contains("needs REGULAR") && refused[1].contains("needs TRUSTED"), refused.toString())
+        assertTrue(refused[0].contains("needs Level 2") && refused[1].contains("needs Level 3"), refused.toString())
         assertTrue(refused[0].contains("vouch"), "a new member is told the vouch route")
     }
 
@@ -384,7 +384,7 @@ abstract class MarketContract {
         val view = w.foldAs(w.founder)
         assertEquals(listOf(w.founder.identity.member to w.carol.identity.member), view.market.vouches.map { it.voucher to it.vouchee })
         val reasons = view.rejected.associate { it.id to it.reason }
-        assertTrue(reasons.getValue(byNewMember.eventId(w.crypto)).contains("Regular member or above"))
+        assertTrue(reasons.getValue(byNewMember.eventId(w.crypto)).contains("only a member at Level 2 or above may vouch"))
         assertTrue(reasons.getValue(ofSelf.eventId(w.crypto)).contains("themselves"))
         assertTrue(reasons.getValue(ofStranger.eventId(w.crypto)).contains("not in the circle"))
         assertFalse(founderVouch.eventId(w.crypto) in reasons)
@@ -729,7 +729,7 @@ abstract class MarketContract {
         fun rejected(vararg extra: Envelope) = w.foldAs(w.founder, w.log + extra.toList()).rejected.map { it.reason }
         assertEquals(listOf("a member cannot propose pausing themselves"), rejected(w.bea.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.bea.identity.member, "x", 5)))
         assertEquals(listOf("a steward is not paused: the steward rules apply"), rejected(w.bea.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.carol.identity.member, "x", 5)))
-        assertEquals(listOf("only a trusted member or above may propose a pause"), rejected(dave.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.bea.identity.member, "x", 5)).let { it.take(1) })
+        assertEquals(listOf("only a member at Level 3 or above may propose a pause"), rejected(dave.pausePropose(w.circle, DAY, newPauseId(w.crypto), w.bea.identity.member, "x", 5)).let { it.take(1) })
         assertEquals(listOf("that member already has a pause or a proposal"), rejected(w.carol.pausePropose(w.circle, DAY, newPauseId(w.crypto), dave.identity.member, "again", 5)))
         assertEquals(listOf("the subject cannot review their own pause"), rejected(dave.pauseReview(w.circle, DAY, id, true)))
         assertEquals(listOf("unknown pause"), rejected(w.bea.pauseReview(w.circle, DAY, newPauseId(w.crypto), true)))
@@ -762,7 +762,7 @@ abstract class MarketContract {
         w.start(StewardSettings(quorum = 1)) // only the founder is a steward, bea and carol are new members
         val id = newPauseId(w.crypto)
         assertEquals(
-            listOf("the circle has too few trusted members to review a pause"),
+            listOf("the circle has too few members at Level 3 or above to review a pause"),
             w.reasons(listOf(w.founder.pausePropose(w.circle, DAY, id, w.bea.identity.member, "x", 5))),
         )
     }
@@ -799,11 +799,11 @@ abstract class MarketContract {
         fun rejected(by: EventAuthor, settings: ConfigSettings) = w.reasons(listOf(by.configUpdate(w.circle, DAY, settings)))
         assertEquals(listOf("only a steward may change the circle's rules"), rejected(w.bea, d.copy(halfLifeDays = 90)))
         assertEquals(listOf("those are already the circle's rules"), rejected(w.founder, d))
-        assertEquals(listOf("halfLifeDays must be from 30 to 730"), rejected(w.founder, d.copy(halfLifeDays = 10)))
-        assertEquals(listOf("reviewersForPause must be from 2 to 9"), rejected(w.founder, d.copy(reviewersForPause = 1)))
-        assertEquals(listOf("thresholds must be positive and strictly increasing"), rejected(w.founder, d.copy(regularTenths = d.trustedTenths)))
-        assertEquals(listOf("thresholds must be from 0.1 to 10000 points"), rejected(w.founder, d.copy(stewardTenths = 0)))
-        assertEquals(listOf("incidentCooldownDays must be from 0 to 365"), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
+        assertEquals(listOf("the days for points to fade by half must be from 30 to 730"), rejected(w.founder, d.copy(halfLifeDays = 10)))
+        assertEquals(listOf("the reviewers needed for a pause must be from 2 to 9"), rejected(w.founder, d.copy(reviewersForPause = 1)))
+        assertEquals(listOf("the points must rise from each level to the next"), rejected(w.founder, d.copy(regularTenths = d.trustedTenths)))
+        assertEquals(listOf("the points for each level must be from 0.1 to 10000"), rejected(w.founder, d.copy(stewardTenths = 0)))
+        assertEquals(listOf("the days on hold after an incident must be from 0 to 365"), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
     }
 
     @Test
@@ -1011,7 +1011,7 @@ abstract class MarketContract {
         assertEquals(
             listOf(
                 "a member cannot confirm their own name",
-                "only a Regular member or above, or a steward, may confirm a name",
+                "only a member at Level 2 or above, or a steward, may confirm a name",
                 "that member has not set a name",
             ),
             w.reasons(

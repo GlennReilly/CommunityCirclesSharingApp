@@ -257,7 +257,7 @@ object StandingCalculator {
             .count { tierOf(it).rank >= cfg.voucherMinTier.rank }
         if (tier.rank < Tier.REGULAR.rank && liveVouchers >= cfg.vouchesForRegular) {
             tier = Tier.REGULAR
-            reasons += "$liveVouchers members vouched for this member, which opens Regular access."
+            reasons += "$liveVouchers members vouched for this member, which opens ${TierText.label(Tier.REGULAR)} access."
         }
 
         // Incident cooldown: the clamp means points alone cannot carry a consequence (C7).
@@ -393,18 +393,18 @@ object AccessPolicy {
         val needed = maxOf(item.itemClass.minTier, item.ownerMinTier ?: Tier.NEW, compareBy { it.rank })
         if (standing.tier.rank >= needed.rank) {
             return AccessDecision.Eligible(
-                standing.reasons + "Your tier (${standing.tier}) meets what ${item.name} needs ($needed)."
+                standing.reasons + "You are at ${TierText.label(standing.tier)}, which is what ${item.name} needs (${TierText.orAbove(needed)})."
             )
         }
 
         val gap = (circle.thresholds[needed] ?: 0.0) - standing.points
         return AccessDecision.NotYet(
-            standing.reasons + "${item.name} needs $needed; you are ${standing.tier}.",
+            standing.reasons + "${item.name} needs ${TierText.label(needed)}; you are ${TierText.label(standing.tier)}.",
             buildList {
                 add("Borrow and return everyday items; about ${format1(gap.coerceAtLeast(0.0))} more points opens it.")
                 // Vouching only opens REGULAR (C4).
                 if (needed.rank <= Tier.REGULAR.rank) {
-                    add("Or get ${circle.vouchesForRegular} members of tier ${circle.voucherMinTier} or above to vouch for you.")
+                    add("Or get ${circle.vouchesForRegular} members at ${TierText.orAbove(circle.voucherMinTier)} to vouch for you.")
                 }
                 add("Or offer a skill share or help at a circle event.")
             }
@@ -429,7 +429,7 @@ object AccessPolicy {
             reason.isBlank() -> PauseResult.Rejected("A pause needs a stated reason.")
             durationDays <= 0 -> PauseResult.Rejected("A pause needs an expiry.")
             qualified.size < cfg.reviewersForPause -> PauseResult.Rejected(
-                "A pause needs ${cfg.reviewersForPause} reviewers of tier ${cfg.pauseReviewerMinTier} or above, " +
+                "A pause needs ${cfg.reviewersForPause} reviewers at ${TierText.orAbove(cfg.pauseReviewerMinTier)}, " +
                     "not counting the member; ${qualified.size} qualify."
             )
             else -> PauseResult.Placed(Pause(member, cfg.id, reason, qualified, today, today + durationDays))

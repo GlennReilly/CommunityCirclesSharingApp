@@ -22,11 +22,11 @@ Lendger is a web app for one group (a "circle") to do this for itself, with no m
 
 ### Trust that grows, with no bans
 
-- New members can borrow lightly. Members have one of three tiers, New, Regular and Trusted ([ADR 0067](docs/adr/0067-tier-names-new-regular-trusted.md)). As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
-- Members choose the name others see. A member at Regular or above (or a steward) who has checked someone's key fingerprint in person can confirm their name, and every page then shows it as "confirmed"; changing the name clears that ([ADR 0068](docs/adr/0068-verified-display-names.md)).
+- New members can borrow lightly. Members are at Level 1, 2 or 3: Level 1 for new people, higher levels as they take part ([ADR 0070](docs/adr/0070-level-numbers.md)). As they return things well and help out, they earn "standing", which slowly fades if they stop taking part ([ADR 0042](docs/adr/0042-standing-vouches-and-the-access-check.md)).
+- Members choose the name others see. A member at Level 2 or above (or a steward) who has checked someone's key fingerprint in person can confirm their name, and every page then shows it as "confirmed"; changing the name clears that ([ADR 0068](docs/adr/0068-verified-display-names.md)).
 - Members can vouch for a new member. Contribution notes (for example, helping at a working bee) also count.
 - There are no star ratings. Owners decide who borrows their things; standing is advice shown to them.
-- As a last resort, trusted members can pause someone. A pause needs several reviewers, has an end date and an appeal, and keeps essentials open ([ADR 0050](docs/adr/0050-pauses.md)). Nobody is banned for good.
+- As a last resort, members at Level 3 can pause someone. A pause needs several reviewers, has an end date and an appeal, and keeps essentials open ([ADR 0050](docs/adr/0050-pauses.md)). Nobody is banned for good.
 
 ### Your data stays private
 

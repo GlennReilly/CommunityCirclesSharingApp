@@ -196,7 +196,7 @@ data class MemberSummary(
     val nameConfirmedBy: List<MemberId> = emptyList(),
     /** Did I confirm their current name? */
     val iConfirmed: Boolean = false,
-    /** May I confirm their name now (they have one, it is not mine, I have not yet, and I am Regular or above or a steward)? */
+    /** May I confirm their identity now (they have a name, it is not mine, I have not yet, and I am at REGULAR or above or a steward)? */
     val canConfirmName: Boolean = false,
 ) {
     /** True once enough current members confirmed the name ([circles.event.NAME_CONFIRMATIONS_NEEDED]). */
@@ -1582,7 +1582,7 @@ class CircleApp(
         return ItemResult.Saved(item)
     }
 
-    /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at Regular or above can. */
+    /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at REGULAR or above can. */
     suspend fun vouchFor(member: MemberId): VouchResult {
         val s = session ?: return VouchResult.NotAllowed
         val view = replica.fold(s.circle, crypto, cipher, s.identity)
@@ -1952,12 +1952,12 @@ class CircleApp(
     private fun unlockHints(standing: Standing, cfg: circles.policy.CircleConfig): List<String> = buildList {
         val next = Tier.entries.firstOrNull { it.rank > standing.tier.rank && it != Tier.STEWARD }
         if (next == null) {
-            add("You have the highest tier that borrowing needs. Keep lending and returning well.")
+            add("You have the highest level that borrowing needs. Keep lending and returning well.")
             return@buildList
         }
         val gap = ((cfg.thresholds[next] ?: 0.0) - standing.points).coerceAtLeast(0.0)
-        add("About ${circles.policy.format1(gap)} more standing points opens ${next.name.lowercase()} access: lend items and get them back, or borrow and return them on time.")
-        if (next.rank <= Tier.REGULAR.rank) add("Or get ${cfg.vouchesForRegular} members (Regular or above) to vouch for you (on the Members page).")
+        add("About ${circles.policy.format1(gap)} more standing points opens ${circles.policy.TierText.label(next)} access: lend items and get them back, or borrow and return them on time.")
+        if (next.rank <= Tier.REGULAR.rank) add("Or get ${cfg.vouchesForRegular} members at ${circles.policy.TierText.orAbove(cfg.voucherMinTier)} to vouch for you (on the Members page).")
     }
 
     /** The names typed when devices were added: from the sealed label of each `device.add`. */

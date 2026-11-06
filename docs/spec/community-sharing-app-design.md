@@ -36,9 +36,9 @@ It is a hobby and community project. It must work whether or not its author ever
 - **Member**: a person in a circle, with one or more devices.
 - **Item**: something shared (tool, equipment, space). Classes: ESSENTIAL, EVERYDAY, VALUABLE, HIGH_VALUE.
 - **Skill offer**: a person offering help (carpentry, plumbing, pottery) with optional open-to terms (barter, gift, money).
-- **Tiers**: NEW, REGULAR, TRUSTED, STEWARD (names per ADR 0067). Derived, never stored.
+- **Tiers**: NEW, REGULAR, TRUSTED, STEWARD (identifiers per ADR 0067). People see them as Level 1, 2, 3 and 4 (ADR 0070). Derived, never stored.
 - **Standing**: decayed sum of contribution events, clamped at zero, per circle.
-- **Vouch**: a member of sufficient tier vouches for a new member; two live vouches open REGULAR access. Vouches expire. A serious incident gives sponsors a mild nudge.
+- **Vouch**: a member of sufficient tier vouches for a new member; two live vouches open REGULAR access (Level 2). Vouches expire. A serious incident gives sponsors a mild nudge.
 - **Pause**: last resort. Needs several distinct reviewers who are themselves trusted members, a reason, an expiry and an appeal route. Essentials stay open during a pause.
 - **Incident cooldown**: after an unreported damage or loss, higher-value items are on hold for a while; essentials and everyday items stay open. Standing points are clamped at zero, so without this a low-standing member would face no consequence at all.
 - **Optimistic return**: a borrower's report that an item came back counts after a short grace period unless the owner disputes it. Owners are never penalised for not confirming (they are the scarce resource); a prompt confirmation earns a small bonus. Disputes go to a steward.

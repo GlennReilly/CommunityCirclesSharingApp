@@ -490,7 +490,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     AppAction.Notice(
                         pauseText(
                             circleApp.proposePause(MemberId(field(FIELD_PAUSE_SUBJECT)), field(FIELD_PAUSE_REASON), field(FIELD_PAUSE_DAYS).toIntOrNull() ?: 0),
-                            "The pause is proposed. The member can see it now. It takes effect when enough other trusted members agree.",
+                            "The pause is proposed. The member can see it now. It takes effect when enough other reviewers (${circles.policy.TierText.orAbove(circles.policy.Tier.TRUSTED)}) agree.",
                         ),
                     ),
                 )
