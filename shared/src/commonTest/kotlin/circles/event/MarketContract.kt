@@ -961,6 +961,93 @@ abstract class MarketContract {
         assertEquals(emptyList(), w.reasons(listOf(w.bea.skillUpsert(w.circle, DAY + 1, newSkillId(w.crypto), "now fits", "", setOf(OpenTo.GIFT, OpenTo.SWAP, OpenTo.THANKS)))))
     }
 
+    // ---- display names (ADR 0068) ----
+
+    @Test
+    fun aMemberSetsAndChangesTheirNameAndEveryChangeClearsItsConfirmations() = runTest {
+        val w = world()
+        val carol = w.carol.identity.member
+        val first = w.carol.memberProfile(w.circle, DAY, "Carol Ng")
+        w.log += first
+        assertFalse(first.encrypted.toHex().contains(ByteString.of("Carol".encodeToByteArray()).toHex()), "the name is sealed")
+        assertTrue(first.public.entries.isEmpty())
+        var view = w.foldAs(w.bea)
+        assertEquals("Carol Ng", view.market.names.getValue(carol).name)
+        assertFalse(view.market.nameConfirmed(carol), "not confirmed until someone does")
+        w.log += w.founder.confirmName(w.circle, DAY, carol, first.eventId(w.crypto), "Carol Ng")
+        view = w.foldAs(w.bea)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(setOf(w.founder.identity.member), view.market.nameConfirmers(carol))
+        assertTrue(view.market.nameConfirmed(carol))
+        assertEquals(listOf("already confirmed"), w.reasons(listOf(w.founder.confirmName(w.circle, DAY, carol, first.eventId(w.crypto), "Carol Ng"))))
+        assertEquals(listOf("that is already the member's name"), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, "Carol Ng"))))
+
+        w.log += w.carol.memberProfile(w.circle, DAY + 1, "Carol N.")
+        view = w.foldAs(w.bea)
+        assertEquals("Carol N.", view.market.names.getValue(carol).name)
+        assertEquals(emptySet(), view.market.nameConfirmers(carol), "a new name starts unconfirmed")
+        // Going back to the first name is a change too: a confirmation of the first one is stale, and so is one with the wrong text.
+        val again = w.carol.memberProfile(w.circle, DAY + 2, "Carol Ng")
+        w.log += again
+        assertEquals(
+            listOf("the name has changed since", "the name has changed since"),
+            w.reasons(
+                listOf(
+                    w.founder.confirmName(w.circle, DAY + 2, carol, first.eventId(w.crypto), "Carol Ng"),
+                    w.founder.confirmName(w.circle, DAY + 2, carol, again.eventId(w.crypto), "Carol N."),
+                ),
+            ),
+        )
+        assertEquals(emptyList(), w.reasons(listOf(w.founder.confirmName(w.circle, DAY + 2, carol, again.eventId(w.crypto), "Carol Ng"))))
+    }
+
+    @Test
+    fun onlyAnotherMemberAtRegularOrAboveMayConfirmAndBadNamesAreRefused() = runTest {
+        val w = world()
+        val bea = w.bea.identity.member
+        val named = w.bea.memberProfile(w.circle, DAY, "Bea")
+        w.log += named
+        val id = named.eventId(w.crypto)
+        assertEquals(
+            listOf(
+                "a member cannot confirm their own name",
+                "only a Regular member or above, or a steward, may confirm a name",
+                "that member has not set a name",
+            ),
+            w.reasons(
+                listOf(
+                    w.bea.confirmName(w.circle, DAY, bea, id, "Bea"),
+                    w.carol.confirmName(w.circle, DAY, bea, id, "Bea"), // carol is a new member
+                    w.founder.confirmName(w.circle, DAY, w.carol.identity.member, id, "Bea"),
+                ),
+            ),
+        )
+        val bad = listOf("x".repeat(MAX_DISPLAY_NAME_CODE_POINTS + 1), "Bea\u0007", " Bea", "Bea  Lee", "2b69a182", "12345", "Be\u200Ba", "")
+        for (name in bad) {
+            assertEquals(1, w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, name))).size, "refused: '$name'")
+        }
+        assertEquals("Bea", w.foldAs(w.founder).market.names.getValue(bea).name)
+    }
+
+    @Test
+    fun aConfirmationStopsCountingWhenTheConfirmerLeaves() = runTest {
+        val w = World(newCrypto(), newCipher())
+        w.start(StewardSettings(quorum = 1))
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY)
+        val carol = w.carol.identity.member
+        val named = w.carol.memberProfile(w.circle, DAY, "Carol")
+        w.log += named
+        w.log += w.bea.confirmName(w.circle, DAY, carol, named.eventId(w.crypto), "Carol")
+        assertTrue(w.foldAs(w.founder).market.nameConfirmed(carol), "a steward may confirm")
+        w.log += w.bea.deviceRevoke(w.circle, w.bea.identity.device, DAY + 1) // bea leaves the circle
+        val after = w.foldAs(w.founder)
+        assertEquals(emptyList(), after.rejected)
+        assertEquals(emptySet(), after.market.nameConfirmers(carol))
+        assertFalse(after.market.nameConfirmed(carol))
+        w.log += w.founder.confirmName(w.circle, DAY + 1, carol, named.eventId(w.crypto), "Carol")
+        assertEquals(setOf(w.founder.identity.member), w.foldAs(w.founder).market.nameConfirmers(carol))
+    }
+
     // ---- item photos (ADR 0060) ----
 
     private fun photo(n: Int, alt: String = "Front view") = ItemPhoto(n.toString(16).padStart(64, 'a'), n.toString(16).padStart(64, 'b'), FIRST_EPOCH, alt)

@@ -150,3 +150,7 @@ svg.qr { display: block; width: 100%; height: auto; }
 }
 
 .primary-button { background: var(--primary); color: var(--on-primary); border-color: var(--primary); font-weight: 600; }
+
+/* Display names (ADR 0068): the confirmation is said in words; unconfirmed reads quieter, never by colour alone. */
+.name-status { font-size: 0.85em; font-weight: normal; }
+.name-status.unconfirmed { opacity: 0.85; }

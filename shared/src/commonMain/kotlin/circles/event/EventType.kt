@@ -6,6 +6,8 @@ enum class EventType(val wire: String) {
     MEMBER_INVITE("member.invite"),
     MEMBER_JOIN("member.join"),
     MEMBER_PROFILE("member.profile"),
+    /** A member confirms another member's current display name (ADR 0068). */
+    MEMBER_NAME_CONFIRM("member.name.confirm"),
     DEVICE_ADD("device.add"),
     DEVICE_REVOKE("device.revoke"),
     KEY_WRAP("key.wrap"),

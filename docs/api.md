@@ -28,6 +28,10 @@ Status codes: `401` missing or bad token, `403` the device is not in that circle
 
 [ADR 0015](adr/0015-rate-limiting-pulled-forward.md). Token buckets, per minute: auth 10 per client address (`/auth/challenge` and `/auth/session` share it, so a login uses two), push 60 per device (per request), join 5 and create 5 per client address. Pull and the probes are not limited. A refused request gets `429` problem+json and `Retry-After` in seconds. `LENDGER_RATE_LIMIT=false` turns it off.
 
+## Sealed event types
+
+Accepted from any registered, unrevoked device of the circle, with an empty `public` and a sealed payload the server cannot read (it checks only the sender, the epoch and that a payload exists): `item.upsert`, `item.retire`, `item.detail`, `loan.request`, `loan.respond`, `loan.handover`, `loan.return`, `loan.cancel`, `loan.dispute`, `loan.resolve`, `vouch`, `standing.note`, `standing.confirm`, `pause.propose`, `pause.review`, `pause.appeal`, `pause.lift`, `config.update`, `skill.upsert`, `skill.retire`, and since ADR 0068 `member.profile` (a member's display name) and `member.name.confirm` (another member confirms it). Clients apply the rules while folding. Every type declared in the spec is now accepted; anything else is refused with `unsupported_type`.
+
 ## Rejection reasons
 
 `malformed`, `unsupported_version`, `unsupported_type`, `too_large`, `future_day`, `unknown_circle`, `circle_exists`, `creation_disabled`, `wrong_circle`, `unknown_device`, `device_revoked`, `device_exists`, `member_exists`, `author_mismatch`, `bad_signature`, `not_steward`, `invalid_public`, `invalid_payload`, `unknown_invite`, `invite_expired`, `invite_exhausted`, `bad_invite_proof`, `steward_protected` (a steward's device may only be revoked by that steward, ADR 0044).

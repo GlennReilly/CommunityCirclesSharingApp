@@ -2,6 +2,9 @@ package circles.web
 
 import circles.app.AppModel
 import circles.app.HomeData
+import circles.app.MemberSummary
+import circles.event.MAX_DISPLAY_NAME_CODE_POINTS
+import circles.policy.MemberId
 import circles.app.PauseHistoryEntry
 import circles.app.MIN_RECOVERY_THRESHOLD
 import circles.app.Fingerprint
@@ -57,6 +60,7 @@ import circles.keys.AUTO_LOCK_CHOICES_MINUTES
 import circles.keys.MIN_PASSPHRASE_CHARS
 import kotlinx.html.ButtonType
 import kotlinx.html.FlowContent
+import kotlinx.html.FlowOrPhrasingContent
 import kotlinx.html.InputType
 import kotlinx.html.ol
 import kotlinx.html.option
@@ -240,7 +244,36 @@ private const val ISO_DATE_CHARS = 10
 const val ATTR_ACTION = "data-action"
 const val ATTR_DEVICE = "data-device"
 private const val ID_INVITE_OUTPUT = "invite-output"
-private const val MEMBER_SHORT_CHARS = 8
+/** How a member without a name shows until they choose one (ADR 0068). */
+const val UNNAMED_MEMBER = "New member (waiting for a name)"
+const val NAME_CONFIRMED = "(confirmed)"
+const val NAME_NOT_CONFIRMED = "(not confirmed yet)"
+const val FORM_MY_NAME = "name-form"
+const val FORM_RENAME = "rename-form"
+const val FIELD_DISPLAY_NAME = "display-name"
+const val FORM_CONFIRM_NAME_PREFIX = "confirm-name-"
+const val FIELD_NAME_CHECKED = "name-checked"
+/** A tick box that must be ticked before its form's submit button shows. */
+const val ATTR_MUST_CHECK = "data-must-check"
+
+/** A member's name as every page shows it; members who have not chosen one yet read [UNNAMED_MEMBER]. */
+fun nameOf(home: HomeData, member: MemberId): String = home.names[member]?.name ?: UNNAMED_MEMBER
+
+/** The name, then in smaller words whether a member confirmed it (words, not colour alone; ADR 0068). */
+fun FlowOrPhrasingContent.personName(home: HomeData, member: MemberId) {
+    val named = home.names[member]
+    span {
+        classes = setOf("person-name")
+        +(named?.name ?: UNNAMED_MEMBER)
+    }
+    if (named != null) {
+        +" "
+        span {
+            classes = setOf("name-status", if (named.confirmed) "confirmed" else "unconfirmed")
+            +(if (named.confirmed) NAME_CONFIRMED else NAME_NOT_CONFIRMED)
+        }
+    }
+}
 
 /**
  * The page as a pure function of [AppState]. It writes through any kotlinx-html consumer, so the browser mounts it
@@ -274,7 +307,8 @@ fun FlowContent.shell(state: AppState) {
             }
         }
     }
-    if (state.signedIn) {
+    // The name page is the one thing to do before anything else (ADR 0068), so it has no navigation to wander off with.
+    if (state.signedIn && state.screen != Screen.YourName) {
         nav {
             attributes["aria-label"] = "Main"
             ul {
@@ -317,6 +351,7 @@ fun FlowContent.shell(state: AppState) {
             is AppModel.Locked -> signIn(model.passkey)
             is AppModel.AwaitingApproval -> awaiting(model)
             is AppModel.Open -> when (state.screen) {
+                Screen.YourName -> yourNamePage()
                 Screen.Home -> home(model.home)
                 Screen.Members -> members(model.home, state)
                 Screen.Settings -> settings(model.home, state)
@@ -597,6 +632,63 @@ private fun FlowContent.home(home: HomeData) {
     }
 }
 
+/** The text field for a display name: the submit button waits for one character (ADR 0068). */
+private fun FlowContent.nameField(labelText: String) {
+    label {
+        attributes["for"] = FIELD_DISPLAY_NAME
+        +labelText
+    }
+    input(type = InputType.text, name = FIELD_DISPLAY_NAME) {
+        id = FIELD_DISPLAY_NAME
+        required = true
+        attributes[ATTR_MIN] = "1"
+        attributes["maxlength"] = (MAX_DISPLAY_NAME_CODE_POINTS * 2).toString()
+        attributes["autocomplete"] = "name"
+        attributes["aria-describedby"] = "name-help"
+    }
+    p {
+        id = "name-help"
+        +"Up to $MAX_DISPLAY_NAME_CODE_POINTS characters. Use the name people in your group know you by."
+    }
+}
+
+/** The first page after joining or starting a circle, and after unlocking if no name is set: one question (ADR 0068). */
+private fun FlowContent.yourNamePage() {
+    h1 { +Screen.YourName.title }
+    p { +"Other members see this name next to everything you share or ask for. Only members of the circle can read it." }
+    form {
+        id = FORM_MY_NAME
+        nameField("Your name: ")
+        formSubmit("Save my name")
+    }
+}
+
+/**
+ * Confirming another member's name (ADR 0068): the fingerprint is on the same card or page, and the button only shows
+ * once the box saying it was checked in person is ticked.
+ */
+private fun FlowContent.confirmNameForm(person: MemberSummary) {
+    val box = "$FIELD_NAME_CHECKED-${person.member.v}"
+    form {
+        id = FORM_CONFIRM_NAME_PREFIX + person.member.v
+        attributes[ATTR_MEMBER] = person.member.v
+        p { +"Confirm this name only if you know this person and compared the key fingerprint ${person.fingerprint} with the one on their own device." }
+        div {
+            classes = setOf("check-row")
+            input(type = InputType.checkBox, name = FIELD_NAME_CHECKED) {
+                id = box
+                required = true
+                attributes[ATTR_MUST_CHECK] = "true"
+            }
+            label {
+                attributes["for"] = box
+                +"I checked this person's key fingerprint in person"
+            }
+        }
+        formSubmit("Confirm their name")
+    }
+}
+
 /** Who is in the circle, how to bring someone in, and (for stewards) who is waiting at the door. */
 private fun FlowContent.members(home: HomeData, state: AppState) {
     h1 { +Screen.Members.title }
@@ -604,7 +696,10 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
         classes = setOf("cards")
         for (person in home.people) {
             li {
-                h2 { +(if (person.isMe) "You" else "Member ${person.member.v.take(MEMBER_SHORT_CHARS)}") }
+                h2 {
+                    personName(home, person.member)
+                    if (person.isMe) +" (you)"
+                }
                 p {
                     +buildList {
                         if (person.isSteward) add("Steward")
@@ -612,12 +707,23 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                     }.joinToString(", ")
                 }
                 p { +"Key fingerprint: ${person.fingerprint}" }
+                if (person.displayName != null) {
+                    p {
+                        +when {
+                            person.nameConfirmed && person.iConfirmed -> "You confirmed this name."
+                            person.nameConfirmed -> "Name confirmed by ${person.nameConfirmedBy.joinToString(", ") { nameOf(home, it) }}."
+                            person.isMe -> "Nobody has confirmed your name yet. Show someone your fingerprint in person and ask them to confirm it."
+                            else -> "Nobody has confirmed this name yet."
+                        }
+                    }
+                }
+                if (person.canConfirmName) confirmNameForm(person)
                 if (person.isMe) {
                     details {
                         summary { +"Show my QR code" }
                         p { +"Let the other person point their phone's camera at this. The link opens in Lendger on their phone, where they must be signed in, and it checks your key fingerprint for them." }
                         val link = VerifyLink(home.circle, person.member, Fingerprint.compact(person.fingerprint)).format(state.origin)
-                        qrImage(link, "QR code of the link that checks member ${person.member.v.take(MEMBER_SHORT_CHARS)}'s key fingerprint")
+                        qrImage(link, "QR code of the link that checks your key fingerprint")
                         label {
                             attributes["for"] = ID_VERIFY_LINK
                             +"Or send them this link: "
@@ -682,7 +788,8 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
             ul {
                 for (waiting in home.waiting) {
                     li {
-                        +"Member ${waiting.member.v.take(MEMBER_SHORT_CHARS)} "
+                        personName(home, waiting.member)
+                        +". Key fingerprint: ${home.people.firstOrNull { it.member == waiting.member }?.fingerprint.orEmpty()} "
                         button(type = ButtonType.button) {
                             attributes[ATTR_ACTION] = ACTION_ADMIT
                             attributes[ATTR_DEVICE] = waiting.device.v
@@ -776,7 +883,13 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
                     }
                 }
                 p { +itemClassLabel(item.itemClass).substringBefore(":") }
-                p { +(if (item.ownedByMe) "Yours" else "Shared by member ${item.owner.v.take(MEMBER_SHORT_CHARS)}") }
+                p {
+                    if (item.ownedByMe) +"Yours"
+                    else {
+                        +"Shared by "
+                        personName(home, item.owner)
+                    }
+                }
                 item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
                 if (!item.ownedByMe) {
                     val access = item.access
@@ -906,7 +1019,7 @@ private fun outcomeLabel(outcome: ReturnOutcome): String = when (outcome) {
 
 private fun window(loan: LoanSummary): String = "${CalendarDay.format(loan.fromDay)} to ${CalendarDay.format(loan.toDay)}"
 
-private fun who(loan: LoanSummary): String = "member ${loan.other.v.take(MEMBER_SHORT_CHARS)}"
+private fun who(home: HomeData, loan: LoanSummary): String = nameOf(home, loan.other)
 
 /** How a loan's end day reads today (ADR 0059): plain, kind words with the date; it changes nothing about standing. */
 fun dueLine(toDay: Int, today: Int): String {
@@ -922,9 +1035,13 @@ fun dueLine(toDay: Int, today: Int): String {
 /** Loans that are out and due back today or past their day, for either side; shown on Home and in the page title (ADR 0059). */
 fun dueCount(home: HomeData): Int = home.loans.count { it.status == LoanStatus.ACTIVE && it.role != LoanRole.STEWARD && it.toDay <= home.today }
 
-private fun FlowContent.loanHeading(loan: LoanSummary) {
+private fun FlowContent.loanHeading(home: HomeData, loan: LoanSummary) {
     h3 { +loan.itemName }
-    p { +"${if (loan.role == LoanRole.OWNER) "Asked by" else "Owned by"} ${who(loan)}, ${window(loan)}" }
+    p {
+        +"${if (loan.role == LoanRole.OWNER) "Asked by" else "Owned by"} "
+        personName(home, loan.other)
+        +", ${window(loan)}"
+    }
     loan.note?.let { p { +"Note: $it" } }
 }
 
@@ -977,7 +1094,7 @@ private fun FlowContent.borrow(home: HomeData) {
             h2 { +"Requests to answer" }
             for (loan in toAnswer) {
                 div {
-                    loanHeading(loan)
+                    loanHeading(home, loan)
                     loanButton(ACTION_APPROVE_LOAN, loan, "Approve and share the details")
                     loanButton(ACTION_DECLINE_LOAN, loan, "Decline")
                     details {
@@ -1011,14 +1128,14 @@ private fun FlowContent.borrow(home: HomeData) {
             h2 { +"Ready to hand over" }
             for (loan in handovers) {
                 div {
-                    loanHeading(loan)
+                    loanHeading(home, loan)
                     loan.description?.takeIf { loan.role == LoanRole.BORROWER && it.isNotBlank() }?.let { p { +"Details: $it" } }
                     if (loan.datesChanged && loan.role == LoanRole.BORROWER) p { +"The owner approved other dates than you asked for. If they do not suit you, cancel and ask again." }
                     if (loan.role == LoanRole.BORROWER && !loan.iConfirmedHandover) loanButton(ACTION_CANCEL_LOAN, loan, "Cancel this loan")
                     if (loan.iConfirmedHandover) {
-                        p { +"You have confirmed. Waiting for ${who(loan)} to confirm too." }
+                        p { +"You have confirmed. Waiting for ${who(home, loan)} to confirm too." }
                     } else {
-                        if (loan.otherConfirmedHandover) p { +"${who(loan).replaceFirstChar { it.uppercase() }} has confirmed." }
+                        if (loan.otherConfirmedHandover) p { +"${who(home, loan).replaceFirstChar { it.uppercase() }} has confirmed." }
                         loanButton(ACTION_HANDOVER, loan, "We handed it over")
                     }
                 }
@@ -1030,14 +1147,14 @@ private fun FlowContent.borrow(home: HomeData) {
             h2 { +"Out now" }
             for (loan in out) {
                 div {
-                    loanHeading(loan)
+                    loanHeading(home, loan)
                     p { +dueLine(loan.toDay, home.today) }
                     if (loan.role == LoanRole.OWNER && loan.toDay < home.today) {
                         details {
                             summary { +"Ask them to return it" }
                             p {
                                 val fingerprint = home.people.firstOrNull { it.member == loan.other }?.fingerprint ?: "not known yet"
-                                +"Ask ${who(loan)} in person, or wherever your group talks: Lendger sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
+                                +"Ask ${who(home, loan)} in person, or wherever your group talks: Lendger sends nothing. To be sure it is the right person, their key fingerprint is $fingerprint."
                             }
                         }
                     }
@@ -1063,7 +1180,7 @@ private fun FlowContent.borrow(home: HomeData) {
                             formSubmit("Report it back", ready = true)
                         }
                     } else {
-                        p { +"With ${who(loan)}. They will report it back." }
+                        p { +"With ${who(home, loan)}. They will report it back." }
                     }
                 }
             }
@@ -1073,7 +1190,7 @@ private fun FlowContent.borrow(home: HomeData) {
         section {
             h2 { +"Waiting for an answer" }
             for (loan in waiting) div {
-                loanHeading(loan)
+                loanHeading(home, loan)
                 loanButton(ACTION_CANCEL_LOAN, loan, "Cancel my request")
             }
         }
@@ -1083,7 +1200,7 @@ private fun FlowContent.borrow(home: HomeData) {
             h2 { +"Finished" }
             for (loan in finished) {
                 div {
-                    loanHeading(loan)
+                    loanHeading(home, loan)
                     p {
                         +(if (loan.status == LoanStatus.DECLINED) "Declined." else if (loan.status == LoanStatus.CANCELLED) "Cancelled." else loan.outcome?.let { outcomeLabel(it) + "." } ?: "Returned.")
                     }
@@ -1251,6 +1368,19 @@ private fun FlowContent.appearanceSection(current: Appearance) {
 /** This browser's own settings: passphrase, locking, and forgetting the device. */
 private fun FlowContent.settings(home: HomeData, state: AppState) {
     h1 { +Screen.Settings.title }
+    section {
+        h2 { +"Your name" }
+        p {
+            +"Others see you as: "
+            personName(home, home.me)
+        }
+        p { +"Changing your name clears its confirmations. Someone will need to check your fingerprint and confirm it again." }
+        form {
+            id = FORM_RENAME
+            nameField("New name: ")
+            formSubmit("Change my name")
+        }
+    }
     devicesSection(home, state)
     appearanceSection(state.appearance)
     section {
@@ -1396,9 +1526,9 @@ private fun FlowContent.agreeButton(proposal: ProposalSummary) {
     }
 }
 
-private fun proposalText(proposal: ProposalSummary): String = when (proposal.change) {
-    StewardChange.ADD -> "Make member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} a steward"
-    StewardChange.REMOVE -> "Remove member ${proposal.member?.v?.take(MEMBER_SHORT_CHARS)} as a steward"
+private fun proposalText(home: HomeData, proposal: ProposalSummary): String = when (proposal.change) {
+    StewardChange.ADD -> "Make ${proposal.member?.let { nameOf(home, it) }} a steward"
+    StewardChange.REMOVE -> "Remove ${proposal.member?.let { nameOf(home, it) }} as a steward"
     StewardChange.POLICY -> proposal.settings?.let {
         "Change the rules: ${it.quorum} to agree, ${it.inactiveDays} quiet days, ${it.fallbackDelayDays} days to wait, " +
             (if (it.recoveryThreshold == 0) "no recovery shares" else "${it.recoveryThreshold} stewards to rebuild the key")
@@ -1420,7 +1550,10 @@ private fun FlowContent.stewards(home: HomeData) {
         ul {
             for (steward in home.stewardList) {
                 li {
-                    h3 { +(if (steward.isMe) "You" else "Member ${steward.member.v.take(MEMBER_SHORT_CHARS)}") }
+                    h3 {
+                        personName(home, steward.member)
+                        if (steward.isMe) +" (you)"
+                    }
                     p {
                         +(steward.sinceDay?.let { "Steward since ${CalendarDay.format(it)}" } ?: "Founding steward")
                         steward.votesFromDay?.let { +". Can vote from ${CalendarDay.format(it)}" }
@@ -1446,7 +1579,7 @@ private fun FlowContent.stewards(home: HomeData) {
             ul {
                 for (proposal in home.proposals) {
                     li {
-                        p { +proposalText(proposal) }
+                        p { +proposalText(home, proposal) }
                         p { +"${proposal.agreeing} of ${proposal.needed} stewards agree." }
                         if (proposal.iAgree) p { +"You agree." }
                         if (proposal.canAgree) agreeButton(proposal)
@@ -1463,7 +1596,8 @@ private fun FlowContent.stewards(home: HomeData) {
                 ul {
                     for (person in candidates) {
                         li {
-                            +"Member ${person.member.v.take(MEMBER_SHORT_CHARS)} "
+                            personName(home, person.member)
+                            +" "
                             button(type = ButtonType.button) {
                                 attributes[ATTR_ACTION] = ACTION_STEWARD_ADD
                                 attributes[ATTR_SUBJECT] = person.member.v
@@ -1925,7 +2059,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
                 h2 { +(if (pause.status == PauseStatus.LIVE) "Your access is paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "A pause has been proposed for you") }
                 p { +"Reason given: ${pause.reason}" }
                 p { +"Essentials stay open to you. ${pause.agreeing} of ${pause.needed} reviewers have agreed." }
-                if (pause.reviewers.isNotEmpty()) p { +"Agreed so far: ${pause.reviewers.joinToString(", ") { "member ${it.v.take(MEMBER_SHORT_CHARS)}" }}" }
+                if (pause.reviewers.isNotEmpty()) p { +"Agreed so far: ${pause.reviewers.joinToString(", ") { nameOf(home, it) }}" }
                 if (pause.appeal != null) p { +"Your appeal: ${pause.appeal}" }
                 if (pause.canAppeal) {
                     p { +"You can write one note to the reviewers. Any of them may then lift the pause." }
@@ -1947,7 +2081,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
                     }
                 }
             } else {
-                h2 { +"Member ${pause.subject.v.take(MEMBER_SHORT_CHARS)}: ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}" }
+                h2 { +"${nameOf(home, pause.subject)}: ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}" }
                 p { +"Reason: ${pause.reason}" }
                 p { +"${pause.agreeing} of ${pause.needed} reviewers have agreed." }
                 if (pause.appeal != null) p { +"The member's appeal: ${pause.appeal}" }
@@ -1973,7 +2107,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
             ul {
                 for (entry in home.pauseHistory) {
                     li {
-                        val who = if (entry.role == PauseRole.SUBJECT) "You" else "Member ${entry.subject.v.take(MEMBER_SHORT_CHARS)}"
+                        val who = if (entry.role == PauseRole.SUBJECT) "You" else nameOf(home, entry.subject)
                         +"$who: ${pauseHistoryLine(entry)} Reason: ${entry.reason}"
                         if (entry.appeal != null) +" Appeal: ${entry.appeal}"
                     }
@@ -1996,7 +2130,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
                     name = FIELD_PAUSE_SUBJECT
                     for (member in home.pauseCandidates) option {
                         value = member.v
-                        +"Member ${member.v.take(MEMBER_SHORT_CHARS)}"
+                        +nameOf(home, member)
                     }
                 }
                 label {
@@ -2056,7 +2190,7 @@ private fun FlowContent.contributions(home: HomeData) {
             h2 { +"Waiting for your confirmation" }
             for (note in c.toConfirm) {
                 div {
-                    p { +"Member ${note.other.v.take(MEMBER_SHORT_CHARS)} says they ${contributionPhrase(note.kind, mine = false)}.${if (note.text.isNotBlank()) " \"${note.text}\"" else ""}" }
+                    p { +"${nameOf(home, note.other)} says they ${contributionPhrase(note.kind, mine = false)}.${if (note.text.isNotBlank()) " \"${note.text}\"" else ""}" }
                     button(type = ButtonType.button) {
                         attributes[ATTR_ACTION] = ACTION_NOTE_CONFIRM
                         attributes[ATTR_NOTE_ID] = note.note.v
@@ -2094,7 +2228,7 @@ private fun FlowContent.contributions(home: HomeData) {
                         name = FIELD_NOTE_WITH
                         for (member in c.candidates) option {
                             value = member.v
-                            +"Member ${member.v.take(MEMBER_SHORT_CHARS)}"
+                            +nameOf(home, member)
                         }
                     }
                     label {
@@ -2115,7 +2249,7 @@ private fun FlowContent.contributions(home: HomeData) {
             h2 { +"Your recent contributions" }
             ul {
                 for (note in c.mine) li {
-                    val what = contributionPhrase(note.kind, mine = true).replace("them", "member ${note.other.v.take(MEMBER_SHORT_CHARS)}")
+                    val what = contributionPhrase(note.kind, mine = true).replace("them", nameOf(home, note.other))
                     val state = when (note.status) {
                         NoteStatus.COUNTED -> "confirmed and counted."
                         NoteStatus.WAITING -> "waiting for them to confirm."
@@ -2194,7 +2328,11 @@ private fun FlowContent.skills(home: HomeData) {
                     }
                 } else {
                     val person = home.people.firstOrNull { it.member == skill.owner }
-                    p { +"Offered by member ${skill.owner.v.take(MEMBER_SHORT_CHARS)}${person?.let { ". Check who they are: ${it.fingerprint}" } ?: ""}" }
+                    p {
+                        +"Offered by "
+                        personName(home, skill.owner)
+                        person?.let { +". Check who they are: ${it.fingerprint}" }
+                    }
                 }
             }
         }
@@ -2341,15 +2479,16 @@ private fun FlowContent.verifyPage(home: HomeData, state: AppState) {
         Fingerprint.compact(person.fingerprint) == link.fingerprint -> {
             p {
                 role = "status"
-                +"Matches. This is member ${person.member.v.take(MEMBER_SHORT_CHARS)}: the key you hold for them is the one in their code."
+                +"Matches. This is ${nameOf(home, person.member)}: the key you hold for them is the one in their code."
             }
             p { +"Their key fingerprint: ${person.fingerprint}" }
+            if (person.canConfirmName) confirmNameForm(person)
             if (person.vouchedByMeUntil == null && home.canVouch) p { +"If you know them, you can vouch for them on the Members page." }
         }
         else -> {
             p {
                 role = "alert"
-                +"Does not match. The code says this key fingerprint is ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for member ${person.member.v.take(MEMBER_SHORT_CHARS)} is ${person.fingerprint}. Do not trust this person until you have compared fingerprints in person."
+                +"Does not match. The code says this key fingerprint is ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for ${nameOf(home, person.member)} is ${person.fingerprint}. Do not trust this person until you have compared fingerprints in person."
             }
         }
     }

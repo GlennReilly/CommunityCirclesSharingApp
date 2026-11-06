@@ -158,6 +158,14 @@ class EventAuthor(
     fun configUpdate(circle: CircleId, day: Int, settings: ConfigSettings): Envelope =
         build(circle, EventType.CONFIG_UPDATE, day, CborMap.EMPTY, MarketPayloads.configUpdate(settings))
 
+    /** Sets the author's display name (ADR 0068); any earlier confirmations no longer count. */
+    fun memberProfile(circle: CircleId, day: Int, name: String): Envelope =
+        build(circle, EventType.MEMBER_PROFILE, day, CborMap.EMPTY, NamePayloads.profile(MemberProfile(name)))
+
+    /** Confirms that [member]'s name [name], set by [profile], is right, after checking their fingerprint in person (ADR 0068). */
+    fun confirmName(circle: CircleId, day: Int, member: MemberId, profile: EventId, name: String): Envelope =
+        build(circle, EventType.MEMBER_NAME_CONFIRM, day, CborMap.EMPTY, NamePayloads.confirmation(NameConfirmation(member, profile, name, NameCheck.FINGERPRINT_IN_PERSON)))
+
     fun skillUpsert(circle: CircleId, day: Int, skill: SkillId, name: String, details: String, openTo: Set<OpenTo>): Envelope =
         build(circle, EventType.SKILL_UPSERT, day, CborMap.EMPTY, MarketPayloads.skillUpsert(SkillOffer(skill, name, details, openTo)))
 

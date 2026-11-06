@@ -190,7 +190,32 @@ data class MemberSummary(
     val vouchedByMeUntil: Int? = null,
     /** May I, as a steward, remove this person from the circle? */
     val canRemove: Boolean = false,
-)
+    /** The name they gave themselves (ADR 0068); null until they set one. */
+    val displayName: String? = null,
+    /** Current members who confirmed that name and still count. */
+    val nameConfirmedBy: List<MemberId> = emptyList(),
+    /** Did I confirm their current name? */
+    val iConfirmed: Boolean = false,
+    /** May I confirm their name now (they have one, it is not mine, I have not yet, and I am Regular or above or a steward)? */
+    val canConfirmName: Boolean = false,
+) {
+    /** True once enough current members confirmed the name ([circles.event.NAME_CONFIRMATIONS_NEEDED]). */
+    val nameConfirmed: Boolean get() = nameConfirmedBy.size >= circles.event.NAME_CONFIRMATIONS_NEEDED
+}
+
+/** A member's display name as every screen shows it (ADR 0068). */
+data class NameSummary(val name: String, val confirmed: Boolean)
+
+sealed interface NameResult {
+    data object Saved : NameResult
+
+    data class Refused(val reason: String) : NameResult
+
+    /** Names are sealed with the circle key, so a member must be let in first. */
+    data object NotLetInYet : NameResult
+
+    data object NotAllowed : NameResult
+}
 
 enum class LoanRole { BORROWER, OWNER, /** Neither party: a steward who may resolve this loan's dispute. */ STEWARD }
 
@@ -434,6 +459,10 @@ data class HomeData(
     val proposals: List<ProposalSummary> = emptyList(),
     /** Everyone in the circle, in the order they joined. */
     val people: List<MemberSummary> = emptyList(),
+    /** My own display name, or null if I have not set one yet: the app then asks for it first (ADR 0068). */
+    val myName: String? = null,
+    /** The display name of every member who has one, including members who have left (old loans still name them). */
+    val names: Map<MemberId, NameSummary> = emptyMap(),
     /** Minutes of inactivity before this browser locks; 0 means only when the tab closes. */
     val autoLockMinutes: Int = circles.keys.DEFAULT_IDLE_LOCK_MINUTES,
     /** Whether unlocking with a passkey is offered here, and whether it is on (ADR 0063). */
@@ -896,6 +925,29 @@ class CircleApp(
     suspend fun retireSkill(skill: circles.event.SkillId): SkillResult {
         val (s, _) = pauseSession() ?: return SkillResult.NotAllowed
         return sendSkill(s.author.skillRetire(s.circle, today(), skill), skill)
+    }
+
+    // ---- display names (ADR 0068) ----
+
+    /** Sets or changes my display name. It is tidied first (NFKC, single spaces); a change clears its confirmations. */
+    suspend fun setMyName(name: String): NameResult {
+        val tidy = circles.event.DisplayNames.tidy(name) { circles.text.nfkc(it) }
+        circles.event.DisplayNames.problem(tidy)?.let { return NameResult.Refused(it) }
+        val (s, _) = pauseSession() ?: return if (session == null) NameResult.NotAllowed else NameResult.NotLetInYet
+        return nameResult(sendPause(s, s.author.memberProfile(s.circle, today(), tidy)))
+    }
+
+    /** Confirms [member]'s current name, after checking their key fingerprint in person (ADR 0068). */
+    suspend fun confirmName(member: MemberId): NameResult {
+        val (s, view) = pauseSession() ?: return NameResult.NotAllowed
+        val current = view.market.names[member] ?: return NameResult.NotAllowed
+        return nameResult(sendPause(s, s.author.confirmName(s.circle, today(), member, current.profile, current.name)))
+    }
+
+    private fun nameResult(result: PauseResult): NameResult = when (result) {
+        PauseResult.Sent -> NameResult.Saved
+        is PauseResult.Refused -> NameResult.Refused(result.reason)
+        PauseResult.NotAllowed -> NameResult.NotAllowed
     }
 
     // ---- contribution notes (ADR 0053) ----
@@ -1776,7 +1828,11 @@ class CircleApp(
                 autoLockMinutes = vault.autoLockMinutes,
                 passkeyOffered = passkeys?.available == true,
                 passkeyOn = keyStore.load()?.passkey != null,
+                myName = view.market.names[me]?.name,
+                names = view.market.names.mapValues { (member, state) -> NameSummary(state.name, view.market.nameConfirmed(member)) },
                 people = view.devices.values.filter { !it.revoked }.groupBy { it.registration.member }.map { (member, devices) ->
+                    val confirmers = view.market.nameConfirmers(member)
+                    val named = view.market.names[member]
                     MemberSummary(
                         member = member,
                         isMe = member == s.identity.member,
@@ -1785,6 +1841,11 @@ class CircleApp(
                         devices = devices.size,
                         fingerprint = fingerprint(devices.first().registration.signPub),
                         vouchedByMeUntil = vouchesNow.filter { it.voucher == me && it.vouchee == member && it.isLiveOn(now, cfg) }.maxOfOrNull { it.effectiveExpiry(cfg) },
+                        displayName = named?.name,
+                        nameConfirmedBy = confirmers.toList(),
+                        iConfirmed = me in confirmers,
+                        canConfirmName = named != null && member != me && me !in named.confirmations &&
+                            (me in view.stewards || myStanding.tier.rank >= Tier.REGULAR.rank),
                     )
                 },
                 loans = view.market.loans.values

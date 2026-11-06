@@ -28,6 +28,7 @@ Sign-in and passphrase keys, circles, invites, second devices, recovery code, it
 | ~~`standing.note` contribution events~~ | done (ADR 0053) | The sponsor nudge for upheld damage disputes was already in (ADR 0043). |
 | ~~Passkey (WebAuthn PRF) unlock~~ | done (ADR 0063) | Tried only with Chrome's virtual authenticator: try a real phone, laptop or security key. |
 | ~~Appearance settings (text size, colours)~~ | done | Standard, large, largest text and light, dark or device colours, kept in the browser. Language is not offered: the pilot is English only. A contrast setting beyond light and dark is not built. |
+| ~~Member names~~ | done (ADR 0068) | Chosen by each member, asked for on the first page after being let in; confirmed by a Regular or higher member or a steward who checked the fingerprint in person. A joiner has no name until let in (it cannot be sealed before), so stewards let people in by fingerprint. Contact preferences and area are not built. |
 | ~~Pause history~~ | done | "Earlier pauses" on the Pauses page, only pauses that took effect, visible to the subject and the reviewers. A general "what happened" log of everything stewards did is not built. |
 
 ## Known limits to tell the pilot group

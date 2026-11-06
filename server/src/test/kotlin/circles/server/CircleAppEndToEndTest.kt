@@ -32,6 +32,7 @@ import circles.policy.Tier
 import circles.event.CircleFold
 import circles.app.LoanRole
 import circles.app.NoteResult
+import circles.app.NameResult
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.put
@@ -1499,5 +1500,69 @@ class CircleAppEndToEndTest {
         assertFalse(home(alice.app).loans.single().datesChanged.not(), "the owner sees it as changed too")
         assertIs<LoanResult.Done>(bea.app.cancelLoan(loan))
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
+    }
+
+    @Test
+    fun namesAreSetConfirmedInPersonClearedByAChangeAndNeverReachTheServerInTheClear() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        assertEquals(null, home(alice.app).myName, "a new founder has no name yet, so the page asks for it")
+        assertEquals(NameResult.Saved, alice.app.setMyName("  Alice\tSmith "))
+        assertEquals("Alice Smith", home(alice.app).myName, "tidied: single spaces, none at the ends")
+        suspend fun invited(): Browser {
+            val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+            val member = browser(transport, crypto)
+            member.app.open(); member.app.join(link, PASSPHRASE); member.app.syncOnce(); alice.app.syncOnce()
+            return member
+        }
+        val bea = invited()
+        // Waiting to be let in: no circle key yet, so no sealed name; the steward sees the person without a name, by fingerprint.
+        assertEquals(NameResult.NotLetInYet, bea.app.setMyName("Bea"))
+        val waiting = home(alice.app).waiting.single()
+        assertEquals(null, home(alice.app).names[waiting.member])
+        alice.app.admit(waiting.device); alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(NameResult.Saved, bea.app.setMyName("Bea Lee"))
+        val carol = invited()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); carol.app.syncOnce()
+        assertEquals(NameResult.Saved, carol.app.setMyName("Ｃａｒｏｌ"))
+        fun sync() = runBlocking { repeat(2) { listOf(alice, bea, carol).forEach { it.app.syncOnce() } } }
+        sync()
+        val beaId = home(bea.app).me
+        assertEquals("Carol", home(alice.app).names[home(carol.app).me]?.name, "NFKC turned full-width letters into plain ones")
+        assertEquals(NameResult.Refused("a name cannot be just a number or look like a member code"), carol.app.setMyName("2b69 a182"))
+
+        // Bea's name, as everyone sees it: not confirmed. Carol is a new member and may not confirm; Bea may not confirm herself.
+        val seenByCarol = home(carol.app).people.single { it.member == beaId }
+        assertEquals("Bea Lee", seenByCarol.displayName)
+        assertFalse(seenByCarol.canConfirmName)
+        assertEquals(NameResult.Refused("only a Regular member or above, or a steward, may confirm a name"), carol.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("a member cannot confirm their own name"), bea.app.confirmName(beaId))
+        // Alice is a steward: she checks Bea's fingerprint in person and confirms.
+        assertTrue(home(alice.app).people.single { it.member == beaId }.canConfirmName)
+        assertEquals(NameResult.Saved, alice.app.confirmName(beaId))
+        sync()
+        for (b in listOf(alice, bea, carol)) {
+            assertEquals(true, home(b.app).names[beaId]?.confirmed)
+            assertEquals(listOf(home(alice.app).me), home(b.app).people.single { it.member == beaId }.nameConfirmedBy)
+        }
+        assertTrue(home(alice.app).people.single { it.member == beaId }.iConfirmed)
+        assertFalse(home(alice.app).people.single { it.member == beaId }.canConfirmName, "once is enough")
+
+        // A change of name clears the confirmation for everyone.
+        assertEquals(NameResult.Saved, bea.app.setMyName("Bea L."))
+        sync()
+        for (b in listOf(alice, bea, carol)) {
+            assertEquals("Bea L.", home(b.app).names[beaId]?.name)
+            assertEquals(false, home(b.app).names[beaId]?.confirmed)
+        }
+        assertTrue(home(alice.app).people.single { it.member == beaId }.canConfirmName, "the new name can be confirmed again")
+
+        val dump = server.rows("SELECT public, encrypted FROM events").joinToString { row -> row.joinToString { (it as? ByteArray)?.decodeToString().orEmpty() } }
+        assertFalse("Alice Smith" in dump || "Bea Lee" in dump || "Bea L." in dump || "Carol" in dump, "names are sealed")
+        listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
 }

@@ -97,12 +97,15 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         val open = action.model is AppModel.Open
         state.copy(
             model = action.model,
-            screen = when {
-                // Signing in after a link was opened lands on what the link was for.
-                open && state.model !is AppModel.Open && state.verifying != null -> Screen.Verify
-                open && state.model !is AppModel.Open && state.focusItem != null -> Screen.Items
-                else -> allowed(action.model, state.screen)
-            },
+            screen = allowed(
+                action.model,
+                when {
+                    // Signing in after a link was opened lands on what the link was for (once a name is set: allowed decides).
+                    open && state.model !is AppModel.Open && state.verifying != null -> Screen.Verify
+                    open && state.model !is AppModel.Open && state.focusItem != null -> Screen.Items
+                    else -> state.screen
+                },
+            ),
             // Leaving the open state forgets anything that was only meant for the open screens.
             newInvite = if (open) state.newInvite else null,
             // An invite only matters to a browser without an identity; the Loading model arrives first and must not drop it.
@@ -143,7 +146,12 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
 
 /** Which screen a visitor may see: each state of the app has its own set of pages. */
 private fun allowed(model: AppModel, screen: Screen): Screen = when (model) {
-    is AppModel.Open -> if (screen in Screen.beforeSignIn) Screen.Home else screen
+    // A member who can read but has no name yet is asked for it before anything else (ADR 0068); once named, that page is done.
+    is AppModel.Open -> when {
+        model.home.canRead && model.home.myName == null -> Screen.YourName
+        screen in Screen.beforeSignIn || screen == Screen.YourName -> Screen.Home
+        else -> screen
+    }
     is AppModel.Locked -> Screen.SignIn
     AppModel.NoIdentity -> if (screen in Screen.signedOut) screen else Screen.Welcome
     AppModel.Loading -> if (screen in Screen.signedOut) screen else Screen.Welcome

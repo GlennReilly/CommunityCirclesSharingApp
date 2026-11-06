@@ -41,7 +41,15 @@ try {
   await until(alice, has(alice, 'Choose a longer passphrase'), 'short passphrase notice'); ok('short passphrase refused with a message');
   await checkAccessibility(alice, 'start page with an error notice');
   await submit(alice, 'start-form', { passphrase: PASS });
-  await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '1 member'), 'alice home'); ok('alice started a circle');
+  // ADR 0068: the first page after starting a circle asks for a name, and only that.
+  await until(alice, 'document.getElementById("name-form") !== null', 'alice is asked for her name');
+  if (await alice.evaluate('document.querySelector("label[for=display-name]").textContent') !== 'Your name: ') throw new Error('name label');
+  if (!(await buttonHidden(alice, 'name-form'))) throw new Error('the name button shows before a name is typed');
+  if (await alice.evaluate('document.querySelectorAll("main form").length') !== 1) throw new Error('the name page has more than one form');
+  ok('after starting a circle alice is asked "Your name: " first, and the button waits for text');
+  await checkAccessibility(alice, 'your name');
+  await submit(alice, 'name-form', { 'display-name': '  Alice   Smith ' });
+  await until(alice, has(alice, 'Circle home') + ' && ' + has(alice, '1 member'), 'alice home'); ok('alice started a circle and named herself');
   await until(alice, has(alice, 'Up to date'), 'alice synced'); ok('alice synced (status: Up to date)');
   await checkAccessibility(alice, 'home');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Key fingerprint: '), 'members page');
@@ -61,9 +69,13 @@ try {
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
   await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting to be let in'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting to be let in'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
+  const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Let in")) || ""');
+  if (!waitingLine.includes('New member (waiting for a name)') || !/Key fingerprint: [0-9a-f]{4}( [0-9a-f]{4}){4}/.test(waitingLine)) throw new Error('waiting line: ' + waitingLine);
+  ok('the waiting person shows as a new member waiting for a name, with their fingerprint');
   await checkAccessibility(alice, 'members with someone waiting');
   await click(alice, 'admit'); await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
-  await click(bea, 'sync'); await until(bea, '!' + has(bea, 'A steward needs to let you in'), 'bea can read'); ok('bea can now read the circle');
+  await click(bea, 'sync'); await until(bea, 'document.getElementById("name-form") !== null', 'bea is asked for her name'); ok('bea can now read the circle and is asked for her name first');
+  await submit(bea, 'name-form', { 'display-name': 'Bea' }); await until(bea, has(bea, 'Circle home'), 'bea home after naming'); ok('bea named herself');
   // Items: add, privacy, change, remove.
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'empty items page'); ok('items page starts empty');
   await checkAccessibility(alice, 'items, empty');
@@ -78,7 +90,7 @@ try {
   await until(alice, has(alice, 'Ladder') + ' && ' + has(alice, 'Details: Garage at the back, ring first') + ' && ' + has(alice, 'Yours'), 'ladder listed'); ok('alice added a ladder and sees her own details');
   await checkAccessibility(alice, 'items, own item with details');
   await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced item');
-  await bea.evaluate('location.hash = "#/items"'); await syncUntil(bea, has(bea, 'Ladder') + ' && ' + has(bea, 'Shared by member'), 'bea sees ladder'); ok('bea sees the ladder');
+  await bea.evaluate('location.hash = "#/items"'); await syncUntil(bea, has(bea, 'Ladder') + ' && ' + has(bea, 'Shared by Alice Smith'), 'bea sees ladder'); ok('bea sees the ladder');
   await checkAccessibility(bea, 'items, another member\'s item');
   if (await bea.evaluate('document.body.innerText.includes("Garage at the back")')) throw new Error('bea can read the private details'); ok('bea cannot read the private details');
   if (await bea.evaluate('document.querySelector(\'[data-action="edit-item"]\') !== null')) throw new Error('bea is offered Change'); ok('bea is not offered Change or Remove');
@@ -200,6 +212,21 @@ try {
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=vouch]") !== null', 'vouch button for alice');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, has(bea, 'Key fingerprint'), 'bea members');
   if (await bea.evaluate('document.querySelector("[data-action=vouch]") !== null')) throw new Error('a new member is offered Vouch'); ok('only the trusted member is offered "Vouch for this person"');
+  // Names (ADR 0068): bea (a new member) cannot confirm names; alice (a steward) ticks that she checked bea's fingerprint in person, then confirms.
+  if (await bea.evaluate('document.querySelector("form[id^=confirm-name-]") !== null')) throw new Error('a new member is offered to confirm a name');
+  if (!(await bea.evaluate(has(bea, 'Bea (not confirmed yet) (you)')))) throw new Error('bea does not see her own name as not confirmed yet');
+  await until(alice, 'document.querySelector("form[id^=confirm-name-]") !== null', 'confirm form for bea');
+  const confirmForm = await alice.evaluate('document.querySelector("form[id^=confirm-name-]").id');
+  if (!(await alice.evaluate(`document.getElementById("${confirmForm}").innerText.includes("Key fingerprint") || /[0-9a-f]{4}( [0-9a-f]{4}){4}/.test(document.getElementById("${confirmForm}").innerText)`))) throw new Error('no fingerprint beside the confirm button');
+  if (!(await buttonHidden(alice, confirmForm))) throw new Error('the confirm button shows before the box is ticked');
+  await alice.evaluate(`(() => { const b = document.getElementById("${confirmForm}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  if (await buttonHidden(alice, confirmForm)) throw new Error('the confirm button stays hidden after the tick');
+  ok('the confirm-name button appears only after "I checked this person\'s key fingerprint in person" is ticked');
+  await checkAccessibility(alice, 'members with a name to confirm');
+  await alice.evaluate(`document.getElementById("${confirmForm}").requestSubmit()`);
+  await until(alice, has(alice, 'You confirmed this name.') + ' && ' + has(alice, 'Bea (confirmed)'), 'alice confirmed bea'); ok('alice confirmed bea\'s name');
+  await syncUntil(alice, has(alice, 'Up to date'), 'alice pushed the confirmation');
+  await syncUntil(bea, has(bea, 'Bea (confirmed) (you)') + ' && ' + has(bea, 'Name confirmed by Alice Smith.'), 'bea sees her name confirmed'); ok('bea sees her name confirmed by Alice Smith');
   // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
   await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'This circle has one steward'), 'steward page'); ok('a lone steward is told the circle needs another');
   await checkAccessibility(alice, 'stewards');
@@ -331,7 +358,7 @@ try {
   const qrBox = await bea.evaluate('(() => { const s = document.querySelector("svg.qr"); const r = s.getBoundingClientRect(); return JSON.stringify([r.width, r.height, s.querySelector("path").getAttribute("d").length]); })()');
   const [qrW, qrH, qrPath] = JSON.parse(qrBox); if (!(qrW > 100 && Math.abs(qrW - qrH) < 1 && qrPath > 500)) throw new Error('QR code not drawn: ' + qrBox); ok('bea shows a QR code of her verify link (' + Math.round(qrW) + ' px square)');
   const hashOf = link => link.slice(link.indexOf('#'));
-  await alice.evaluate('location.hash = ' + JSON.stringify(hashOf(verifyLink))); await until(alice, has(alice, 'Matches. This is member'), 'alice told it matches'); ok('opening bea\'s code on alice\'s side says it matches');
+  await alice.evaluate('location.hash = ' + JSON.stringify(hashOf(verifyLink))); await until(alice, has(alice, 'Matches. This is Bea'), 'alice told it matches'); ok('opening bea\'s code on alice\'s side says it matches');
   await checkAccessibility(alice, 'check a member, matches');
   if (!(await alice.evaluate('location.hash')).endsWith('#/verify')) throw new Error('the address still holds the link');
   const forged = verifyLink.replace(/[0-9a-f]{20}$/, '0'.repeat(20));

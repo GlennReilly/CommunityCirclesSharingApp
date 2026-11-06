@@ -142,7 +142,16 @@ class MarketView(
     val contributions: List<ContributionState> = emptyList(),
     /** Skill offers (ADR 0055), retired ones included, in the order they were first made. */
     val skills: List<SkillState> = emptyList(),
+    /** Each member's current display name and its confirmations (ADR 0068). */
+    val names: Map<MemberId, NameState> = emptyMap(),
 ) {
+    /** Who confirmed [member]'s current name and still counts: confirmers who have since left do not (ADR 0068). */
+    fun nameConfirmers(member: MemberId): Set<MemberId> =
+        names[member]?.confirmations?.keys?.filterTo(mutableSetOf()) { it !in departed }.orEmpty()
+
+    /** True once enough current members confirmed [member]'s current name. */
+    fun nameConfirmed(member: MemberId): Boolean = nameConfirmers(member).size >= NAME_CONFIRMATIONS_NEEDED
+
     /** The circle's rules for a decision dated [day]: the newest version that had taken effect by then (ADR 0051, C1). */
     fun configOn(circle: CircleId, day: Int): circles.policy.CircleConfig {
         val base = baseConfig ?: StandingRules.defaultConfig(circle)
@@ -166,7 +175,7 @@ private val MARKET_TYPES = setOf(
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.LOAN_CANCEL, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
     EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE, EventType.STANDING_NOTE,
-    EventType.SKILL_UPSERT, EventType.SKILL_RETIRE,
+    EventType.SKILL_UPSERT, EventType.SKILL_RETIRE, EventType.MEMBER_PROFILE, EventType.MEMBER_NAME_CONFIRM,
 )
 
 internal fun isMarketType(type: String): Boolean = EventType.fromWire(type) in MARKET_TYPES
@@ -193,6 +202,7 @@ internal class MarketFold(
     private val configs = mutableListOf<ConfigVersion>()
     private val notes = linkedMapOf<NoteId, ContributionState>()
     private val skills = linkedMapOf<SkillId, SkillState>()
+    private val names = linkedMapOf<MemberId, NameState>()
 
     private fun confirmedNotes(): List<ContributionState> = notes.values.filter { it.confirmedDay != null }
     private val configProposals = linkedMapOf<ConfigSettings, PendingConfig>()
@@ -210,7 +220,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList(), skills.values.toList()), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList(), skills.values.toList(), names.toMap()), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -224,6 +234,8 @@ internal class MarketFold(
         EventType.VOUCH -> parse(MarketPayloads.parseVouch(payload)) { vouch(e.author, it, e.day, id) }
         EventType.SKILL_UPSERT -> parse(MarketPayloads.parseSkillUpsert(payload)) { offerSkill(e.author, it) }
         EventType.SKILL_RETIRE -> parse(MarketPayloads.parseSkillRetire(payload)) { retireSkill(e.author, it) }
+        EventType.MEMBER_PROFILE -> parse(NamePayloads.parseProfile(payload)) { setName(e.author, it, e.day, id) }
+        EventType.MEMBER_NAME_CONFIRM -> parse(NamePayloads.parseConfirmation(payload)) { confirmName(e.author, it, e.day, id) }
         EventType.STANDING_NOTE -> parse(MarketPayloads.parseStandingNote(payload)) { noteContribution(e.author, it, e.day, id) }
         EventType.CONFIG_UPDATE -> parse(MarketPayloads.parseConfigUpdate(payload)) { configUpdate(e.author, it, e.day, id) }
         EventType.PAUSE_PROPOSE -> parse(MarketPayloads.parsePausePropose(payload)) { proposePause(e.author, it, e.day, id) }
@@ -335,6 +347,30 @@ internal class MarketFold(
         if (skill.owner != author) return "only the author may retire an offer"
         if (skill.retired) return "the offer is already retired"
         skills[v.skill] = skill.copy(retired = true)
+        return null
+    }
+
+    // ---- display names (ADR 0068) ----
+
+    /** A member names themselves; a new name starts with no confirmations. */
+    private fun setName(author: MemberId, v: MemberProfile, day: Int, id: EventId): String? {
+        if (names[author]?.name == v.name) return "that is already the member's name"
+        names[author] = NameState(author, v.name, id, day)
+        return null
+    }
+
+    /**
+     * A member at Regular or above (stewards count as Trusted) confirms another member's current name. The confirmation
+     * names the profile event, so one made for an earlier name, or for the same text set again, is stale and refused.
+     */
+    private fun confirmName(author: MemberId, v: NameConfirmation, day: Int, id: EventId): String? {
+        if (v.member == author) return "a member cannot confirm their own name"
+        val current = names[v.member] ?: return "that member has not set a name"
+        if (v.profile != current.profile || v.name != current.name) return "the name has changed since"
+        if (author in current.confirmations) return "already confirmed"
+        val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
+        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a Regular member or above, or a steward, may confirm a name"
+        names[v.member] = current.copy(confirmations = current.confirmations + (author to day))
         return null
     }
 

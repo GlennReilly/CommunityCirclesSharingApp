@@ -108,7 +108,7 @@ async function keyboardAndStructure(chrome, name) {
       if (seen.some(s => s.key === info.key)) { if (seen[0].key === info.key) seen[0].visibleFocus = info.visibleFocus; else seen.push(info); break; }
       seen.push(info);
     }
-    const redrawn = stopped !== '' && await chrome.evaluate(`document.getElementById('app').firstElementChild?.__walk !== true`);
+    const redrawn = seen.length < structure.count && await chrome.evaluate(`document.getElementById('app').firstElementChild?.__walk !== true`);
     if (!redrawn) break;
     console.log(`keys ${name}: the page redrew itself during the walk, starting again`);
     await sleep(1500);

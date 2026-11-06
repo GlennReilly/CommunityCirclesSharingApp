@@ -6,6 +6,7 @@ import circles.app.PauseHistoryEntry
 import circles.app.InviteLink
 import circles.app.LoanRole
 import circles.app.MemberSummary
+import circles.app.NameSummary
 import circles.app.LoanSummary
 import circles.event.LoanId
 import circles.event.LoanStatus
@@ -57,7 +58,12 @@ private fun home(
     items: List<ItemSummary> = emptyList(),
     loans: List<LoanSummary> = emptyList(),
     people: List<MemberSummary> = emptyList(),
-) = HomeData(circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759, people = people)
+    myName: String? = "Alice",
+    names: Map<MemberId, NameSummary> = mapOf(me to NameSummary("Alice", confirmed = true), bea to NameSummary("Bea", confirmed = false)),
+) = HomeData(
+    circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759, people = people,
+    myName = myName, names = if (canRead) names else emptyMap(),
+)
 
 private val ladder = ItemSummary(ItemId("1".repeat(32)), "Ladder", ItemClass.EVERYDAY, me, ownedByMe = true, description = "Garage at the back")
 private val drill = ItemSummary(ItemId("2".repeat(32)), "Drill", ItemClass.VALUABLE, bea, ownedByMe = false, description = null, access = AccessSummary(true, emptyList(), emptyList()))
@@ -254,6 +260,7 @@ class ShellViewTest {
             stewards(true, listOf(meSteward)),
             borrow(loan("d", LoanRole.BORROWER, LoanStatus.ACTIVE)),
             borrow(returned(LoanRole.OWNER, { it.copy(canDispute = true) })),
+            render(open(home(myName = null)).copy(screen = Screen.YourName)),
         )
         var labels = 0
         for (html in pages) {
@@ -262,7 +269,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1 + 2, labels)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1 + 2 + 2, labels) // + the name on Settings and on the first-name page (ADR 0068)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -353,7 +360,7 @@ class ShellViewTest {
 
     @Test fun theMembersPageListsEveryoneWithRoleDevicesAndFingerprint() {
         val html = members(home(people = listOf(aliceSummary, beaSummary)))
-        assertTrue("You" in html && "Member bbbbbbbb" in html)
+        assertTrue("(you)" in html && ">Bea<" in html && NAME_NOT_CONFIRMED in html && NAME_CONFIRMED in html)
         assertTrue("Steward, 2 devices" in html)
         assertTrue("1 device<" in html)
         assertTrue("Key fingerprint: ab12 cd34 ef56 7890 1234" in html)
@@ -375,7 +382,7 @@ class ShellViewTest {
         val steward = members(home(steward = true, waiting = waiting))
         assertTrue("""$ATTR_ACTION="$ACTION_ADMIT"""" in steward)
         assertTrue("""$ATTR_DEVICE="${beaDevice.v}"""" in steward)
-        assertTrue("Member bbbbbbbb" in steward)
+        assertTrue(">Bea<" in steward)
         assertFalse("""$ATTR_ACTION="$ACTION_ADMIT"""" in members(home(steward = false, waiting = waiting)))
         assertFalse("Waiting to be let in" in members(home(steward = true)))
     }
@@ -434,7 +441,7 @@ class ShellViewTest {
         assertTrue("ended on its date" in pauseHistoryLine(earlier(circles.event.PauseStatus.ENDED, 20_001, 20_030)))
         assertTrue("nothing happened" in pauseHistoryLine(earlier(circles.event.PauseStatus.LAPSED, null, 20_014)))
         val html = render(open(home().copy(pauseHistory = listOf(earlier(circles.event.PauseStatus.ENDED, 20_001, 20_030)))).copy(screen = Screen.Pauses))
-        assertTrue("Earlier pauses" in html && "left things damaged" in html && "Member 01234567" in html)
+        assertTrue("Earlier pauses" in html && "left things damaged" in html && UNNAMED_MEMBER in html)
         assertFalse("Earlier pauses" in render(open(home()).copy(screen = Screen.Pauses)), "no heading when there is no history")
     }
 
@@ -492,7 +499,7 @@ class ShellViewTest {
         val html = items(home(items = listOf(ladder, drill)))
         assertTrue("Ladder" in html && "Drill" in html)
         assertTrue("Yours" in html)
-        assertTrue("Shared by member bbbbbbbb" in html)
+        assertTrue("""Shared by <span class="person-name">Bea</span>""" in html)
         assertTrue("Details: Garage at the back" in html)
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EDIT_ITEM"""").findAll(html).count())
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_RETIRE_ITEM"""").findAll(html).count())
@@ -758,7 +765,7 @@ class ShellViewTest {
     @Test fun proposalsShowProgressAndOnlyThoseWhoCanVoteSeeAgree() {
         val add = ProposalSummary(StewardChange.ADD, MemberId("c".repeat(32)), null, agreeing = 1, needed = 2, iAgree = false, canAgree = true)
         val html = stewards(true, listOf(meSteward, beaSteward), listOf(add))
-        assertTrue("Make member cccccccc a steward" in html)
+        assertTrue("Make $UNNAMED_MEMBER a steward" in html)
         assertTrue("1 of 2 stewards agree." in html)
         assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_ADD" $ATTR_SUBJECT="${"c".repeat(32)}"""" in html)
         val mine = stewards(true, listOf(meSteward, beaSteward), listOf(add.copy(iAgree = true, canAgree = false)))
@@ -778,7 +785,7 @@ class ShellViewTest {
         assertTrue("""$ATTR_SUBJECT="1:60:14:3"""" in sharesHtml)
         assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_SETTINGS" $ATTR_SUBJECT="1:60:14:0"""" in html)
         val removal = ProposalSummary(StewardChange.REMOVE, bea, null, 1, 2, false, true)
-        assertTrue("Remove member bbbbbbbb as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
+        assertTrue("Remove Bea as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
     }
 
     @Test fun onlyStewardsSeeWhoCanBeProposedAndTheRulesForm() {
@@ -1348,12 +1355,12 @@ class ShellViewTest {
         val html = render(open(home(people = peopleForQr)).copy(screen = Screen.Members, origin = "https://circles.example"))
         assertTrue("<summary>Show my QR code</summary>" in html)
         assertEquals(1, Regex("""<svg class="qr"""").findAll(html).count(), "only mine")
-        assertTrue("""role="img"""" in html && "QR code of the link that checks member" in html && """fill="#ffffff"""" in html && """fill="#000000"""" in html)
+        assertTrue("""role="img"""" in html && "QR code of the link that checks your key fingerprint" in html && """fill="#ffffff"""" in html && """fill="#000000"""" in html)
         assertTrue("Or read your fingerprint out: 0123 4567 89ab cdef 0123" in html)
     }
 
     @Test fun openingAMembersCodeSaysMatchesOrDoesNotMatchAfterWorkingOutTheFingerprintItself() {
-        assertTrue("Matches. This is member" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee")))
+        assertTrue("Matches. This is Bea" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee")))
         val wrong = verifyHtml(linkFor(bea, "ffffffffffffffffffff"))
         assertTrue("Does not match" in wrong && """role="alert"""" in wrong && "aaaa bbbb cccc dddd eeee" in wrong && "ffff ffff ffff ffff ffff" in wrong)
         assertTrue("That is your own code." in verifyHtml(linkFor(me, "0123456789abcdef0123")))
@@ -1394,5 +1401,75 @@ class ShellViewTest {
         assertEquals(Screen.Items, reduce(item, AppAction.ModelChanged(AppModel.Open(home()))).screen)
         assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.ItemTag)).screen, "no item chosen, back to items")
         assertFalse(Screen.Verify in Screen.navigation || Screen.ItemTag in Screen.navigation)
+    }
+}
+
+/** Display names (ADR 0068): asked for first, shown everywhere with whether they are confirmed, confirmed only after an in-person check. */
+class NamesViewTest {
+    private fun render(state: AppState): String = createHTML().div { shell(state) }
+
+    private val alice = MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "ab12 cd34 ef56 7890 1234", displayName = "Alice", nameConfirmedBy = listOf(bea))
+    private val beaToConfirm = MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "1111 2222 3333 4444 5555", displayName = "Bea", canConfirmName = true)
+
+    @Test fun aMemberWhoCanReadButHasNoNameIsAskedForItBeforeAnythingElse() {
+        val unnamed = AppState(model = AppModel.Open(home(myName = null)))
+        for (screen in listOf(Screen.Home, Screen.Items, Screen.Members, Screen.Settings, Screen.Verify)) {
+            assertEquals(Screen.YourName, reduce(unnamed, AppAction.Navigate(screen)).screen, screen.name)
+        }
+        assertEquals(Screen.YourName, reduce(AppState(model = AppModel.Locked(circle)), AppAction.ModelChanged(AppModel.Open(home(myName = null)))).screen, "after unlocking")
+        // Once the name is saved the page moves on, and the name page is not reachable any more.
+        val named = reduce(unnamed.copy(screen = Screen.YourName), AppAction.ModelChanged(AppModel.Open(home())))
+        assertEquals(Screen.Home, named.screen)
+        assertEquals(Screen.Home, reduce(named, AppAction.Navigate(Screen.YourName)).screen)
+        // Someone still waiting to be let in cannot seal a name yet, so they are not asked.
+        assertEquals(Screen.Home, reduce(AppState(model = AppModel.Open(home(canRead = false, myName = null))), AppAction.Navigate(Screen.Home)).screen)
+        assertFalse(Screen.YourName in Screen.navigation)
+    }
+
+    @Test fun theNamePageAsksOneQuestionAndItsButtonWaitsForText() {
+        val html = render(open(home(myName = null)).copy(screen = Screen.YourName))
+        assertEquals(1, Regex("<form").findAll(html).count(), "one topic: one form")
+        assertFalse("<nav" in html, "nothing else to wander off to")
+        assertTrue(">Your name: </label>" in html)
+        assertTrue("""id="$FORM_MY_NAME"""" in html && """name="$FIELD_DISPLAY_NAME"""" in html && """$ATTR_MIN="1"""" in html)
+        val button = Regex("<button[^>]*id=\"$SUBMIT_ID\"[^>]*>").find(html)?.value.orEmpty()
+        assertTrue("hidden" in button, button)
+    }
+
+    @Test fun membersShowNamesWithTheirStateAndTheConfirmFormNeedsTheInPersonTick() {
+        val html = render(open(home(people = listOf(alice, beaToConfirm))).copy(screen = Screen.Members))
+        assertTrue("""<span class="person-name">Alice</span> <span class="name-status confirmed">$NAME_CONFIRMED</span> (you)""" in html)
+        assertTrue("""<span class="person-name">Bea</span> <span class="name-status unconfirmed">$NAME_NOT_CONFIRMED</span>""" in html)
+        assertTrue("Name confirmed by Bea." in html)
+        val form = html.substringAfter("""id="$FORM_CONFIRM_NAME_PREFIX${bea.v}"""").substringBefore("</form>")
+        assertTrue("1111 2222 3333 4444 5555" in form, "the fingerprint is on the same form")
+        assertTrue("""type="checkbox"""" in form && """$ATTR_MUST_CHECK="true"""" in form && "I checked this person's key fingerprint in person" in form)
+        assertTrue(Regex("<button[^>]*hidden[^>]*>Confirm their name").containsMatchIn(form), "the button waits for the tick")
+        val noRight = render(open(home(people = listOf(alice, beaToConfirm.copy(canConfirmName = false)))).copy(screen = Screen.Members))
+        assertFalse(FORM_CONFIRM_NAME_PREFIX in noRight)
+    }
+
+    @Test fun anUnnamedMemberAndOneWaitingToBeLetInAreShownPlainlyWithTheirFingerprint() {
+        val stranger = MemberId("9".repeat(32))
+        val waiting = listOf(WaitingDevice(DeviceId("8".repeat(32)), stranger))
+        val people = listOf(alice, MemberSummary(stranger, isMe = false, isSteward = false, devices = 1, fingerprint = "9999 8888 7777 6666 5555"))
+        val html = render(open(home(waiting = waiting, people = people)).copy(screen = Screen.Members))
+        assertTrue(UNNAMED_MEMBER in html)
+        assertTrue(html.substringAfter("Waiting to be let in").let { "$UNNAMED_MEMBER</span>. Key fingerprint: 9999 8888 7777 6666 5555" in it })
+        assertFalse(html.substringAfter("Waiting to be let in").contains(NAME_NOT_CONFIRMED), "no confirmation state without a name")
+    }
+
+    @Test fun settingsShowsMyNameAndLetsMeChangeIt() {
+        val html = render(open(home()).copy(screen = Screen.Settings))
+        assertTrue("Others see you as: " in html && ">Alice<" in html)
+        assertTrue("""id="$FORM_RENAME"""" in html && ">New name: </label>" in html)
+        assertTrue("clears its confirmations" in html)
+    }
+
+    @Test fun aVerifiedCodeOffersToConfirmTheName() {
+        val link = circles.app.VerifyLink(circle, bea, "11112222333344445555")
+        val html = render(open(home(people = listOf(alice, beaToConfirm))).copy(screen = Screen.Verify, verifying = link))
+        assertTrue("Matches. This is Bea" in html)
+        assertTrue("""id="$FORM_CONFIRM_NAME_PREFIX${bea.v}"""" in html)
     }
 }

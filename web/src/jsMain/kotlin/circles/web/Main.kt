@@ -12,6 +12,7 @@ import circles.app.DeviceRemoval
 import circles.app.ItemResult
 import circles.app.LoanResult
 import circles.app.VouchResult
+import circles.app.NameResult
 import circles.policy.MemberId
 import circles.event.DisputeClaim
 import circles.event.DisputeOutcome
@@ -307,6 +308,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             val length = if (field.getAttribute("type") == "password") value.length else value.trim().length
             if (length < min) ready = false
         }
+        val boxes = form.querySelectorAll("[$ATTR_MUST_CHECK]")
+        for (index in 0 until boxes.length) {
+            if ((boxes.item(index) as? HTMLInputElement)?.checked != true) ready = false
+        }
         button.hidden = !ready
     }
 
@@ -321,6 +326,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             else -> ""
         }
         busyLaunch((event.asDynamic().submitter as? Element) ?: form.querySelector("#$SUBMIT_ID")) {
+            if (form.id.startsWith(FORM_CONFIRM_NAME_PREFIX)) {
+                val member = form.getAttribute(ATTR_MEMBER)?.let(::MemberId)
+                if (member != null) reportName(circleApp.confirmName(member), "Confirmed. Others now see that you checked this name.")
+                return@busyLaunch
+            }
             if (form.id.startsWith(FORM_DISPUTE_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val claim = DisputeClaim.entries.firstOrNull { it.name == field(FIELD_CLAIM) }
@@ -342,6 +352,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 return@busyLaunch
             }
             when (form.id) {
+                FORM_MY_NAME -> reportName(circleApp.setMyName(field(FIELD_DISPLAY_NAME)), "Thank you. Your name is saved.")
+                FORM_RENAME -> reportName(circleApp.setMyName(field(FIELD_DISPLAY_NAME)), "Your name is changed.")
                 FORM_START -> report(circleApp.startCircle(field(FIELD_PASSPHRASE)))
                 FORM_JOIN -> state.pendingInvite?.let { report(circleApp.join(it, field(FIELD_PASSPHRASE))) }
                 FORM_LINK -> {
@@ -523,6 +535,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     }
 
     private fun kind(name: String): ItemClass = ItemClass.entries.firstOrNull { it.name == name } ?: ItemClass.EVERYDAY
+
+    private fun reportName(result: NameResult, done: String) {
+        dispatch(
+            AppAction.Notice(
+                when (result) {
+                    NameResult.Saved -> done
+                    is NameResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    NameResult.NotLetInYet -> "A steward needs to let you in before you can set your name."
+                    NameResult.NotAllowed -> "That cannot be done right now. Try syncing, then again."
+                },
+            ),
+        )
+    }
 
     private fun reportItem(result: ItemResult) {
         when (result) {
