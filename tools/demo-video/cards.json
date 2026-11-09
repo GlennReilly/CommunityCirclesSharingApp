@@ -1,0 +1,19 @@
+{
+ "bg": "0x0b1220",
+ "accent": "0x0b57d0",
+ "muted": "0xb4bdd0",
+ "title": {
+  "eyebrow": "COMMUNITY LENDING",
+  "big": "Lendger",
+  "small": "Share things with the people you trust."
+ },
+ "problem": {
+  "eyebrow": "THE PROBLEM",
+  "big": "Tools, ladders and books are lent\nby text message. No record,\nnobody sure who has what,\nno way to know who to trust.",
+  "small": "Lendger keeps the record, privately, in your circle."
+ },
+ "end": {
+  "big": "Lendger",
+  "small": "Self-hostable. Your data stays yours.\nOnly members can read what you share: not even the server can.\nFree for personal and community use. No tracking."
+ }
+}
