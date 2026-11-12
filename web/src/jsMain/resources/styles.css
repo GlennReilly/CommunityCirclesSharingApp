@@ -51,6 +51,8 @@ main ul, main ol { padding-left: 1.5rem; }
 ul.cards { list-style: none; padding: 0; display: grid; gap: 1rem; }
 ul.cards > li, main section > div { border: 1px solid var(--line); border-radius: 0.5rem; padding: 1rem; margin: 0 0 0.75rem; }
 ul.cards > li { margin: 0; }
+main section > div > :first-child { margin-top: 0; }
+main section > div > :last-child { margin-bottom: 0; }
 ul.cards h2 { margin-top: 0; }
 details { margin: 0.5rem 0; }
 summary { display: list-item; padding: 0.5rem 0; cursor: pointer; }

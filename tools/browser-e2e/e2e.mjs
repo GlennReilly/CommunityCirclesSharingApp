@@ -143,8 +143,8 @@ try {
   if (loanLabels.some(l => !l.endsWith(': '))) throw new Error('request labels: ' + JSON.stringify(loanLabels));
   if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('request button visible before dates'); ok('request page: labels ' + JSON.stringify(loanLabels) + ', button hidden until both dates');
   await checkAccessibility(bea, 'ask to borrow');
-  await setField(bea, 'loan-request-form', 'from', iso(1)); if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('button visible with one date');
-  await setField(bea, 'loan-request-form', 'to', iso(3)); await setField(bea, 'loan-request-form', 'note', 'for the fence');
+  await setField(bea, 'loan-request-form', 'from', iso(0)); if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('button visible with one date');
+  await setField(bea, 'loan-request-form', 'to', iso(2)); await setField(bea, 'loan-request-form', 'note', 'for the fence');
   if (await buttonHidden(bea, 'loan-request-form')) throw new Error('button hidden with both dates');
   await bea.evaluate('document.getElementById("loan-request-form").requestSubmit()');
   await until(bea, has(bea, 'Waiting for an answer') + ' && ' + has(bea, 'Long ladder'), 'bea waiting'); ok('bea asked to borrow the ladder');
@@ -163,17 +163,17 @@ try {
   await checkAccessibility(alice, 'borrow, finished');
   await alice.evaluate('location.hash = "#/items"');
   // Confirmation and disputes: one return confirmed by the owner, one disputed (alice is both the owner and the only steward).
-  async function lendOnceAndReturnOk() {
+  async function lendOnceAndReturnOk(fromDay = 0, toDay = 1, outcome = 'OK') {
     await bea.evaluate('location.hash = "#/items"'); await until(bea, has(bea, 'Long ladder'), 'bea on items');
     await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'request page');
-    await setField(bea, 'loan-request-form', 'from', iso(1)); await setField(bea, 'loan-request-form', 'to', iso(2));
+    await setField(bea, 'loan-request-form', 'from', iso(fromDay)); await setField(bea, 'loan-request-form', 'to', iso(toDay));
     await bea.evaluate('document.getElementById("loan-request-form").requestSubmit()'); await until(bea, has(bea, 'Waiting for an answer'), 'bea waiting');
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Requests to answer'), 'alice sees the request'); await click(alice, 'approve-loan');
     await until(alice, has(alice, 'Ready to hand over'), 'approved'); await sleep(1200);
     await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Ready to hand over'), 'bea sees approval'); await click(bea, 'handover-loan'); await sleep(1200);
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'has confirmed'), 'alice sees bea confirm'); await click(alice, 'handover-loan'); await sleep(1200);
     await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'How did it go:'), 'bea sees it out');
-    await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "OK"; f.requestSubmit(); return true; })()');
+    await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "' + outcome + '"; f.requestSubmit(); return true; })()');
     await until(bea, has(bea, 'Thank you. Reported back.'), 'bea returned'); await sleep(1200);
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'It came back fine'), 'alice sees the return');
   }
@@ -187,20 +187,23 @@ try {
   if (!(await alice.evaluate(has(alice, 'You are the only steward, so nobody else can decide this')))) throw new Error('no single-steward warning'); ok('the only steward is warned that nobody else can decide it');
   if (await alice.evaluate('document.querySelector("[data-action=uphold-dispute]") !== null')) throw new Error('alice can resolve her own dispute'); ok('a party to the loan is not offered the decision');
   await sleep(1500); await click(alice, 'sync'); await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Pending review'), 'bea sees pending review'); ok('the borrower sees "Pending review" too');
+  // A loan the borrower reports as late (requests cannot start in the past, so lateness is reported, ADR 0072; the after-the-last-day rule is a unit test).
+  await lendOnceAndReturnOk(0, 0, 'LATE'); await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'Returned late'), 'alice sees the late return'); ok('a loan was reported back late');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items');
   // Loan history (ADR 0072): the owner sees every loan of the ladder; the borrower sees it under their borrowing history with a way to ask again.
   await click(alice, 'item-history'); await until(alice, has(alice, 'Loan history') + ' && ' + has(alice, 'Dates:'), 'alice item history');
   const ownerHistory = await text(alice);
-  if ((ownerHistory.match(/Dates:/g) || []).length !== 3) throw new Error('owner history should list 3 loans: ' + ownerHistory);
-  if (!ownerHistory.includes('Bea') || !ownerHistory.includes('damage reported (no penalty for telling)') || !ownerHistory.includes('Returned on time.')) throw new Error('owner history words: ' + ownerHistory);
+  if ((ownerHistory.match(/Dates:/g) || []).length !== 4) throw new Error('owner history should list 4 loans: ' + ownerHistory);
+  if (!ownerHistory.includes('Bea') || !ownerHistory.includes('damage reported (no penalty for telling)') || !ownerHistory.includes('Returned on time.') || !ownerHistory.includes('Returned late.')) throw new Error('owner history words: ' + ownerHistory);
   if (ownerHistory.includes('Garage at the back')) throw new Error('owner history shows the private description');
-  ok('the owner sees all 3 loans of the ladder with the borrower, dates and outcomes');
+  ok('the owner sees all 4 loans of the ladder with the borrower, dates and outcomes');
   await checkAccessibility(alice, 'item loan history');
   await bea.evaluate('location.hash = "#/borrow"'); await until(bea, has(bea, 'My borrowing history'), 'bea has a history link');
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'bea history');
   const borrowerHistory = await text(bea);
-  if ((borrowerHistory.match(/Dates:/g) || []).length < 3 || !borrowerHistory.includes('Long ladder')) throw new Error('borrower history: ' + borrowerHistory);
+  if ((borrowerHistory.match(/Dates:/g) || []).length < 4 || !borrowerHistory.includes('Long ladder') || !borrowerHistory.includes('Returned late.')) throw new Error('borrower history: ' + borrowerHistory);
   ok('the borrower sees the ladder in their borrowing history with "Ask to borrow again"');
+  for (const [, from, back] of borrowerHistory.matchAll(/Dates: (\d{4}-\d\d-\d\d) to \d{4}-\d\d-\d\d\s+Reported back: (\d{4}-\d\d-\d\d)/g)) if (back < from) throw new Error('reported back before the loan started: ' + from + ' ' + back);
   await checkAccessibility(bea, 'my borrowing history');
   await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'borrow again opens the request form'); ok('"Ask to borrow again" opens the request form for the ladder');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items again');
