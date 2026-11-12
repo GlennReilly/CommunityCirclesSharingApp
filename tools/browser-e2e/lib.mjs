@@ -91,9 +91,16 @@ async function keyboardAndStructure(chrome, name) {
     const label = (e.getAttribute('aria-label') || e.innerText || e.getAttribute('name') || e.id || e.tagName).trim().slice(0, 30);
     return JSON.stringify({ key: e.tagName + '#' + [...document.querySelectorAll('*')].indexOf(e), label, visibleFocus });
   })()`;
-  // A redraw keeps focus where it was (FocusKeeper), so one walk is enough: no retry is needed.
+  // A redraw keeps focus where it was (FocusKeeper). The page can still change under the walk on its own (a notice clears itself after
+  // 8 s and takes its Dismiss button with it), so the list of controls is read before and after, and a walk over a changing page is repeated.
+  const controlList = () => chrome.evaluate(`JSON.stringify([...document.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')]
+    .filter(e => !e.disabled && e.tabIndex >= 0 && e.checkVisibility() && e.type !== 'hidden' && !e.hidden).map(e => (e.getAttribute('aria-label') || e.innerText || e.id || e.tagName).trim().slice(0, 30)))`);
   let seen = [], stopped = '';
-  {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const before = await controlList();
+    structure.count = JSON.parse(before).length;
+    seen = []; stopped = '';
+    {
     await press(chrome, 'Shift', 'ShiftLeft', 16); // tells the browser the last input was the keyboard, so :focus-visible applies to the first control too
     await chrome.evaluate(`(() => { window.scrollTo(0, 0); const first = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')].find(e => !e.disabled && e.tabIndex >= 0 && e.checkVisibility() && e.type !== 'hidden' && !e.hidden); if (first) first.focus(); return true; })()`);
     seen = [JSON.parse(await chrome.evaluate(probe))];
@@ -105,6 +112,8 @@ async function keyboardAndStructure(chrome, name) {
       if (seen.some(s => s.key === info.key)) { if (seen[0].key === info.key) seen[0].visibleFocus = info.visibleFocus; else seen.push(info); break; }
       seen.push(info);
     }
+  }
+    if ((await controlList()) === before) break; // the page held still during the walk
   }
   if (seen.length < structure.count) problems.push('Tab reached only ' + seen.length + ' of ' + structure.count + ' visible controls' + (stopped ? ': ' + stopped : '') + ' [' + seen.map(s => s.label).join(' | ') + ']');
   const keys = seen.map(s => s.key);
