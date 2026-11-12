@@ -16,6 +16,7 @@ const click = (c, action, extra = '') => c.evaluate(`(() => { const b = document
 const has = (c, s) => `document.getElementById("app").innerText.includes(${JSON.stringify(s)})`;
 // Clicks "Sync now" every couple of seconds until the page shows what is expected (the other browser may not have pushed yet).
 async function syncUntil(c, expr, what, ms = 25000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await click(c, 'sync'); await sleep(1500); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
+const search = (c, v) => c.evaluate(`(() => { const e = document.getElementById('history-search'); e.value = ${JSON.stringify(v)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 let step = 0; const ok = m => console.log(`ok ${++step}: ${m}`);
 try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Lendger'), 'welcome page');
@@ -197,6 +198,13 @@ try {
   if (!ownerHistory.includes('Bea') || !ownerHistory.includes('damage reported (no penalty for telling)') || !ownerHistory.includes('Returned on time.') || !ownerHistory.includes('Returned late.')) throw new Error('owner history words: ' + ownerHistory);
   if (ownerHistory.includes('Garage at the back')) throw new Error('owner history shows the private description');
   ok('the owner sees all 4 loans of the ladder with the borrower, dates and outcomes');
+  const ownerLabel = await alice.evaluate('document.querySelector("label[for=history-search]").textContent');
+  if (ownerLabel !== 'Search: ') throw new Error('history search label: ' + ownerLabel);
+  await search(alice, 'returned late'); await until(alice, '(document.getElementById("history-count").textContent) === "1 loan" && document.body.innerText.match(/Dates:/g).length === 1', 'owner history filtered to the late loan');
+  await search(alice, 'BEA  damage'); await until(alice, 'document.getElementById("history-count").textContent === "2 loans"', 'two words, any case, both need to match');
+  await search(alice, 'nobody-by-this-name'); await until(alice, 'document.getElementById("history-count").textContent === "0 loans" && !/Dates:/.test(document.body.innerText)', 'no match shows none');
+  await search(alice, ''); await until(alice, 'document.getElementById("history-count").textContent === "4 loans"', 'clearing shows all again');
+  ok('the owner history search filters loans by outcome words and person, and clears');
   await checkAccessibility(alice, 'item loan history');
   await bea.evaluate('location.hash = "#/borrow"'); await until(bea, has(bea, 'My borrowing history'), 'bea has a history link');
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'bea history');
@@ -204,11 +212,23 @@ try {
   if ((borrowerHistory.match(/Dates:/g) || []).length < 4 || !borrowerHistory.includes('Long ladder') || !borrowerHistory.includes('Returned late.')) throw new Error('borrower history: ' + borrowerHistory);
   ok('the borrower sees the ladder in their borrowing history with "Ask to borrow again"');
   for (const [, from, back] of borrowerHistory.matchAll(/Dates: (\d{4}-\d\d-\d\d) to \d{4}-\d\d-\d\d\s+Reported back: (\d{4}-\d\d-\d\d)/g)) if (back < from) throw new Error('reported back before the loan started: ' + from + ' ' + back);
+  await search(bea, 'cancelled'); await until(bea, 'document.getElementById("history-count").textContent === "0 loans" && document.body.innerText.includes("Long ladder") === false', 'no cancelled loans hides the whole item group');
+  await search(bea, 'alice'); await until(bea, 'document.getElementById("history-count").textContent === "4 loans" && document.body.innerText.includes("Long ladder")', 'the owner name finds the item');
+  await search(bea, '');
+  ok('the borrowing history search hides an item with no matching loan');
   await checkAccessibility(bea, 'my borrowing history');
   await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'borrow again opens the request form'); ok('"Ask to borrow again" opens the request form for the ladder');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items again');
   await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
   await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Removed items') + ' && ' + has(alice, 'Long ladder'), 'alice sees the removed item');
+  await checkAccessibility(alice, 'items with a removed item');
+  await click(alice, 'item-history'); await until(alice, has(alice, 'You removed this item from the list.') + ' && ' + has(alice, 'Dates:'), 'alice removed item history');
+  if (((await text(alice)).match(/Dates:/g) || []).length !== 4) throw new Error('removed item history should keep 4 loans: ' + await text(alice));
+  if ((await text(alice)).includes('Garage at the back')) throw new Error('removed item history shows the private description');
+  ok('a removed item stays reachable from the Items page with all 4 loans and no private details');
+  await checkAccessibility(alice, 'removed item loan history');
+  await alice.evaluate('location.hash = "#/items"');
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'No longer on the list.'), 'bea history after removal');
   if (await bea.evaluate('document.querySelector("[data-action=borrow-item]") !== null')) throw new Error('borrow again offered for a removed item');
   ok('a removed item shows "No longer on the list." and no borrow-again button');

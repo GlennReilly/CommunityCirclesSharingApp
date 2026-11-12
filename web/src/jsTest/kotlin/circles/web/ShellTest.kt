@@ -1636,4 +1636,69 @@ class NamesViewTest {
     @Test fun anEmptyBorrowingHistorySaysSo() {
         assertTrue("You have not borrowed anything yet." in render(open().copy(screen = Screen.BorrowHistory)))
     }
+
+    // ---- history search (ADR 0073) ----
+
+    @Test fun theSearchTextHoldsItemPersonDatesAndOutcomeInLowerCase() {
+        val entry = circles.app.LoanHistory.entryOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_704))
+        val text = historySearchText(entry, "Long Ladder", "Bea")
+        assertEquals(text.lowercase(), text)
+        assertTrue("long ladder" in text && "bea" in text && "returned late" in text && circles.app.CalendarDay.format(20_700) in text)
+        val disputed = circles.app.LoanHistory.entryOf(past("2", LoanRole.OWNER, LoanStatus.RETURNED, 1, 2, ReturnOutcome.DAMAGED_REPORTED, 2, dispute = DisputeSummary(DisputeClaim.DAMAGE, null, 3, DisputeStatus.UPHELD)))
+        assertTrue("upheld" in historySearchText(disputed, "x", "y"))
+    }
+
+    @Test fun bothHistoryPagesOfferASearchOnlyWithMoreThanOneLoanAndTagEachLoan() {
+        val two = listOf(
+            past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702),
+            past("2", LoanRole.OWNER, LoanStatus.DECLINED, 20_710, 20_711),
+        )
+        val owner = render(open(home(items = listOf(ladder), loans = two)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("""id="$ID_HISTORY_SEARCH"""" in owner && "Search: " in owner)
+        assertEquals(2, Regex(ATTR_HISTORY_TEXT).findAll(owner).count())
+        val one = render(open(home(items = listOf(ladder), loans = two.take(1))).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertFalse(ID_HISTORY_SEARCH in one)
+        val borrowed = listOf(
+            past("3", LoanRole.BORROWER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702, item = drill),
+            past("4", LoanRole.BORROWER, LoanStatus.CANCELLED, 20_710, 20_711, item = drill),
+        )
+        val mine = render(open(home(items = listOf(drill), loans = borrowed)).copy(screen = Screen.BorrowHistory))
+        assertTrue("""id="$ID_HISTORY_SEARCH"""" in mine && ID_HISTORY_COUNT in mine)
+        assertEquals(2, Regex(ATTR_HISTORY_TEXT).findAll(mine).count())
+        assertEquals(1, Regex(ATTR_HISTORY_GROUP).findAll(mine).count(), "one group per borrowed item")
+        assertFalse(ID_HISTORY_SEARCH in render(open().copy(screen = Screen.BorrowHistory)))
+    }
+
+    // ---- removed items (ADR 0073) ----
+
+    @Test fun aRemovedItemIsListedOnTheItemsPageWithItsHistoryButtonEvenWhenNothingElseIsListed() {
+        val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702))
+        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items))
+        assertTrue("Nothing has been shared yet." in html && "Removed items" in html && "Ladder" in html)
+        assertTrue(ACTION_ITEM_HISTORY in html && ladder.item.v in html && "1 loan" in html)
+        val withItems = render(open(home(items = listOf(drill), loans = loans)).copy(screen = Screen.Items))
+        assertTrue("Removed items" in withItems)
+        assertFalse("Removed items" in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.Items)), "a listed item is not removed")
+        assertFalse("Removed items" in render(open(home(items = emptyList())).copy(screen = Screen.Items)))
+    }
+
+    @Test fun theHistoryOfARemovedItemOpensAndSaysItWasRemovedWithoutPrivateDetails() {
+        val loans = listOf(
+            past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702),
+            past("2", LoanRole.OWNER, LoanStatus.RETURNED, 20_710, 20_712, ReturnOutcome.LATE, returned = 20_713),
+        )
+        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("Ladder" in html && "You removed this item from the list." in html)
+        assertEquals(2, Regex("Dates: ").findAll(html).count())
+        assertTrue("Returned late." in html)
+        assertFalse("PRIVATE-DETAILS" in html)
+        assertTrue("no longer on your list" in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = drill.item)), "an item I never owned has no history")
+    }
+
+    @Test fun aRemovedItemWhoseNameCannotBeReadIsCalledWhatItIs() {
+        val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702).copy(itemName = ""))
+        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue(UNREADABLE_ITEM_NAME in html)
+        assertTrue(UNREADABLE_ITEM_NAME in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items)))
+    }
 }

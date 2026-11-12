@@ -5,6 +5,7 @@ import circles.app.HistoryDispute
 import circles.app.HistoryEntry
 import circles.app.HistoryOutcome
 import circles.app.LoanHistory
+import circles.app.RemovedItem
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MemberSummary
@@ -158,6 +159,10 @@ const val ACTION_PASSKEY_ON = "passkey-on"
 const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
 const val ACTION_ITEM_HISTORY = "item-history"
+const val ID_HISTORY_SEARCH = "history-search"
+const val ID_HISTORY_COUNT = "history-count"
+const val ATTR_HISTORY_TEXT = "data-history-text"
+const val ATTR_HISTORY_GROUP = "data-history-group"
 const val ACTION_PRINT = "print-page"
 const val ACTION_SHOW_ALL_ITEMS = "show-all-items"
 const val ID_VERIFY_LINK = "verify-link"
@@ -1004,6 +1009,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
     }
     if (home.items.isEmpty()) {
         p { +"Nothing has been shared yet." }
+        removedItems(home)
         return
     }
     ul {
@@ -1079,6 +1085,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
             }
         }
     }
+    removedItems(home)
 }
 
 /** Adding an item ([existing] null) or changing one: the same fields, on a page of their own. */
@@ -1430,6 +1437,31 @@ fun historyDisputeText(dispute: HistoryDispute, claim: DisputeClaim?): String {
     }
 }
 
+/** The words the history search looks through for one loan: item, person, dates and outcome, lower case (ADR 0073). */
+fun historySearchText(entry: HistoryEntry, itemName: String, person: String): String = buildString {
+    append(itemName).append(' ').append(person).append(' ').append(window(entry.loan)).append(' ')
+    append(historyOutcomeText(entry.outcome))
+    entry.dispute?.let { append(' ').append(historyDisputeText(it, entry.claim)) }
+}.lowercase()
+
+/** The filter box and its count, shown when there is more than one loan to look through (ADR 0073). */
+private fun FlowContent.historySearch(total: Int) {
+    if (total < 2) return
+    label {
+        attributes["for"] = ID_HISTORY_SEARCH
+        +"Search: "
+    }
+    input(type = InputType.text) {
+        id = ID_HISTORY_SEARCH
+        attributes["autocomplete"] = "off"
+    }
+    p {
+        id = ID_HISTORY_COUNT
+        role = "status"
+        +(if (total == 1) "1 loan" else "$total loans")
+    }
+}
+
 private fun FlowContent.historyEntry(entry: HistoryEntry) {
     val loan = entry.loan
     p { +"Dates: ${window(loan)}" }
@@ -1438,21 +1470,26 @@ private fun FlowContent.historyEntry(entry: HistoryEntry) {
     entry.dispute?.let { p { +historyDisputeText(it, entry.claim) } }
 }
 
-/** Every loan of one item the member owns (ADR 0072). */
+/** Every loan of one item the member owns, or owned and removed (ADR 0072, 0073). */
 private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     h1 { +Screen.ItemHistory.title }
-    val item = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
-    if (item == null) {
+    val listed = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
+    val removed = if (listed == null) state.historyOf?.let { LoanHistory.removedOwnedItem(home.loans, home.items, it) } else null
+    if (listed == null && removed == null) {
         p { +"That item is no longer on your list." }
         p { a(href = Screen.Items.fragment) { +"Back to items" } }
         return
     }
-    h2 { +item.name }
-    val entries = LoanHistory.forOwnedItem(home.loans, item.item)
+    val name = listed?.name ?: removed?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
+    val entries = listed?.let { LoanHistory.forOwnedItem(home.loans, it.item) } ?: removed?.entries.orEmpty()
+    h2 { +name }
+    if (removed != null) p { +"You removed this item from the list. Its loans are kept here." }
     if (entries.isEmpty()) p { +"Nobody has asked to borrow this yet." }
+    historySearch(entries.size)
     section {
         for (entry in entries) {
             div {
+                attributes[ATTR_HISTORY_TEXT] = historySearchText(entry, name, nameOf(home, entry.loan.other))
                 h3 { personName(home, entry.loan.other) }
                 historyEntry(entry)
             }
@@ -1461,19 +1498,49 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     p { a(href = Screen.Items.fragment) { +"Back to items" } }
 }
 
+/** What an owner sees for a removed item whose name this device cannot read. */
+const val UNREADABLE_ITEM_NAME = "An item you removed"
+
+/** Removed items the member owned, so their loan history stays reachable (ADR 0073). */
+private fun FlowContent.removedItems(home: HomeData) {
+    val removed = LoanHistory.removedOwnedItems(home.loans, home.items)
+    if (removed.isEmpty()) return
+    h2 { +"Removed items" }
+    p { +"Items you took off the list. Their loan history is still here." }
+    ul {
+        classes = setOf("cards")
+        for (item in removed) {
+            li {
+                h3 { +item.name.ifBlank { UNREADABLE_ITEM_NAME } }
+                p { +(if (item.entries.size == 1) "1 loan" else "${item.entries.size} loans") }
+                button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_ITEM_HISTORY
+                    attributes[ATTR_ITEM] = item.item.v
+                    +"Loan history"
+                }
+            }
+        }
+    }
+}
+
 /** The items the member borrowed before, with a shortcut to ask again (ADR 0072). */
 private fun FlowContent.borrowHistoryPage(home: HomeData) {
     h1 { +Screen.BorrowHistory.title }
     val borrowed = LoanHistory.borrowedBefore(home.loans, home.items)
     if (borrowed.isEmpty()) p { +"You have not borrowed anything yet." }
+    historySearch(borrowed.sumOf { it.entries.size })
     for (entry in borrowed) {
         section {
+            attributes[ATTR_HISTORY_GROUP] = entry.item.v
             h2 { +entry.itemName }
             p {
                 +"Owned by "
                 personName(home, entry.owner)
             }
-            for (past in entry.entries) div { historyEntry(past) }
+            for (past in entry.entries) div {
+                attributes[ATTR_HISTORY_TEXT] = historySearchText(past, entry.itemName, nameOf(home, entry.owner))
+                historyEntry(past)
+            }
             when (val again = entry.again) {
                 BorrowAgain.CanAsk -> button(type = ButtonType.button) {
                     attributes[ATTR_ACTION] = ACTION_BORROW_ITEM

@@ -105,4 +105,29 @@ class LoanHistoryTest {
         assertIs<BorrowAgain.CanAsk>(history.single().again)
     }
 
+    @Test fun removedItemsAreThoseIOwnedThatAreNoLongerListedWithTheirLoansNewestFirst() {
+        val listed = listOf(item(drill, owner = me))
+        val gone1 = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 100, 102, outcome = ReturnOutcome.OK, returnedDay = 102)
+        val gone2 = loan(ladder, LoanRole.OWNER, LoanStatus.DECLINED, 200, 202, other = cat)
+        val stillListed = loan(drill, LoanRole.OWNER, LoanStatus.RETURNED, 300, 301, outcome = ReturnOutcome.OK, returnedDay = 301)
+        val borrowed = loan(ladder, LoanRole.BORROWER, LoanStatus.RETURNED, 50, 51, outcome = ReturnOutcome.OK, returnedDay = 51)
+        val removed = LoanHistory.removedOwnedItems(listOf(gone1, stillListed, borrowed, gone2), listed)
+        assertEquals(1, removed.size)
+        assertEquals(ladder, removed.single().item)
+        assertEquals("Ladder", removed.single().name)
+        assertEquals(listOf(gone2.loan, gone1.loan), removed.single().entries.map { it.loan.loan })
+        assertEquals(removed.single(), LoanHistory.removedOwnedItem(listOf(gone1, gone2), listed, ladder))
+        assertEquals(null, LoanHistory.removedOwnedItem(listOf(gone1), listed, drill))
+    }
+
+    @Test fun aRemovedItemWhoseNameThisDeviceCannotReadHasAnEmptyName() {
+        val unreadable = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 100, 102, outcome = ReturnOutcome.OK, returnedDay = 102).copy(itemName = "")
+        assertEquals("", LoanHistory.removedOwnedItems(listOf(unreadable), emptyList()).single().name)
+    }
+
+    @Test fun removedItemsAreEmptyWhenNothingWasRemovedAndNeverIncludeOthersItems() {
+        assertTrue(LoanHistory.removedOwnedItems(emptyList(), emptyList()).isEmpty())
+        val theirs = loan(ladder, LoanRole.STEWARD, LoanStatus.RETURNED, 1, 2)
+        assertTrue(LoanHistory.removedOwnedItems(listOf(theirs), emptyList()).isEmpty())
+    }
 }

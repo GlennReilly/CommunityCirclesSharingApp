@@ -48,6 +48,9 @@ data class BorrowedItem(
     val again: BorrowAgain,
 )
 
+/** An item the member owned and removed, with the loans they made of it (ADR 0073). [name] is empty when this device cannot read it. */
+data class RemovedItem(val item: ItemId, val name: String, val entries: List<HistoryEntry>)
+
 /**
  * The loan history pages (ADR 0072), computed from what `HomeData` already holds. A member sees only loans they were
  * a party to: as the owner of the item, or as its borrower. Stewards get no extra view.
@@ -114,4 +117,22 @@ object LoanHistory {
             )
         }
     }
+
+    /**
+     * The items the member owned that are no longer listed (removed), each with its loans, the one with the most
+     * recent loan first (ADR 0073). Derived from the loans alone: [items] is `HomeData.items`, which leaves removed
+     * items out. The name is whatever the loans carry, empty when the device cannot read it.
+     */
+    fun removedOwnedItems(loans: List<LoanSummary>, items: List<ItemSummary>): List<RemovedItem> {
+        val listed = items.mapTo(HashSet()) { it.item }
+        val gone = newestFirst(loans.filter { it.role == LoanRole.OWNER && it.item !in listed })
+        return gone.map { it.item }.distinct().map { item ->
+            val mine = gone.filter { it.item == item }
+            RemovedItem(item, mine.firstOrNull { it.itemName.isNotBlank() }?.itemName.orEmpty(), mine.map(::entryOf))
+        }
+    }
+
+    /** The removed item with this id, if the member owned it and made loans of it. */
+    fun removedOwnedItem(loans: List<LoanSummary>, items: List<ItemSummary>, item: ItemId): RemovedItem? =
+        removedOwnedItems(loans, items).firstOrNull { it.item == item }
 }

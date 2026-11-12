@@ -320,19 +320,36 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    /** Hides the elements carrying [attribute] whose text does not contain what was typed; returns how many stay (all words, any case). */
+    private fun filterRows(typed: String, attribute: String): Int {
+        val words = typed.trim().lowercase().split(' ').filter { it.isNotEmpty() }
+        val rows = document.querySelectorAll("[$attribute]")
+        var shown = 0
+        for (index in 0 until rows.length) {
+            val row = rows.item(index) as? HTMLElement ?: continue
+            val text = row.getAttribute(attribute) ?: ""
+            val match = words.all { text.contains(it) }
+            row.hidden = !match
+            if (match) shown++
+        }
+        return shown
+    }
+
     private fun onInput(event: Event) {
         (event.target as? HTMLInputElement)?.takeIf { it.id == ID_SKILL_SEARCH }?.let { field ->
             // Filtering happens here, on this device, as you type: nothing is sent anywhere.
-            val query = field.value.trim().lowercase()
-            val rows = document.querySelectorAll("[$ATTR_SKILL_TEXT]")
-            var shown = 0
-            for (index in 0 until rows.length) {
-                val row = rows.item(index) as? HTMLElement ?: continue
-                val match = query.isEmpty() || (row.getAttribute(ATTR_SKILL_TEXT) ?: "").contains(query)
-                row.hidden = !match
-                if (match) shown++
-            }
+            val shown = filterRows(field.value, ATTR_SKILL_TEXT)
             document.getElementById(ID_SKILL_COUNT)?.textContent = if (shown == 1) "1 offer" else "$shown offers"
+        }
+        (event.target as? HTMLInputElement)?.takeIf { it.id == ID_HISTORY_SEARCH }?.let { field ->
+            val shown = filterRows(field.value, ATTR_HISTORY_TEXT)
+            // A borrowed item with no loan left showing is hidden with them.
+            val groups = document.querySelectorAll("[$ATTR_HISTORY_GROUP]")
+            for (index in 0 until groups.length) {
+                val group = groups.item(index) as? HTMLElement ?: continue
+                group.hidden = group.querySelector("[$ATTR_HISTORY_TEXT]:not([hidden])") == null
+            }
+            document.getElementById(ID_HISTORY_COUNT)?.textContent = if (shown == 1) "1 loan" else "$shown loans"
         }
         val form = (event.target as? Element)?.closest("form") as? HTMLFormElement ?: return
         val button = form.querySelector("#$SUBMIT_ID") as? HTMLElement ?: return
