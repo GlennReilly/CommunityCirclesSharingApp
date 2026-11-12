@@ -262,6 +262,8 @@ data class LoanSummary(
     val canResolve: Boolean = false,
     /** The owner approved other dates than the borrower asked for (ADR 0061). */
     val datesChanged: Boolean = false,
+    /** The day the borrower reported it back; null until then (ADR 0072). */
+    val returnedDay: Int? = null,
 )
 
 sealed interface LoanResult {
@@ -1890,6 +1892,7 @@ class CircleApp(
                             description = ((view.market.details[loan.item] as? circles.encoding.Parsed.Ok)?.value?.get(DETAIL_DESCRIPTION) as? CborText)?.value,
                             reported = loan.outcome,
                             confirmed = loan.confirmedDay != null,
+                            returnedDay = loan.returnedDay,
                             datesChanged = loan.fromDay != loan.requestedFromDay || loan.toDay != loan.requestedToDay,
                             dispute = dispute?.let {
                                 DisputeSummary(

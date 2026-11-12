@@ -1570,4 +1570,70 @@ class NamesViewTest {
         assertFalse(FORM_LET_IN_PREFIX + other.device.v in html, "a device whose characters do not match the code is not offered")
         assertFalse(FORM_LET_IN_PREFIX in render(open(home(steward = false, people = listOf(alice, newcomer), waiting = listOf(matching))).copy(screen = Screen.Verify, verifying = link)))
     }
+
+    // ---- loan history (ADR 0072) ----
+
+    private fun past(id: String, role: LoanRole, status: LoanStatus, from: Int, to: Int, outcome: ReturnOutcome? = null, returned: Int? = null, item: ItemSummary = ladder, dispute: DisputeSummary? = null) =
+        LoanSummary(LoanId(id.repeat(32)), item.item, item.name, role, bea, from, to, status, true, true, outcome, "PRIVATE-DETAILS", returnedDay = returned, dispute = dispute)
+
+    @Test fun anOwnerSeesEveryLoanOfTheirItemWithBorrowerDatesAndOutcome() {
+        val loans = listOf(
+            past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_704),
+            past("2", LoanRole.OWNER, LoanStatus.RETURNED, 20_710, 20_712, ReturnOutcome.DAMAGED_REPORTED, returned = 20_712,
+                dispute = DisputeSummary(DisputeClaim.DAMAGE, null, 20_713, DisputeStatus.UPHELD)),
+            past("3", LoanRole.OWNER, LoanStatus.DECLINED, 20_720, 20_721),
+            past("4", LoanRole.BORROWER, LoanStatus.RETURNED, 20_730, 20_731, item = drill),
+        )
+        val html = render(open(home(items = listOf(ladder, drill), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("Loan history" in html && "Ladder" in html && "Bea" in html)
+        assertTrue("Returned late." in html && "Reported back: ${circles.app.CalendarDay.format(20_704)}" in html)
+        assertTrue("damage reported (no penalty for telling)" in html && "report of damage was upheld" in html)
+        assertTrue("Declined." in html)
+        assertEquals(3, Regex("Dates: ").findAll(html).count(), "only loans of this item that I own")
+        assertFalse("PRIVATE-DETAILS" in html)
+        assertTrue(html.indexOf(circles.app.CalendarDay.format(20_720)) < html.indexOf(circles.app.CalendarDay.format(20_700)), "newest first")
+    }
+
+    @Test fun anOwnerHistoryWithNoLoansSaysSo() {
+        val html = render(open(home(items = listOf(ladder))).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("Nobody has asked to borrow this yet." in html)
+    }
+
+    @Test fun historyIsOnlyForOwnedItemsAndOnlyOffersAButtonOnThem() {
+        val owned = render(open(home(items = listOf(ladder, drill))).copy(screen = Screen.Items))
+        assertEquals(1, Regex(ACTION_ITEM_HISTORY).findAll(owned).count(), "one button, for the item I own")
+        val notMine = render(open(home(items = listOf(drill))).copy(screen = Screen.ItemHistory, historyOf = drill.item))
+        assertTrue("no longer on your list" in notMine)
+        assertEquals(Screen.Items, reduce(open(), AppAction.Navigate(Screen.ItemHistory)).screen, "no item chosen, back to Items")
+        val chosen = reduce(open(), AppAction.ShowItemHistory(ladder.item))
+        assertEquals(Screen.ItemHistory, chosen.screen)
+        assertEquals(ladder.item, chosen.historyOf)
+    }
+
+    @Test fun aBorrowerSeesPastItemsAndAskAgainOnlyWhereItCanWork() {
+        val loans = listOf(
+            past("1", LoanRole.BORROWER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702, item = drill),
+            past("2", LoanRole.BORROWER, LoanStatus.RETURNED, 20_710, 20_712, ReturnOutcome.OK, returned = 20_712, item = locked),
+            past("3", LoanRole.BORROWER, LoanStatus.CANCELLED, 20_720, 20_721, item = ladder.copy(item = ItemId("9".repeat(32)), name = "Gone")),
+        )
+        val html = render(open(home(items = listOf(drill, locked), loans = loans)).copy(screen = Screen.BorrowHistory))
+        assertTrue("Drill" in html && "Trailer" in html && "Gone" in html)
+        assertEquals(1, Regex("Ask to borrow again").findAll(html).count(), "only the item whose rules allow it")
+        assertTrue(ACTION_BORROW_ITEM in html && drill.item.v in html)
+        assertTrue("Trailer needs Level 3" in html && "Why, and how to unlock" in html)
+        assertTrue("No longer on the list." in html)
+        assertFalse("PRIVATE-DETAILS" in html)
+        assertTrue("Returned on time." in html && "Cancelled." in html)
+    }
+
+    @Test fun theBorrowPageLinksToBorrowingHistoryOnlyOnceThereIsSome() {
+        val none = render(open(home(items = listOf(drill), loans = listOf(past("1", LoanRole.BORROWER, LoanStatus.ACTIVE, 1, 2, item = drill)))).copy(screen = Screen.Borrow))
+        assertFalse(Screen.BorrowHistory.fragment in none)
+        val some = render(open(home(items = listOf(drill), loans = listOf(past("1", LoanRole.BORROWER, LoanStatus.RETURNED, 1, 2, ReturnOutcome.OK, 2, drill)))).copy(screen = Screen.Borrow))
+        assertTrue(Screen.BorrowHistory.fragment in some)
+    }
+
+    @Test fun anEmptyBorrowingHistorySaysSo() {
+        assertTrue("You have not borrowed anything yet." in render(open().copy(screen = Screen.BorrowHistory)))
+    }
 }

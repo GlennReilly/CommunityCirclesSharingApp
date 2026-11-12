@@ -861,6 +861,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.CheckPerson(PersonCheck(MemberId(member), target.getAttribute(ATTR_DEVICE)?.let(::DeviceId))))
                     window.location.hash = Screen.CheckIdentity.fragment
                 }
+                ACTION_ITEM_HISTORY -> target.getAttribute(ATTR_ITEM)?.let {
+                    dispatch(AppAction.ShowItemHistory(ItemId(it)))
+                    window.location.hash = Screen.ItemHistory.fragment
+                }
                 ACTION_TAG_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.TagItem(ItemId(it)))
                     window.location.hash = Screen.ItemTag.fragment

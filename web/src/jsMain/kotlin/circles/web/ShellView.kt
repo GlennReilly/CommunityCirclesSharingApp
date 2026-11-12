@@ -1,5 +1,10 @@
 package circles.web
 
+import circles.app.BorrowAgain
+import circles.app.HistoryDispute
+import circles.app.HistoryEntry
+import circles.app.HistoryOutcome
+import circles.app.LoanHistory
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MemberSummary
@@ -152,6 +157,7 @@ const val ACTION_UNLOCK_PASSKEY = "unlock-passkey"
 const val ACTION_PASSKEY_ON = "passkey-on"
 const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
+const val ACTION_ITEM_HISTORY = "item-history"
 const val ACTION_PRINT = "print-page"
 const val ACTION_SHOW_ALL_ITEMS = "show-all-items"
 const val ID_VERIFY_LINK = "verify-link"
@@ -379,6 +385,8 @@ fun FlowContent.shell(state: AppState) {
                 Screen.AddItem -> itemForm(null)
                 Screen.EditItem -> itemForm(model.home.items.firstOrNull { it.item == state.editing })
                 Screen.Borrow -> borrow(model.home)
+                Screen.ItemHistory -> itemHistoryPage(model.home, state)
+                Screen.BorrowHistory -> borrowHistoryPage(model.home)
                 Screen.RequestLoan -> requestForm(model.home.items.firstOrNull { it.item == state.borrowing }, model.home)
                 else -> comingSoon(state.screen)
             }
@@ -1053,6 +1061,11 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
                         attributes[ATTR_ITEM] = item.item.v
                         +"Print a tag"
                     }
+                    button(type = ButtonType.button) {
+                        attributes[ATTR_ACTION] = ACTION_ITEM_HISTORY
+                        attributes[ATTR_ITEM] = item.item.v
+                        +"Loan history"
+                    }
                     details {
                         summary { +"Remove" }
                         p { +"This takes the item off everyone's list. It cannot be put back, but you can add it again." }
@@ -1198,6 +1211,9 @@ private fun FlowContent.borrow(home: HomeData) {
         p { +"No loans yet. " }
         p { a(href = Screen.Items.fragment) { +"Find something on the Items page." } }
         return
+    }
+    if (LoanHistory.borrowedBefore(home.loans, home.items).isNotEmpty()) {
+        p { a(href = Screen.BorrowHistory.fragment) { +Screen.BorrowHistory.title } }
     }
     val mine = home.loans.filter { it.role != LoanRole.STEWARD }
     val toAnswer = mine.filter { it.role == LoanRole.OWNER && it.status == LoanStatus.REQUESTED }
@@ -1389,6 +1405,97 @@ private fun FlowContent.borrow(home: HomeData) {
             }
         }
     }
+}
+
+/** What happened to one loan, in plain words; damage and loss are facts, not penalties (spec section 6, ADR 0072). */
+fun historyOutcomeText(outcome: HistoryOutcome): String = when (outcome) {
+    HistoryOutcome.ASKED -> "Asked, no answer yet."
+    HistoryOutcome.APPROVED -> "Approved, not handed over yet."
+    HistoryOutcome.OUT -> "Out now."
+    HistoryOutcome.RETURNED_ON_TIME -> "Returned on time."
+    HistoryOutcome.RETURNED_LATE -> "Returned late."
+    HistoryOutcome.DAMAGE_REPORTED -> "Returned, damage reported (no penalty for telling)."
+    HistoryOutcome.LOSS_REPORTED -> "Lost, reported (no penalty for telling)."
+    HistoryOutcome.DECLINED -> "Declined."
+    HistoryOutcome.CANCELLED -> "Cancelled."
+}
+
+/** How a disputed return ended, as one sentence for either side. */
+fun historyDisputeText(dispute: HistoryDispute, claim: DisputeClaim?): String {
+    val what = if (claim == DisputeClaim.LOSS) "loss" else "damage"
+    return when (dispute) {
+        HistoryDispute.PENDING -> "The owner reported $what and a steward is reviewing it."
+        HistoryDispute.UPHELD -> "The owner's report of $what was upheld."
+        HistoryDispute.DISMISSED -> "The owner's report of $what was dismissed, so the return counts as reported."
+    }
+}
+
+private fun FlowContent.historyEntry(entry: HistoryEntry) {
+    val loan = entry.loan
+    p { +"Dates: ${window(loan)}" }
+    loan.returnedDay?.takeIf { it != loan.toDay }?.let { p { +"Reported back: ${CalendarDay.format(it)}" } }
+    p { +historyOutcomeText(entry.outcome) }
+    entry.dispute?.let { p { +historyDisputeText(it, entry.claim) } }
+}
+
+/** Every loan of one item the member owns (ADR 0072). */
+private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
+    h1 { +Screen.ItemHistory.title }
+    val item = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
+    if (item == null) {
+        p { +"That item is no longer on your list." }
+        p { a(href = Screen.Items.fragment) { +"Back to items" } }
+        return
+    }
+    h2 { +item.name }
+    val entries = LoanHistory.forOwnedItem(home.loans, item.item)
+    if (entries.isEmpty()) p { +"Nobody has asked to borrow this yet." }
+    section {
+        for (entry in entries) {
+            div {
+                h3 { personName(home, entry.loan.other) }
+                historyEntry(entry)
+            }
+        }
+    }
+    p { a(href = Screen.Items.fragment) { +"Back to items" } }
+}
+
+/** The items the member borrowed before, with a shortcut to ask again (ADR 0072). */
+private fun FlowContent.borrowHistoryPage(home: HomeData) {
+    h1 { +Screen.BorrowHistory.title }
+    val borrowed = LoanHistory.borrowedBefore(home.loans, home.items)
+    if (borrowed.isEmpty()) p { +"You have not borrowed anything yet." }
+    for (entry in borrowed) {
+        section {
+            h2 { +entry.itemName }
+            p {
+                +"Owned by "
+                personName(home, entry.owner)
+            }
+            for (past in entry.entries) div { historyEntry(past) }
+            when (val again = entry.again) {
+                BorrowAgain.CanAsk -> button(type = ButtonType.button) {
+                    attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
+                    attributes[ATTR_ITEM] = entry.item.v
+                    +"Ask to borrow again"
+                }
+                is BorrowAgain.NotYet -> {
+                    p { +"Not yet. This is not open to you at the moment." }
+                    details {
+                        summary { +"Why, and how to unlock" }
+                        ul { for (reason in again.reasons) li { +reason } }
+                        if (again.howToUnlock.isNotEmpty()) {
+                            h3 { +"How to unlock" }
+                            ul { for (step in again.howToUnlock) li { +step } }
+                        }
+                    }
+                }
+                BorrowAgain.NotListed -> p { +"No longer on the list." }
+            }
+        }
+    }
+    p { a(href = Screen.Borrow.fragment) { +"Back to borrowing" } }
 }
 
 /** The page for asking to borrow one item. */

@@ -188,8 +188,27 @@ try {
   if (await alice.evaluate('document.querySelector("[data-action=uphold-dispute]") !== null')) throw new Error('alice can resolve her own dispute'); ok('a party to the loan is not offered the decision');
   await sleep(1500); await click(alice, 'sync'); await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'Pending review'), 'bea sees pending review'); ok('the borrower sees "Pending review" too');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items');
+  // Loan history (ADR 0072): the owner sees every loan of the ladder; the borrower sees it under their borrowing history with a way to ask again.
+  await click(alice, 'item-history'); await until(alice, has(alice, 'Loan history') + ' && ' + has(alice, 'Dates:'), 'alice item history');
+  const ownerHistory = await text(alice);
+  if ((ownerHistory.match(/Dates:/g) || []).length !== 3) throw new Error('owner history should list 3 loans: ' + ownerHistory);
+  if (!ownerHistory.includes('Bea') || !ownerHistory.includes('damage reported (no penalty for telling)') || !ownerHistory.includes('Returned on time.')) throw new Error('owner history words: ' + ownerHistory);
+  if (ownerHistory.includes('Garage at the back')) throw new Error('owner history shows the private description');
+  ok('the owner sees all 3 loans of the ladder with the borrower, dates and outcomes');
+  await checkAccessibility(alice, 'item loan history');
+  await bea.evaluate('location.hash = "#/borrow"'); await until(bea, has(bea, 'My borrowing history'), 'bea has a history link');
+  await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'bea history');
+  const borrowerHistory = await text(bea);
+  if ((borrowerHistory.match(/Dates:/g) || []).length < 3 || !borrowerHistory.includes('Long ladder')) throw new Error('borrower history: ' + borrowerHistory);
+  ok('the borrower sees the ladder in their borrowing history with "Ask to borrow again"');
+  await checkAccessibility(bea, 'my borrowing history');
+  await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'borrow again opens the request form'); ok('"Ask to borrow again" opens the request form for the ladder');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items again');
   await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
   await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
+  await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'No longer on the list.'), 'bea history after removal');
+  if (await bea.evaluate('document.querySelector("[data-action=borrow-item]") !== null')) throw new Error('borrow again offered for a removed item');
+  ok('a removed item shows "No longer on the list." and no borrow-again button');
   await alice.evaluate('location.hash = "#/home"');
   // Live updates: nobody clicks "Sync now" for Bea here, and the page only polls once a minute, so this proves the event stream works.
   await bea.evaluate('location.hash = "#/items"'); await sleep(4000); // let both event streams connect

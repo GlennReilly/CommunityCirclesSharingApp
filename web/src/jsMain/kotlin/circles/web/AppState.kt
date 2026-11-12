@@ -34,6 +34,8 @@ data class AppState(
     val tagging: ItemId? = null,
     /** The skill offer being changed on the Change a skill offer page. */
     val editingSkill: circles.event.SkillId? = null,
+    /** The owned item whose loan history is on show (ADR 0072). */
+    val historyOf: ItemId? = null,
     /** The item being asked for on the Ask to borrow page. */
     val borrowing: ItemId? = null,
     /** A link to add this browser as another device of a member, found in the address (ADR 0046). */
@@ -80,6 +82,7 @@ sealed interface AppAction {
     data object ShowAllItems : AppAction
     data class EditSkill(val skill: circles.event.SkillId) : AppAction
     data class BorrowItem(val item: ItemId) : AppAction
+    data class ShowItemHistory(val item: ItemId) : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
 }
@@ -98,6 +101,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             it == Screen.CheckIdentity && state.checking == null -> Screen.Members
             it == Screen.CheckDevice && state.addingDevice == null -> Screen.Settings
             it == Screen.ItemTag && state.tagging == null -> Screen.Items
+            it == Screen.ItemHistory && state.historyOf == null -> Screen.Items
             it == Screen.EditItem && state.editing == null -> Screen.Items
             it == Screen.EditSkill && state.editingSkill == null -> Screen.Skills
             it == Screen.RequestLoan && state.borrowing == null -> Screen.Items
@@ -108,6 +112,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     )
     is AppAction.CheckPerson -> if (state.signedIn) state.copy(checking = action.check, screen = Screen.CheckIdentity) else state
     is AppAction.CheckNewDevice -> if (state.signedIn) state.copy(addingDevice = action.device, screen = if (action.device != null) Screen.CheckDevice else Screen.Settings) else state
+    is AppAction.ShowItemHistory -> if (state.signedIn) state.copy(historyOf = action.item, screen = Screen.ItemHistory) else state
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
     is AppAction.EditSkill -> if (state.signedIn) state.copy(editingSkill = action.skill, screen = Screen.EditSkill) else state
     is AppAction.EditItem -> if (state.signedIn) state.copy(editing = action.item, screen = Screen.EditItem) else state

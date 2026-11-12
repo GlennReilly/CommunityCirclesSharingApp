@@ -75,6 +75,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0069](0069-unique-display-names.md) | Display names are unique within a circle | Accepted |
 | [0070](0070-level-numbers.md) | People see level numbers, not tier names | Accepted |
 | [0071](0071-checking-identity-in-person.md) | Checking identity in person: one check page, fingerprints only as the fallback | Accepted |
+| [0072](0072-loan-history.md) | Loan history for owners and borrowers, with "Borrow again" | Accepted |
 
 ## Open decisions still to record
 
