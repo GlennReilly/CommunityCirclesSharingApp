@@ -36,7 +36,7 @@ a[aria-current="page"] { font-weight: bold; border-bottom-color: currentColor; }
 
 /* Notice banner (status messages): inside the column, text on the left, Dismiss on the right. */
 #notice:empty { display: none; }
-#notice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.75rem; background: var(--soft); border: 1px solid var(--line); border-radius: 0.5rem; max-width: calc(60rem - 2rem); }
+#notice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.75rem auto 0; width: calc(100% - 2rem); background: var(--soft); border: 1px solid var(--line); border-radius: 0.5rem; max-width: calc(60rem - 2rem); }
 #notice button { flex: none; margin: 0; }
 
 /* Headings and text. */
@@ -53,7 +53,7 @@ ul.cards > li, main section > div { border: 1px solid var(--line); border-radius
 ul.cards > li { margin: 0; }
 main section > div > :first-child { margin-top: 0; }
 main section > div > :last-child { margin-bottom: 0; }
-ul.cards h2 { margin-top: 0; }
+ul.cards h2, ul.cards h3 { margin-top: 0; }
 details { margin: 0.5rem 0; }
 summary { display: list-item; padding: 0.5rem 0; cursor: pointer; }
 

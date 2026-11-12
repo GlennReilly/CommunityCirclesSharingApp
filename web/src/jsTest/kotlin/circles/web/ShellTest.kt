@@ -515,10 +515,10 @@ class ShellViewTest {
         assertEquals(1, Regex("Details:").findAll(html).count(), "someone else's item shows no details")
     }
 
-    @Test fun removingAnItemNeedsASecondDeliberateClick() {
+    @Test fun archivingAnItemNeedsASecondDeliberateClick() {
         val html = items(home(items = listOf(ladder)))
         assertTrue(html.indexOf("<details") < html.indexOf(ACTION_RETIRE_ITEM))
-        assertTrue("cannot be put back" in html)
+        assertTrue("cannot be restored" in html && "Archive this item" in html && "Remove from the list" !in html)
     }
 
     @Test fun theAddItemPageHasNameKindAndDetailsAndAHiddenButton() {
@@ -1669,35 +1669,36 @@ class NamesViewTest {
         assertFalse(ID_HISTORY_SEARCH in render(open().copy(screen = Screen.BorrowHistory)))
     }
 
-    // ---- removed items (ADR 0073) ----
+    // ---- archived items (ADR 0073, wording 0074) ----
 
-    @Test fun aRemovedItemIsListedOnTheItemsPageWithItsHistoryButtonEvenWhenNothingElseIsListed() {
+    @Test fun anArchivedItemIsListedOnTheItemsPageWithItsHistoryButtonEvenWhenNothingElseIsListed() {
         val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702))
         val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items))
-        assertTrue("Nothing has been shared yet." in html && "Removed items" in html && "Ladder" in html)
+        assertTrue("Nothing has been shared yet." in html && "Archived items" in html && "Ladder" in html)
         assertTrue(ACTION_ITEM_HISTORY in html && ladder.item.v in html && "1 loan" in html)
         val withItems = render(open(home(items = listOf(drill), loans = loans)).copy(screen = Screen.Items))
-        assertTrue("Removed items" in withItems)
-        assertFalse("Removed items" in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.Items)), "a listed item is not removed")
-        assertFalse("Removed items" in render(open(home(items = emptyList())).copy(screen = Screen.Items)))
+        assertTrue("Archived items" in withItems)
+        assertFalse("Archived items" in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.Items)), "a listed item is not removed")
+        assertFalse("Archived items" in render(open(home(items = emptyList())).copy(screen = Screen.Items)))
     }
 
-    @Test fun theHistoryOfARemovedItemOpensAndSaysItWasRemovedWithoutPrivateDetails() {
+    @Test fun theHistoryOfAnArchivedItemOpensAndSaysItWasArchivedWithoutPrivateDetails() {
         val loans = listOf(
             past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702),
             past("2", LoanRole.OWNER, LoanStatus.RETURNED, 20_710, 20_712, ReturnOutcome.LATE, returned = 20_713),
         )
         val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
-        assertTrue("Ladder" in html && "You removed this item from the list." in html)
+        assertTrue("Ladder" in html && "You archived this item." in html && "cannot be restored" in html && "add it as a new item." in html)
         assertEquals(2, Regex("Dates: ").findAll(html).count())
         assertTrue("Returned late." in html)
         assertFalse("PRIVATE-DETAILS" in html)
         assertTrue("no longer on your list" in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = drill.item)), "an item I never owned has no history")
     }
 
-    @Test fun aRemovedItemWhoseNameCannotBeReadIsCalledWhatItIs() {
+    @Test fun anArchivedItemWhoseNameCannotBeReadIsCalledWhatItIs() {
         val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702).copy(itemName = ""))
         val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertEquals("An archived item", UNREADABLE_ITEM_NAME)
         assertTrue(UNREADABLE_ITEM_NAME in html)
         assertTrue(UNREADABLE_ITEM_NAME in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items)))
     }

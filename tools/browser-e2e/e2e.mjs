@@ -96,7 +96,7 @@ try {
   ok('a second member who types the first member\'s name in capitals is told it is taken and stays on the name page');
   await checkAccessibility(bea, 'your name, name taken');
   await submit(bea, 'name-form', { 'display-name': 'Bea' }); await until(bea, has(bea, 'Circle home'), 'bea home after naming'); ok('bea named herself');
-  // Items: add, privacy, change, remove.
+  // Items: add, privacy, change, archive.
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'empty items page'); ok('items page starts empty');
   await checkAccessibility(alice, 'items, empty');
   await alice.evaluate('document.querySelector(\'a[href="#/items/add"]\').click()'); await until(alice, 'document.getElementById("item-add-form") !== null', 'add item page');
@@ -113,7 +113,7 @@ try {
   await bea.evaluate('location.hash = "#/items"'); await syncUntil(bea, has(bea, 'Ladder') + ' && ' + has(bea, 'Shared by Alice Smith'), 'bea sees ladder'); ok('bea sees the ladder');
   await checkAccessibility(bea, 'items, another member\'s item');
   if (await bea.evaluate('document.body.innerText.includes("Garage at the back")')) throw new Error('bea can read the private details'); ok('bea cannot read the private details');
-  if (await bea.evaluate('document.querySelector(\'[data-action="edit-item"]\') !== null')) throw new Error('bea is offered Change'); ok('bea is not offered Change or Remove');
+  if (await bea.evaluate('document.querySelector(\'[data-action="edit-item"]\') !== null')) throw new Error('bea is offered Change'); ok('bea is not offered Change or Archive');
   await click(alice, 'edit-item'); await until(alice, 'document.getElementById("item-edit-form") !== null', 'edit page');
   if (await alice.evaluate('document.getElementById("item-edit-form").elements.namedItem("name").value') !== 'Ladder') throw new Error('edit form not prefilled'); ok('change page is prefilled');
   await checkAccessibility(alice, 'change item');
@@ -219,19 +219,20 @@ try {
   await checkAccessibility(bea, 'my borrowing history');
   await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'borrow again opens the request form'); ok('"Ask to borrow again" opens the request form for the ladder');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items again');
+  { const label = await alice.evaluate('document.querySelector("[data-action=retire-item]").textContent'); const pageText = await alice.evaluate('document.querySelector("main").textContent'); if (label !== 'Archive this item' || /Remove/.test(pageText)) throw new Error('item archive wording: ' + label + ' / ' + pageText); ok('the item is archived with Archive wording and no Remove wording on the Items page'); }
   await click(alice, 'retire-item'); await until(alice, has(alice, 'Nothing has been shared yet.'), 'retired'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced retire');
-  await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees removal'); ok('removing the item removed it for bea too');
-  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Removed items') + ' && ' + has(alice, 'Long ladder'), 'alice sees the removed item');
-  await checkAccessibility(alice, 'items with a removed item');
-  await click(alice, 'item-history'); await until(alice, has(alice, 'You removed this item from the list.') + ' && ' + has(alice, 'Dates:'), 'alice removed item history');
-  if (((await text(alice)).match(/Dates:/g) || []).length !== 4) throw new Error('removed item history should keep 4 loans: ' + await text(alice));
-  if ((await text(alice)).includes('Garage at the back')) throw new Error('removed item history shows the private description');
-  ok('a removed item stays reachable from the Items page with all 4 loans and no private details');
-  await checkAccessibility(alice, 'removed item loan history');
+  await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees the archived item gone'); ok('archiving the item took it off bea\'s list too');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Archived items') + ' && ' + has(alice, 'Long ladder'), 'alice sees the archived item');
+  await checkAccessibility(alice, 'items with an archived item');
+  await click(alice, 'item-history'); await until(alice, has(alice, 'You archived this item.') + ' && ' + has(alice, 'cannot be restored') + ' && ' + has(alice, 'Dates:'), 'alice archived item history');
+  if (((await text(alice)).match(/Dates:/g) || []).length !== 4) throw new Error('archived item history should keep 4 loans: ' + await text(alice));
+  if ((await text(alice)).includes('Garage at the back')) throw new Error('archived item history shows the private description');
+  ok('an archived item stays reachable from the Items page with all 4 loans and no private details');
+  await checkAccessibility(alice, 'archived item loan history');
   await alice.evaluate('location.hash = "#/items"');
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'No longer on the list.'), 'bea history after removal');
-  if (await bea.evaluate('document.querySelector("[data-action=borrow-item]") !== null')) throw new Error('borrow again offered for a removed item');
-  ok('a removed item shows "No longer on the list." and no borrow-again button');
+  if (await bea.evaluate('document.querySelector("[data-action=borrow-item]") !== null')) throw new Error('borrow again offered for an archived item');
+  ok('an archived item shows "No longer on the list." and no borrow-again button');
   await alice.evaluate('location.hash = "#/home"');
   // Live updates: nobody clicks "Sync now" for Bea here, and the page only polls once a minute, so this proves the event stream works.
   await bea.evaluate('location.hash = "#/items"'); await sleep(4000); // let both event streams connect

@@ -153,8 +153,13 @@ async function screenshot(chrome, name) {
   if (!dir) return;
   mkdirSync(dir, { recursive: true });
   await chrome.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: process.env.DARK === '1' ? 'dark' : 'light' }] });
-  await chrome.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 800, deviceScaleFactor: 1, mobile: false });
+  await chrome.send('Emulation.setDeviceMetricsOverride', { width: Number(process.env.SHOT_WIDTH || 1000), height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
+  if (process.env.SHOT_WIDTH) { // narrow check: sideways overflow, and controls smaller than the 44 px touch target (the invisible touch area counts)
+    const m = JSON.parse(await chrome.evaluate(`JSON.stringify({ overflow: document.documentElement.scrollWidth - window.innerWidth, client: document.documentElement.clientWidth, edges: ['#notice', 'main section > div', 'main ul.cards > li', 'main'].map(q => { const e = document.querySelector(q); if (!e) return q + ' none'; const r = e.getBoundingClientRect(); return q + ' ' + Math.round(r.left) + '..' + Math.round(r.right); }),
+      small: [...document.querySelectorAll('main button, main input, main select, main a.button')].filter(e => e.checkVisibility()).map(e => { const r = e.getBoundingClientRect(); return { t: (e.innerText || e.id || e.tagName).trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) }; }).filter(x => x.h < 32 || x.w < 32) })`));
+    console.log('narrow ' + name + ': client ' + m.client + ' ' + m.edges.join(', ') + '; overflow ' + m.overflow + ' px, small controls ' + JSON.stringify(m.small));
+  }
   const shot = await chrome.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
   writeFileSync(`${dir}/${name.replace(/[^a-z0-9]+/gi, '-')}.png`, Buffer.from(shot.result.data, 'base64'));
 }

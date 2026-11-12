@@ -1073,12 +1073,12 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
                         +"Loan history"
                     }
                     details {
-                        summary { +"Remove" }
-                        p { +"This takes the item off everyone's list. It cannot be put back, but you can add it again." }
+                        summary { +"Archive" }
+                        p { +"This takes the item off everyone's list. An archived item cannot be restored; to lend it again, add it as a new item. Its loan history is kept." }
                         button(type = ButtonType.button) {
                             attributes[ATTR_ACTION] = ACTION_RETIRE_ITEM
                             attributes[ATTR_ITEM] = item.item.v
-                            +"Remove from the list"
+                            +"Archive this item"
                         }
                     }
                 }
@@ -1483,7 +1483,7 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     val name = listed?.name ?: removed?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
     val entries = listed?.let { LoanHistory.forOwnedItem(home.loans, it.item) } ?: removed?.entries.orEmpty()
     h2 { +name }
-    if (removed != null) p { +"You removed this item from the list. Its loans are kept here." }
+    if (removed != null) p { +"You archived this item. Its loans are kept here. An archived item cannot be restored; to lend it again, add it as a new item." }
     if (entries.isEmpty()) p { +"Nobody has asked to borrow this yet." }
     historySearch(entries.size)
     section {
@@ -1498,14 +1498,14 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     p { a(href = Screen.Items.fragment) { +"Back to items" } }
 }
 
-/** What an owner sees for a removed item whose name this device cannot read. */
-const val UNREADABLE_ITEM_NAME = "An item you removed"
+/** What an owner sees for an archived item whose name this device cannot read. */
+const val UNREADABLE_ITEM_NAME = "An archived item"
 
 /** Removed items the member owned, so their loan history stays reachable (ADR 0073). */
 private fun FlowContent.removedItems(home: HomeData) {
     val removed = LoanHistory.removedOwnedItems(home.loans, home.items)
     if (removed.isEmpty()) return
-    h2 { +"Removed items" }
+    h2 { +"Archived items" }
     p { +"Items you took off the list. Their loan history is still here." }
     ul {
         classes = setOf("cards")
