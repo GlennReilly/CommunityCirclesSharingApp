@@ -24,5 +24,5 @@ suspend fun Replica.fold(circle: CircleId, crypto: Crypto, cipher: Cipher, me: D
     val checked = entries.mapNotNull { entry -> entry.verifiedWith?.let { entry.id to it } }.toMap()
     val stored = entries.map { it.id }.toSet()
     val pending = waiting.filter { it.eventId(crypto) !in stored }
-    return CircleFold(crypto, cipher, me, signatures = VerifiedSignatures.of(checked)).fold(circle, entries.map { it.envelope } + pending)
+    return CircleFold(crypto, cipher, me, requireConfirmedStewards = true, signatures = VerifiedSignatures.of(checked)).fold(circle, entries.map { it.envelope } + pending)
 }

@@ -956,6 +956,9 @@ private fun FlowContent.personActions(home: HomeData, person: MemberSummary) {
         person.nameConfirmed -> p { +"This member's identity is already confirmed." }
         else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm a member's identity." }
     }
+    if (home.isSteward && !person.isSteward && !person.nameConfirmed) {
+        p { +"This member cannot become a steward until someone has confirmed their identity." }
+    }
     val vouchedUntil = person.vouchedByMeUntil
     when {
         vouchedUntil != null -> p { +"You vouch for this member until ${CalendarDay.format(vouchedUntil)}." }
@@ -2073,10 +2076,16 @@ private fun FlowContent.stewards(home: HomeData) {
         }
     }
     if (home.isSteward) {
-        val candidates = home.people.filter { person -> !person.isMe && home.stewardList.none { it.member == person.member } }
-        if (candidates.isNotEmpty()) {
+        val others = home.people.filter { person -> !person.isMe && home.stewardList.none { it.member == person.member } }
+        // ADR 0079: only members whose identity someone has confirmed can become stewards.
+        val candidates = others.filter { it.nameConfirmed }
+        if (others.isNotEmpty()) {
             section {
                 h2 { +"Propose a new steward" }
+                if (candidates.size < others.size) {
+                    p { +"Only members whose identity has been confirmed can become stewards, so some members are not listed. Open a member's page and check their identity in person first." }
+                }
+                if (candidates.isEmpty()) p { +"No member can be proposed yet." }
                 ul {
                     for (person in candidates) {
                         li {

@@ -54,6 +54,12 @@ class HeldShare(val epoch: Int, val share: ByteString, val from: MemberId)
 /** One steward's vote on a change that is still waiting: [subject] is the member id, or the settings for [StewardChange.POLICY]. */
 data class PendingStewardVote(val change: StewardChange, val subject: String, val vote: StewardVote)
 
+/** Why a steward.add is refused for a member nobody has confirmed (ADR 0079). The app words it with the member's name. */
+const val IDENTITY_NOT_CONFIRMED_REASON = "the member's identity has not been confirmed yet, so they cannot become a steward"
+
+/** How many times the fold repeats to settle who counts as a confirmer and who as a steward (ADR 0079). */
+private const val MAX_IDENTITY_ROUNDS = 6
+
 /**
  * Replays a circle's log in `serverSeq` order the way every client must (spec 3.1, 3.4): it trusts nothing the server
  * said. Signatures, device registration and revocation, roles and invites are re-checked; keys wrapped to [me] are
@@ -77,13 +83,46 @@ class CircleFold(
      */
     private val mayBorrow: (MemberId, ItemId) -> Boolean = { _, _ -> true },
     /**
+     * ADR 0079: a member whose identity nobody has confirmed cannot become a steward. Names and confirmations are sealed,
+     * so the server cannot check this; it is a client-fold rule like loans and pauses. Off by default so that folds of
+     * plain governance logs (tests, tools) need no names; the app turns it on in `Replica.fold`.
+     */
+    private val requireConfirmedStewards: Boolean = false,
+    /**
      * Signatures a client already checked when the events arrived (ADR 0036). An entry only counts when it names the same
      * key the fold would verify with, so a stale or wrong entry falls back to a real check and never lets a forgery in.
      */
     private val signatures: VerifiedSignatures = VerifiedSignatures.NONE,
 ) {
     fun fold(circle: CircleId, log: List<Envelope>): CircleView {
-        val state = State(circle)
+        if (!requireConfirmedStewards) return foldOnce(circle, log) { _, _ -> true }.view
+        // Who may become a steward depends on confirmations, and who may confirm depends on who is a steward (they count as
+        // trusted). Start by allowing everyone, read the confirmations that result, and fold again with the rule they give,
+        // until the set of stewards and refusals stops changing (at most a few rounds: each round can only remove stewards
+        // and confirmations that were counted wrongly).
+        var allow: (MemberId, Long) -> Boolean = { _, _ -> true }
+        var result = foldOnce(circle, log, allow)
+        // With no steward.add in the log the rule has nothing to decide, so one fold is enough (and the common case stays cheap).
+        if (log.none { it.type == EventType.STEWARD_ADD.wire }) return result.view
+        repeat(MAX_IDENTITY_ROUNDS) {
+            val index = result.indexOf
+            val spans = result.view.market.identityIntervals.mapValues { (_, list) ->
+                list.mapNotNull { i -> index[i.from]?.let { from -> from to (i.until?.let { u -> index[u] } ?: Long.MAX_VALUE) } }
+            }
+            allow = { member, position -> spans[member].orEmpty().any { (from, until) -> from < position && position < until } }
+            val next = foldOnce(circle, log, allow)
+            val same = next.view.stewards == result.view.stewards && next.view.rejected.map { it.id } == result.view.rejected.map { it.id }
+            result = next
+            if (same) return result.view
+        }
+        return result.view
+    }
+
+    private class Folded(val view: CircleView, val indexOf: Map<EventId, Long>)
+
+    private fun foldOnce(circle: CircleId, log: List<Envelope>, identityOk: (MemberId, Long) -> Boolean): Folded {
+        val state = State(circle, identityOk)
+        val indexOf = mutableMapOf<EventId, Long>()
         val accepted = mutableListOf<Pair<EventId, Envelope>>()
         // The steward set as it stood after each accepted event, so the standing floor can use "stewards then" (ADR 0042).
         val stewardsAfter = mutableMapOf<EventId, Set<MemberId>>()
@@ -93,6 +132,7 @@ class CircleFold(
         var currentStewards: Set<MemberId> = emptySet()
         for ((index, envelope) in log.withIndex()) {
             val id = envelope.eventId(crypto)
+            indexOf[id] = index.toLong()
             val problem = if (envelope.circle != circle) "event belongs to another circle" else state.apply(envelope, id, index.toLong())
             if (problem == null) state.noteActivity(envelope.author, envelope.day, index.toLong())
             if (problem == null) {
@@ -118,15 +158,20 @@ class CircleFold(
             val name = ((event.payload as? Parsed.Ok)?.value)?.let { (NamePayloads.parseProfile(it) as? Parsed.Ok)?.value?.name } ?: continue
             if (market.rejected[event.id] == NAME_TAKEN_REASON) nameRefusals[author] = name else if (event.id !in market.rejected) nameRefusals.remove(author)
         }
-        return CircleView(
-            state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
-            opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
-            state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
-            state.unrotatedRemovals(), state.heldShares.toMap(), state.shareHolders.mapValues { it.value.toSet() }, state.commitmentsSnapshot(), nameRefusals,
+        return Folded(
+            CircleView(
+                state.devices.toMap(), state.stewards.keys.toSet(), state.epoch, state.keys,
+                opened.filter { it.id !in market.rejected }, state.rejected.toList() + refused, market.view, state.settings,
+                state.stewards.toMap(), state.stewardVotes.map { PendingStewardVote(it.first, it.second, it.third) },
+                state.unrotatedRemovals(), state.heldShares.toMap(), state.shareHolders.mapValues { it.value.toSet() }, state.commitmentsSnapshot(), nameRefusals,
+            ),
+            indexOf,
         )
     }
 
-    private inner class State(val circle: CircleId) {
+    private inner class State(val circle: CircleId, val identityOk: (MemberId, Long) -> Boolean) {
+        /** The member who made the circle: exempt from the identity rule, since nobody else could have confirmed them (ADR 0079). */
+        var founder: MemberId? = null
         val devices = mutableMapOf<DeviceId, DeviceState>()
         val stewards = mutableMapOf<MemberId, Int>()
         val stewardVotes = mutableListOf<Triple<StewardChange, String, StewardVote>>()
@@ -213,6 +258,7 @@ class CircleFold(
             settings = terms.settings
             devices[reg.device] = DeviceState(reg, revoked = false)
             stewards[reg.member] = FOUNDING_STEWARD_DAY
+            founder = reg.member
             return null
         }
 
@@ -265,6 +311,7 @@ class CircleFold(
             if (change == StewardChange.ADD) {
                 if (devices.values.none { it.registration.member == target }) return "member is not in the circle"
                 if (!mayBecomeSteward(target)) return "member has not reached the steward standing tier"
+                if (requireConfirmedStewards && target !in stewards && target != founder && !identityOk(target, position)) return IDENTITY_NOT_CONFIRMED_REASON
             }
             val prior = stewardVotes.filter { it.first == change && it.second == target.v }.map { it.third }
             val outcome = StewardRules.decide(policyNow(), change, target, sender.member, e.day, stewards, prior, activity)

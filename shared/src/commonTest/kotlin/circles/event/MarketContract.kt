@@ -1228,4 +1228,77 @@ abstract class MarketContract {
         assertEquals(FROM to TO, same.requestedFromDay to same.requestedToDay)
         assertEquals(same.fromDay, same.requestedFromDay)
     }
+
+    // ---- a steward needs a confirmed identity (ADR 0079) ----
+
+    private fun World.strict(who: EventAuthor, extra: List<Envelope> = emptyList()): CircleView =
+        CircleFold(crypto, cipher, who.identity, requireConfirmedStewards = true).fold(circle, log + extra)
+
+    /** Bea sets a name and the founder confirms it, so Bea's identity counts as confirmed. */
+    private fun World.confirmBea() {
+        val profile = bea.memberProfile(circle, DAY, "Bea Jones")
+        log += profile
+        log += founder.confirmName(circle, DAY, bea.identity.member, profile.eventId(crypto), "Bea Jones")
+    }
+
+    @Test
+    fun aMemberWhoseIdentityIsNotConfirmedCannotBecomeASteward() = runTest {
+        val w = world()
+        w.log += w.bea.memberProfile(w.circle, DAY, "Bea Jones")
+        val view = w.strict(w.founder, listOf(w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)))
+        assertEquals(setOf(w.founder.identity.member), view.stewards)
+        assertEquals(listOf(IDENTITY_NOT_CONFIRMED_REASON), view.rejected.map { it.reason })
+        // the same log folded without the rule (a plain governance fold) lets it through: the rule is the app's, not the wire's
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), w.foldAs(w.founder, w.log + w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)).stewards)
+    }
+
+    @Test
+    fun aMemberWithAConfirmedIdentityCanBecomeASteward() = runTest {
+        val w = world()
+        w.confirmBea()
+        val view = w.strict(w.founder, listOf(w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), view.stewards)
+        assertEquals(emptyList(), view.rejected)
+    }
+
+    @Test
+    fun aConfirmationThatComesAfterTheProposalDoesNotMakeAnEarlierProposalValid() = runTest {
+        val w = world()
+        val profile = w.bea.memberProfile(w.circle, DAY, "Bea Jones")
+        w.log += profile
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)
+        w.log += w.founder.confirmName(w.circle, DAY + 2, w.bea.identity.member, profile.eventId(w.crypto), "Bea Jones")
+        val view = w.strict(w.founder)
+        assertEquals(setOf(w.founder.identity.member), view.stewards, "the early proposal stays refused")
+        assertEquals(listOf(IDENTITY_NOT_CONFIRMED_REASON), view.rejected.map { it.reason })
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), w.strict(w.founder, listOf(w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 3))).stewards.also { }, "asking again after the confirmation works")
+    }
+
+    @Test
+    fun theFounderIsExemptAndASittingStewardKeepsTheRoleWhenTheConfirmerLeaves() = runTest {
+        val w = world()
+        w.confirmBea()
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)
+        // the founder steps down and leaves: Bea, confirmed by the founder, stays a steward
+        w.log += w.founder.stewardRemove(w.circle, w.founder.identity.member, DAY + 20)
+        val view = w.strict(w.bea)
+        assertEquals(setOf(w.bea.identity.member), view.stewards)
+        // later Bea brings the founder back, who has no name and no confirmation, and it works: the founder is exempt
+        val back = w.bea.stewardAdd(w.circle, w.founder.identity.member, DAY + 30)
+        assertEquals(setOf(w.bea.identity.member, w.founder.identity.member), w.strict(w.bea, listOf(back)).stewards)
+        assertEquals(emptyList(), w.strict(w.bea, listOf(back)).rejected)
+    }
+
+    @Test
+    fun theInactivityFallbackDoesNotLetAnUnconfirmedMemberIn() = runTest {
+        val w = world()
+        w.confirmBea()
+        w.log += w.founder.stewardAdd(w.circle, w.bea.identity.member, DAY + 1)
+        // carol has no confirmed identity; bea proposes her, the founder stays silent, and bea repeats the proposal long after
+        val first = w.bea.stewardAdd(w.circle, w.carol.identity.member, DAY + 10)
+        val repeat = w.bea.stewardAdd(w.circle, w.carol.identity.member, DAY + 100)
+        val view = w.strict(w.bea, listOf(first, repeat))
+        assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), view.stewards)
+        assertEquals(listOf(IDENTITY_NOT_CONFIRMED_REASON, IDENTITY_NOT_CONFIRMED_REASON), view.rejected.map { it.reason })
+    }
 }

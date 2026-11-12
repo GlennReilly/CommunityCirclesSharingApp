@@ -52,7 +52,21 @@ enum class NameCheck { FINGERPRINT_IN_PERSON }
 data class NameConfirmation(val member: MemberId, val profile: EventId, val name: String, val how: NameCheck)
 
 /** A member's current name, the event that set it, and who confirmed it (member to day) since then. */
-data class NameState(val member: MemberId, val name: String, val profile: EventId, val day: Int, val confirmations: Map<MemberId, Int> = emptyMap())
+data class NameState(
+    val member: MemberId,
+    val name: String,
+    val profile: EventId,
+    val day: Int,
+    val confirmations: Map<MemberId, Int> = emptyMap(),
+    /** The confirmation event that first made this name count as confirmed (ADR 0079); null while it is not. A new name starts again. */
+    val confirmedAt: EventId? = null,
+)
+
+/**
+ * A stretch of the log in which a member's identity counted as confirmed (ADR 0079): from the confirmation that made it so
+ * to the profile event of a later name (null while it still holds). A rename ends it; the new name needs confirming again.
+ */
+data class IdentityInterval(val from: EventId, val until: EventId?)
 
 /** The rules for display names (ADR 0068), the same on every client. */
 object DisplayNames {

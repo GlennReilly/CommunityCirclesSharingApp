@@ -102,6 +102,10 @@ data class ItemSummary(
     val access: AccessSummary? = null,
 )
 
+/** Why someone cannot become a steward yet (ADR 0079), as a sentence without its full stop; [name] null reads "The new member". */
+fun identityNotConfirmedText(name: String?): String =
+    "${name ?: "The member"}'s identity has not been confirmed yet, so they cannot become a steward"
+
 /** An archived item of mine: its name is what the fold holds for it (ADR 0073, 0075). */
 data class ArchivedItem(val item: ItemId, val name: String)
 
@@ -705,6 +709,10 @@ class CircleApp(
             else -> {
                 val target = MemberId(subject)
                 if (view.devices.values.none { !it.revoked && it.registration.member == target }) return StewardResult.Refused("That person is not in the circle.")
+                // ADR 0079: nobody becomes a steward before someone has confirmed their identity (the founder and sitting stewards are exempt).
+                if (change == StewardChange.ADD && target !in view.stewards && view.market.names[target]?.confirmedAt == null) {
+                    return StewardResult.Refused(identityNotConfirmedText(view.market.names[target]?.name))
+                }
                 StewardRules.decide(policy, change, target, me, today(), view.stewardSince, prior)
             }
         }

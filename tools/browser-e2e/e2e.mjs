@@ -345,6 +345,12 @@ try {
   // Checking identity (ADR 0071): the card has only "Check identity"; vouching and confirming live on the check page.
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=check-person]") !== null', 'check button for alice');
   if (await alice.evaluate('document.querySelector("[data-action=vouch], form[id^=confirm-name-]") !== null')) throw new Error('vouch or confirm is still on the members card');
+  // A steward needs a confirmed identity (ADR 0079): Bea is not confirmed yet, so she cannot be proposed.
+  await alice.evaluate('location.hash = "#/stewards"'); await until(alice, has(alice, 'Propose a new steward'), 'alice stewards page');
+  if (await alice.evaluate('document.querySelector("[data-action=steward-add]") !== null')) throw new Error('an unconfirmed member can be proposed as a steward');
+  if (!(await alice.evaluate(has(alice, 'Only members whose identity has been confirmed can become stewards')))) throw new Error('no sentence saying why nobody is listed: ' + await text(alice));
+  ok('an unconfirmed member is not offered as a steward, and one sentence says why');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=check-person]") !== null', 'alice back on members');
   await bea.evaluate('location.hash = "#/members"'); await until(bea, 'document.querySelector("[data-action=check-person]") !== null', 'bea members');
   if (!(await bea.evaluate(has(bea, 'Bea (identity not confirmed yet) (you)') + ' && ' + has(bea, 'Nobody has confirmed your identity yet.')))) throw new Error('bea does not see her own identity as not confirmed yet: ' + await text(bea));
   await click(bea, 'check-person'); await until(bea, has(bea, 'Checking: ') + ' && document.querySelector("p.fingerprint") !== null', 'bea checks alice');

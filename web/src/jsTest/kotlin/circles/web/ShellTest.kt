@@ -805,7 +805,7 @@ class ShellViewTest {
     @Test fun onlyStewardsSeeWhoCanBeProposedAndTheRulesForm() {
         val people = listOf(
             MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "x"),
-            MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "y"),
+            MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "y", displayName = "Bea", nameConfirmedBy = listOf(me)),
         )
         val steward = stewards(true, listOf(meSteward), people = people)
         assertTrue("Propose a new steward" in steward && "Propose as steward" in steward)
@@ -1846,5 +1846,31 @@ class NamesViewTest {
         assertTrue("""View <a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in views[0])
         val note = render(open(home().copy(standing = StandingSummary(circles.policy.Tier.TRUSTED, "3.0", emptyList(), emptyList()), contributions = circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 3))).copy(screen = Screen.Standing))
         assertTrue("""id="$FIELD_NOTE_WITH"""" in note && """$ATTR_VIEW_OF="$FIELD_NOTE_WITH"""" in note)
+    }
+
+    // ---- stewards need a confirmed identity (ADR 0079) ----
+
+    @Test fun onlyMembersWithAConfirmedIdentityAreOfferedAsStewardsAndOneSentenceSaysWhy() {
+        val carol = MemberId("c".repeat(32))
+        val confirmed = MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "a", displayName = "Bea", nameConfirmedBy = listOf(me))
+        val unconfirmed = MemberSummary(carol, isMe = false, isSteward = false, devices = 1, fingerprint = "b", displayName = "Carol")
+        val html = render(open(home(people = listOf(meSummary, confirmed, unconfirmed)).copy(stewardList = listOf(circles.app.StewardInfo(me, isMe = true, sinceDay = null, votesFromDay = null)))).copy(screen = Screen.Stewards))
+        assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_STEWARD_ADD"""").findAll(html).count(), "only the confirmed member")
+        assertTrue("""$ATTR_SUBJECT="${bea.v}"""" in html && """$ATTR_SUBJECT="${carol.v}"""" !in html)
+        assertTrue("Only members whose identity has been confirmed can become stewards" in html)
+        val none = render(open(home(people = listOf(meSummary, unconfirmed)).copy(stewardList = listOf(circles.app.StewardInfo(me, isMe = true, sinceDay = null, votesFromDay = null)))).copy(screen = Screen.Stewards))
+        assertFalse(ACTION_STEWARD_ADD in none)
+        assertTrue("No member can be proposed yet." in none)
+        val all = render(open(home(people = listOf(meSummary, confirmed)).copy(stewardList = listOf(circles.app.StewardInfo(me, isMe = true, sinceDay = null, votesFromDay = null)))).copy(screen = Screen.Stewards))
+        assertFalse("Only members whose identity has been confirmed" in all, "no sentence when everyone is listed")
+    }
+
+    @Test fun theirPersonPageSaysAnUnconfirmedMemberCannotBecomeASteward() {
+        val unconfirmed = MemberSummary(bea, isMe = false, isSteward = false, devices = 1, fingerprint = "a", displayName = "Bea")
+        val asSteward = render(personState(bea, home(people = listOf(meSummary, unconfirmed))))
+        assertTrue("cannot become a steward until someone has confirmed their identity" in asSteward)
+        val confirmed = unconfirmed.copy(nameConfirmedBy = listOf(me))
+        assertFalse("cannot become a steward" in render(personState(bea, home(people = listOf(meSummary, confirmed)))))
+        assertFalse("cannot become a steward" in render(personState(bea, home(steward = false, people = listOf(meSummary, unconfirmed)))), "only a steward needs the hint")
     }
 }

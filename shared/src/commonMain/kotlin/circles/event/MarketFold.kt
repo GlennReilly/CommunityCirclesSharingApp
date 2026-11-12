@@ -144,6 +144,8 @@ class MarketView(
     val skills: List<SkillState> = emptyList(),
     /** Each member's current display name and its confirmations (ADR 0068). */
     val names: Map<MemberId, NameState> = emptyMap(),
+    /** When each member's identity counted as confirmed, as stretches of the log (ADR 0079). */
+    val identityIntervals: Map<MemberId, List<IdentityInterval>> = emptyMap(),
 ) {
     /** Who confirmed [member]'s current name and still counts: confirmers who have since left do not (ADR 0068). */
     fun nameConfirmers(member: MemberId): Set<MemberId> =
@@ -203,6 +205,7 @@ internal class MarketFold(
     private val notes = linkedMapOf<NoteId, ContributionState>()
     private val skills = linkedMapOf<SkillId, SkillState>()
     private val names = linkedMapOf<MemberId, NameState>()
+    private val identityIntervals = mutableMapOf<MemberId, MutableList<IdentityInterval>>()
 
     private fun confirmedNotes(): List<ContributionState> = notes.values.filter { it.confirmedDay != null }
     private val configProposals = linkedMapOf<ConfigSettings, PendingConfig>()
@@ -220,7 +223,7 @@ internal class MarketFold(
             if (problem != null) rejected[event.id] = problem
         }
         val keys = myItemKeys()
-        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList(), skills.values.toList(), names.toMap()), rejected.toMap())
+        return MarketResult(MarketView(items.toMap(), loans.toMap(), keys, openDetails(keys), vouches.toList(), devices.values.map { it.registration.member }.toSet().mapNotNull { member -> removedOn(member)?.let { member to it } }.toMap(), pauses.values.toList(), configs.toList(), configProposals.values.toList(), baseConfig, notes.values.toList(), skills.values.toList(), names.toMap(), identityIntervals.mapValues { it.value.toList() }), rejected.toMap())
     }
 
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
@@ -369,6 +372,8 @@ internal class MarketFold(
         val key = NameKey.of(v.name)
         if (names.any { (member, state) -> member != author && NameKey.of(state.name) == key && removedOn(member) == null }) return NAME_TAKEN_REASON
         names[author] = NameState(author, v.name, id, day)
+        // a new name ends any stretch in which the member counted as confirmed
+        identityIntervals[author]?.let { list -> if (list.isNotEmpty() && list.last().until == null) list[list.lastIndex] = list.last().copy(until = id) }
         return null
     }
 
@@ -383,7 +388,12 @@ internal class MarketFold(
         if (author in current.confirmations) return "already confirmed"
         val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
         if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, may confirm someone's identity"
-        names[v.member] = current.copy(confirmations = current.confirmations + (author to day))
+        val confirmations = current.confirmations + (author to day)
+        names[v.member] = current.copy(
+            confirmations = confirmations,
+            confirmedAt = current.confirmedAt ?: id.takeIf { confirmations.size >= NAME_CONFIRMATIONS_NEEDED },
+        )
+        if (current.confirmedAt == null && confirmations.size >= NAME_CONFIRMATIONS_NEEDED) identityIntervals.getOrPut(v.member) { mutableListOf() } += IdentityInterval(id, null)
         return null
     }
 

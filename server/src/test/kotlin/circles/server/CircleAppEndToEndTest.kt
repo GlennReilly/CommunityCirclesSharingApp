@@ -562,6 +562,41 @@ class CircleAppEndToEndTest {
         assertEquals(0, home(alice.app).loans.count { it.canResolve })
     }
 
+    /** [other] names themselves and [alice] confirms it, after the in-person check the app asks for (ADR 0068, 0079): a steward needs a confirmed identity. */
+    private suspend fun confirmIdentity(alice: Browser, other: Browser, name: String) {
+        other.app.setMyName(name); other.app.syncOnce(); alice.app.syncOnce()
+        assertEquals(NameResult.Saved, alice.app.confirmName(home(other.app).me))
+        alice.app.syncOnce(); other.app.syncOnce()
+    }
+
+    @Test
+    fun aStewardNeedsAConfirmedIdentityBeforeTheProposalIsSent() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        val beaId = home(bea.app).me
+        // no name at all, then a name nobody has confirmed: refused in a full sentence, nothing queued
+        assertEquals(StewardResult.Refused("The member's identity has not been confirmed yet, so they cannot become a steward"), alice.app.proposeSteward(beaId))
+        bea.app.setMyName("Bea Lee"); bea.app.syncOnce(); alice.app.syncOnce()
+        assertEquals(StewardResult.Refused("Bea Lee's identity has not been confirmed yet, so they cannot become a steward"), alice.app.proposeSteward(beaId))
+        assertEquals(0, home(alice.app).changesWaiting)
+        assertEquals(NameResult.Saved, alice.app.confirmName(beaId)); alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(beaId))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertTrue(home(bea.app).isSteward)
+        assertEquals(0, home(alice.app).refusedChanges)
+        // a new name needs confirming again, but a sitting steward keeps the role
+        bea.app.setMyName("Bea L. Lee"); bea.app.syncOnce(); alice.app.syncOnce()
+        assertTrue(home(alice.app).stewardList.any { it.member == beaId })
+    }
+
     @Test
     fun stewardsAreAddedByQuorumAfterTheCoolingOffAndTheRulesCanBeChanged() = apiTest {
         val transport = HttpTransport { method, path, body, token ->
@@ -587,6 +622,7 @@ class CircleAppEndToEndTest {
         // One steward and the default quorum of two: the only steward can add another at once.
         assertEquals(1, home(alice.app).stewardList.size)
         assertEquals(2, home(alice.app).stewardSettings.quorum)
+        confirmIdentity(alice, bea, "Bea Lee"); confirmIdentity(alice, carol, "Carol Ng")
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(id(bea)))
         sync()
         val beaView = home(bea.app)
@@ -905,10 +941,11 @@ class CircleAppEndToEndTest {
         alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
         val aliceMember = home(alice.app).me
         val aliceDevice = home(alice.app).myDevices.single().device
-        // Bea's replica never shows her the wraps Alice makes for her: she is a steward whose device has no key.
+        // Bea becomes a steward the normal way (a steward needs a confirmed identity, ADR 0079, so she holds the first key). Her replica
+        // never shows her the wraps Alice makes after that, so after the key is changed she is a steward whose device lacks the current key.
         val hideWraps: (circles.event.Envelope) -> Boolean = { e ->
-            e.type == circles.event.EventType.KEY_WRAP.wire && e.author == aliceMember &&
-                (circles.event.CircleKeys.keyWrap(e.public) as? circles.encoding.Parsed.Ok)?.value?.device != aliceDevice
+            val wrap = (circles.event.CircleKeys.keyWrap(e.public) as? circles.encoding.Parsed.Ok)?.value
+            e.type == circles.event.EventType.KEY_WRAP.wire && e.author == aliceMember && wrap?.device != aliceDevice && (wrap?.epoch ?: 0) >= 2
         }
         val beaReplica = InMemoryReplica { it.eventId(crypto) }
         val beaHidden = HidingReplica(beaReplica, hideWraps)
@@ -923,11 +960,17 @@ class CircleAppEndToEndTest {
         val ladder = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back") as ItemResult.Saved).item
         bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
         alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        confirmIdentity(alice, bea, "Bea Lee")
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
         alice.app.syncOnce(); bea.app.syncOnce()
         assertTrue(home(bea.app).isSteward)
-        assertFalse(home(bea.app).canRead, "Bea is in the log but was never sent the key")
-        assertEquals(emptyList(), home(bea.app).items)
+        // Carol joins and is removed: the key changes to a new one, and Bea's device is never shown it.
+        val link2 = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val carol = browser(transport, crypto)
+        carol.app.open(); carol.app.join(link2, PASSPHRASE); carol.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); carol.app.syncOnce()
+        assertEquals(RemoveResult.Removed, alice.app.removeMember(home(carol.app).me))
+        alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
 
         // 1. Alice makes the shares: 2 of 2 stewards. A threshold out of range is explained; a non-steward cannot.
         assertEquals(circles.app.ShareMakingResult.BadThreshold(2, 2), alice.app.makeRecoveryShares(3))
@@ -936,18 +979,18 @@ class CircleAppEndToEndTest {
         assertEquals(circles.app.ShareMakingResult.Sent(stewards = 2, threshold = 2), alice.app.makeRecoveryShares(2))
         alice.app.syncOnce(); bea.app.syncOnce(); alice.app.syncOnce()
         val aliceShares = home(alice.app).recoveryShares
-        assertEquals(listOf(1), aliceShares.heldEpochs)
+        assertEquals(listOf(2), aliceShares.heldEpochs)
         assertTrue(aliceShares.currentSetSent && aliceShares.mayMake)
         val beaShares = home(bea.app).recoveryShares
-        assertEquals(listOf(1), beaShares.heldEpochs)
-        assertEquals(listOf(1), beaShares.missingKeyEpochs)
+        assertEquals(listOf(2), beaShares.heldEpochs)
+        assertEquals(listOf(2), beaShares.missingKeyEpochs)
         assertFalse(beaShares.mayMake, "she cannot split a key she does not have")
 
         // 2. The codes are text; the owner of each reads theirs out.
-        val aliceCode = assertNotNull(alice.app.shareCode(1))
-        val beaCode = assertNotNull(bea.app.shareCode(1))
+        val aliceCode = assertNotNull(alice.app.shareCode(2))
+        val beaCode = assertNotNull(bea.app.shareCode(2))
         assertTrue(aliceCode.startsWith("rs1 ") && aliceCode != beaCode)
-        assertNull(alice.app.shareCode(2))
+        assertNull(alice.app.shareCode(3))
 
         // 3. Wrong sets send nothing: no code, a mistyped one, not a code, one share alone, the same share twice.
         assertEquals(circles.app.RebuildResult.NoCodes, bea.app.rebuildKey(listOf("", "  ")))
@@ -956,11 +999,10 @@ class CircleAppEndToEndTest {
         assertEquals(circles.app.RebuildResult.BadCode(2, mistyped = true), bea.app.rebuildKey(listOf(beaCode, typo)))
         assertIs<circles.app.RebuildResult.Wrong>(bea.app.rebuildKey(listOf(beaCode)))
         assertIs<circles.app.RebuildResult.Wrong>(bea.app.rebuildKey(listOf(beaCode, beaCode)))
-        assertFalse(home(bea.app).canRead)
 
         // 4. The right two rebuild the key; it is checked against the log's commitment, wrapped to Bea's device, and she reads.
-        assertEquals(circles.app.RebuildResult.Rebuilt(1), bea.app.rebuildKey(listOf(aliceCode.uppercase(), beaCode.replace(' ', '-'))))
-        assertTrue(home(bea.app).canRead, "her own change shows at once")
+        assertEquals(circles.app.RebuildResult.Rebuilt(2), bea.app.rebuildKey(listOf(aliceCode.uppercase(), beaCode.replace(' ', '-'))))
+        assertEquals(emptyList(), home(bea.app).recoveryShares.missingKeyEpochs, "her own change shows at once")
         bea.app.syncOnce(); alice.app.syncOnce(); bea.app.syncOnce()
         assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
         assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
@@ -996,6 +1038,7 @@ class CircleAppEndToEndTest {
         sync()
         assertEquals(2, home(bea.app).stewardSettings.recoveryThreshold)
         assertEquals(emptyList(), home(alice.app).recoveryShares.heldEpochs, "one steward: nothing to split")
+        confirmIdentity(alice, bea, "Bea Lee")
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
         sync()
         for (steward in listOf(alice, bea)) {
@@ -1159,6 +1202,7 @@ class CircleAppEndToEndTest {
         // Three stewards (stewards count as trusted); dave is an ordinary member.
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeStewardSettings(1, 60, 14))
         sync()
+        confirmIdentity(alice, bea, "Bea Lee"); confirmIdentity(alice, carol, "Carol Ng")
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(bea.app).me))
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeSteward(home(carol.app).me))
         val ladder = (alice.app.addItem("Ladder", ItemClass.VALUABLE, "") as ItemResult.Saved).item
