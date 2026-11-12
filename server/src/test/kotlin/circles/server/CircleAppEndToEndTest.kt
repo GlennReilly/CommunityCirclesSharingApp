@@ -1,6 +1,7 @@
 package circles.server
 
 import circles.app.AppModel
+import circles.app.ArchivedItem
 import circles.app.CircleApp
 import circles.app.HomeData
 import circles.app.InviteLink
@@ -285,6 +286,62 @@ class CircleAppEndToEndTest {
         assertEquals(emptyList(), home(alice.app).items)
         assertEquals(emptyList(), home(bea.app).items)
         assertEquals(ItemResult.NotAllowed, alice.app.editItem(saved.item, "Back again", ItemClass.EVERYDAY, ""))
+    }
+
+    @Test
+    fun anArchivedItemIsRestoredWithItsHistoryAndBorrowersCanAskAgain() = apiTest {
+        val transport = HttpTransport { method, path, body, token ->
+            api.raw(method, path, body, token).let { HttpReply(it.status, it.body, it.retryAfter) }
+        }
+        val crypto = JvmCrypto()
+        val alice = browser(transport, crypto)
+        alice.app.open(); alice.app.startCircle(PASSPHRASE); alice.app.syncOnce()
+        val link = assertNotNull(alice.app.makeInvite()); alice.app.syncOnce()
+        val bea = browser(transport, crypto)
+        bea.app.open(); bea.app.join(link, PASSPHRASE); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
+        val item = (alice.app.addItem("Ladder", ItemClass.EVERYDAY, "Garage at the back, ring first") as ItemResult.Saved).item
+        alice.app.syncOnce(); bea.app.syncOnce()
+
+        // One whole loan, returned.
+        val loan = (bea.app.requestLoan(item, TODAY, TODAY + 2, "") as LoanResult.Done).loan
+        bea.app.syncOnce(); alice.app.syncOnce()
+        assertIs<LoanResult.Done>(alice.app.respondToLoan(loan, approve = true, note = ""))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        bea.app.confirmHandover(loan); bea.app.syncOnce(); alice.app.syncOnce()
+        alice.app.confirmHandover(loan); alice.app.syncOnce(); bea.app.syncOnce()
+        assertIs<LoanResult.Done>(bea.app.returnLoan(loan, ReturnOutcome.OK))
+        bea.app.syncOnce(); alice.app.syncOnce()
+
+        // Nothing to restore while it is on the list, and only the owner can restore.
+        assertEquals(ItemResult.NotAllowed, alice.app.restoreItem(item))
+        assertIs<ItemResult.Saved>(alice.app.retireItem(item))
+        alice.app.syncOnce(); bea.app.syncOnce()
+        assertEquals(ItemResult.NotAllowed, bea.app.restoreItem(item))
+        assertEquals(emptyList(), home(alice.app).items)
+        assertEquals(listOf(ArchivedItem(item, "Ladder")), home(alice.app).archivedItems)
+        assertEquals(circles.app.BorrowAgain.NotListed, circles.app.LoanHistory.borrowedBefore(home(bea.app).loans, home(bea.app).items).single().again)
+        assertEquals(LoanResult.NotAllowed, bea.app.requestLoan(item, TODAY + 5, TODAY + 6, ""))
+
+        // Restoring puts it back for both of them, with the old loan still in the history.
+        assertIs<ItemResult.Saved>(alice.app.restoreItem(item))
+        assertEquals(0, assertNotNull(alice.app.syncOnce()).refused)
+        bea.app.syncOnce(); alice.app.syncOnce()
+        assertEquals(emptyList(), home(alice.app).archivedItems)
+        val mine = home(alice.app).items.single()
+        assertEquals(item, mine.item)
+        assertEquals("Garage at the back, ring first", mine.description, "same key, same details")
+        assertEquals(listOf(loan), circles.app.LoanHistory.forOwnedItem(home(alice.app).loans, item).map { it.loan.loan })
+        assertEquals(item, home(bea.app).items.single().item)
+        assertEquals(circles.app.BorrowAgain.CanAsk, circles.app.LoanHistory.borrowedBefore(home(bea.app).loans, home(bea.app).items).single().again, "\"No longer on the list\" stops")
+        assertIs<LoanResult.Done>(bea.app.requestLoan(item, TODAY + 5, TODAY + 6, "again"))
+        assertEquals(0, assertNotNull(bea.app.syncOnce()).refused)
+        alice.app.syncOnce()
+        assertEquals(2, home(alice.app).loans.size)
+        assertEquals(0, home(alice.app).refusedChanges)
+        assertEquals(0, home(bea.app).refusedChanges)
+        val dump = server.rows("SELECT public, encrypted FROM events").joinToString { row -> row.joinToString { (it as? ByteArray)?.decodeToString().orEmpty() } }
+        assertFalse("Ladder" in dump || "Garage" in dump)
     }
 
     @Test

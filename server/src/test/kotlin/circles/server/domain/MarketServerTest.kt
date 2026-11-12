@@ -137,6 +137,15 @@ class MarketServerTest {
     }
 
     @Test
+    fun anItemRestoreIsAcceptedAsASealedMarketEventAndRefusedWithAPublicPart() {
+        setup()
+        accept(owner.itemRetire(circle, TODAY, item))
+        val restore = owner.itemRestore(circle, TODAY, item)
+        reject(RejectionCode.INVALID_PUBLIC, resign(restore.copy(public = CborMap.of("item" to CborText(item.v)))))
+        accept(restore)
+    }
+
+    @Test
     fun marketEventsNeedAKeyEpochTheCircleHasReachedAndARegisteredDevice() {
         setup()
         val real = owner.itemRetire(circle, TODAY, item)

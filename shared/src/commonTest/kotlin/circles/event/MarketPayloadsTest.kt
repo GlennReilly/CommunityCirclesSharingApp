@@ -33,6 +33,7 @@ class MarketPayloadsTest {
         assertEquals(upsert, ok(MarketPayloads.parseItemUpsert(MarketPayloads.itemUpsert(upsert))))
         assertEquals(upsert.copy(minTier = null), ok(MarketPayloads.parseItemUpsert(MarketPayloads.itemUpsert(upsert.copy(minTier = null)))))
         assertEquals(ItemRetire(item), ok(MarketPayloads.parseItemRetire(MarketPayloads.itemRetire(ItemRetire(item)))))
+        assertEquals(ItemRestore(item), ok(MarketPayloads.parseItemRestore(MarketPayloads.itemRestore(ItemRestore(item)))))
         val detail = ItemDetail(item, keyId, ByteString.of(ByteArray(40)))
         assertEquals(detail, ok(MarketPayloads.parseItemDetail(MarketPayloads.itemDetail(detail))))
         val request = LoanRequest(loan, item, 100, 107, "for the weekend")

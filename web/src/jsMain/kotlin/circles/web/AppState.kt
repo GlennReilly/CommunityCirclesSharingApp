@@ -36,6 +36,8 @@ data class AppState(
     val editingSkill: circles.event.SkillId? = null,
     /** The owned item whose loan history is on show (ADR 0072). */
     val historyOf: ItemId? = null,
+    /** The member whose page is on show (ADR 0076); forgotten when the page is left or the app locks. */
+    val viewing: circles.policy.MemberId? = null,
     /** The item being asked for on the Ask to borrow page. */
     val borrowing: ItemId? = null,
     /** A link to add this browser as another device of a member, found in the address (ADR 0046). */
@@ -83,6 +85,7 @@ sealed interface AppAction {
     data class EditSkill(val skill: circles.event.SkillId) : AppAction
     data class BorrowItem(val item: ItemId) : AppAction
     data class ShowItemHistory(val item: ItemId) : AppAction
+    data class ShowPerson(val member: circles.policy.MemberId) : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
 }
@@ -93,12 +96,14 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         // A link's target only lives while its page is on show.
         verifying = if (!state.signedIn || action.screen == Screen.Verify) state.verifying else null,
         checking = if (action.screen == Screen.CheckIdentity) state.checking else null,
+        viewing = if (action.screen == Screen.Person) state.viewing else null,
         addingDevice = if (action.screen == Screen.CheckDevice) state.addingDevice else null,
         focusItem = if (!state.signedIn || action.screen == Screen.Items) state.focusItem else null,
         screen = allowed(state.model, action.screen).let {
         when {
             it == Screen.Verify && state.verifying == null -> Screen.Members
             it == Screen.CheckIdentity && state.checking == null -> Screen.Members
+            it == Screen.Person && state.viewing == null -> Screen.Members
             it == Screen.CheckDevice && state.addingDevice == null -> Screen.Settings
             it == Screen.ItemTag && state.tagging == null -> Screen.Items
             it == Screen.ItemHistory && state.historyOf == null -> Screen.Items
@@ -112,6 +117,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     )
     is AppAction.CheckPerson -> if (state.signedIn) state.copy(checking = action.check, screen = Screen.CheckIdentity) else state
     is AppAction.CheckNewDevice -> if (state.signedIn) state.copy(addingDevice = action.device, screen = if (action.device != null) Screen.CheckDevice else Screen.Settings) else state
+    is AppAction.ShowPerson -> if (state.signedIn) state.copy(viewing = action.member, screen = Screen.Person) else state
     is AppAction.ShowItemHistory -> if (state.signedIn) state.copy(historyOf = action.item, screen = Screen.ItemHistory) else state
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
     is AppAction.EditSkill -> if (state.signedIn) state.copy(editingSkill = action.skill, screen = Screen.EditSkill) else state
@@ -137,6 +143,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             pendingRestore = if (action.model is AppModel.Locked || action.model is AppModel.Open || action.model is AppModel.AwaitingApproval) null else state.pendingRestore,
             recoveryDraft = if (open) state.recoveryDraft else null,
             checking = if (open) state.checking else null,
+            viewing = if (open) state.viewing else null,
             addingDevice = if (open) state.addingDevice else null,
             shareCodes = if (open) state.shareCodes else emptyMap(),
         )

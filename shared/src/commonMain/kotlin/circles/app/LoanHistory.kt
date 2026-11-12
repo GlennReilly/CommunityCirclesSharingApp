@@ -48,8 +48,8 @@ data class BorrowedItem(
     val again: BorrowAgain,
 )
 
-/** An item the member owned and removed, with the loans they made of it (ADR 0073). [name] is empty when this device cannot read it. */
-data class RemovedItem(val item: ItemId, val name: String, val entries: List<HistoryEntry>)
+/** An item the member archived, with the loans they made of it (ADR 0073, 0075). [name] is empty when there is nothing to call it. */
+data class ArchivedHistory(val item: ItemId, val name: String, val entries: List<HistoryEntry>)
 
 /**
  * The loan history pages (ADR 0072), computed from what `HomeData` already holds. A member sees only loans they were
@@ -118,21 +118,21 @@ object LoanHistory {
         }
     }
 
+    /** Every loan between the viewer and [person], whichever way it went, most recent first (ADR 0076). Only loans the viewer was a party to. */
+    fun withPerson(loans: List<LoanSummary>, person: MemberId): List<HistoryEntry> =
+        newestFirst(loans.filter { it.role != LoanRole.STEWARD && it.other == person }).map(::entryOf)
+
     /**
-     * The items the member owned that are no longer listed (removed), each with its loans, the one with the most
-     * recent loan first (ADR 0073). Derived from the loans alone: [items] is `HomeData.items`, which leaves removed
-     * items out. The name is whatever the loans carry, empty when the device cannot read it.
+     * The member's archived items (ADR 0075: `HomeData.archivedItems`), each with its loans. Those with loans come first,
+     * the most recent loan first; archived items nobody ever asked for follow in the order given. They are listed so
+     * they can be restored.
      */
-    fun removedOwnedItems(loans: List<LoanSummary>, items: List<ItemSummary>): List<RemovedItem> {
-        val listed = items.mapTo(HashSet()) { it.item }
-        val gone = newestFirst(loans.filter { it.role == LoanRole.OWNER && it.item !in listed })
-        return gone.map { it.item }.distinct().map { item ->
-            val mine = gone.filter { it.item == item }
-            RemovedItem(item, mine.firstOrNull { it.itemName.isNotBlank() }?.itemName.orEmpty(), mine.map(::entryOf))
-        }
+    fun archivedOwnedItems(archived: List<ArchivedItem>, loans: List<LoanSummary>): List<ArchivedHistory> {
+        val all = archived.map { ArchivedHistory(it.item, it.name, forOwnedItem(loans, it.item)) }
+        return all.filter { it.entries.isNotEmpty() }.sortedByDescending { it.entries.first().loan.fromDay } + all.filter { it.entries.isEmpty() }
     }
 
-    /** The removed item with this id, if the member owned it and made loans of it. */
-    fun removedOwnedItem(loans: List<LoanSummary>, items: List<ItemSummary>, item: ItemId): RemovedItem? =
-        removedOwnedItems(loans, items).firstOrNull { it.item == item }
+    /** The archived item with this id, if the member owns it. */
+    fun archivedOwnedItem(archived: List<ArchivedItem>, loans: List<LoanSummary>, item: ItemId): ArchivedHistory? =
+        archived.firstOrNull { it.item == item }?.let { ArchivedHistory(it.item, it.name, forOwnedItem(loans, it.item)) }
 }

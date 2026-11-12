@@ -49,6 +49,9 @@ data class ItemUpsert(
 
 data class ItemRetire(val item: ItemId)
 
+/** Puts an archived item back on the list, with the same id, key, details and photos (ADR 0075). */
+data class ItemRestore(val item: ItemId)
+
 data class ItemDetail(val item: ItemId, val detailKeyId: String, val sealed: ByteString)
 
 data class LoanRequest(val loan: LoanId, val item: ItemId, val fromDay: Int, val toDay: Int, val note: String?)
@@ -249,6 +252,8 @@ object MarketPayloads {
 
     fun itemRetire(v: ItemRetire): CborMap = CborMap.of(K_ITEM to CborText(v.item.v))
 
+    fun itemRestore(v: ItemRestore): CborMap = CborMap.of(K_ITEM to CborText(v.item.v))
+
     fun itemDetail(v: ItemDetail): CborMap =
         CborMap.of(K_ITEM to CborText(v.item.v), K_DETAIL_KEY to CborText(v.detailKeyId), K_SEALED to CborBytes(v.sealed))
 
@@ -308,6 +313,11 @@ object MarketPayloads {
     fun parseItemRetire(map: CborMap): Parsed<ItemRetire> {
         keys(map, required = setOf(K_ITEM))?.let { return Parsed.Invalid(it) }
         return Parsed.Ok(ItemRetire(ItemId(itemId(map) ?: return Parsed.Invalid("item must be 32 lowercase hex characters"))))
+    }
+
+    fun parseItemRestore(map: CborMap): Parsed<ItemRestore> {
+        keys(map, required = setOf(K_ITEM))?.let { return Parsed.Invalid(it) }
+        return Parsed.Ok(ItemRestore(ItemId(itemId(map) ?: return Parsed.Invalid("item must be 32 lowercase hex characters"))))
     }
 
     fun parseItemDetail(map: CborMap): Parsed<ItemDetail> {

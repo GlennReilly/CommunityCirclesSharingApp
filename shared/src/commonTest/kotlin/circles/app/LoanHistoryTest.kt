@@ -105,29 +105,34 @@ class LoanHistoryTest {
         assertIs<BorrowAgain.CanAsk>(history.single().again)
     }
 
-    @Test fun removedItemsAreThoseIOwnedThatAreNoLongerListedWithTheirLoansNewestFirst() {
-        val listed = listOf(item(drill, owner = me))
+    @Test fun archivedItemsComeWithTheirLoansNewestFirstAndThoseWithNoLoansLast() {
         val gone1 = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 100, 102, outcome = ReturnOutcome.OK, returnedDay = 102)
         val gone2 = loan(ladder, LoanRole.OWNER, LoanStatus.DECLINED, 200, 202, other = cat)
-        val stillListed = loan(drill, LoanRole.OWNER, LoanStatus.RETURNED, 300, 301, outcome = ReturnOutcome.OK, returnedDay = 301)
         val borrowed = loan(ladder, LoanRole.BORROWER, LoanStatus.RETURNED, 50, 51, outcome = ReturnOutcome.OK, returnedDay = 51)
-        val removed = LoanHistory.removedOwnedItems(listOf(gone1, stillListed, borrowed, gone2), listed)
-        assertEquals(1, removed.size)
-        assertEquals(ladder, removed.single().item)
-        assertEquals("Ladder", removed.single().name)
-        assertEquals(listOf(gone2.loan, gone1.loan), removed.single().entries.map { it.loan.loan })
-        assertEquals(removed.single(), LoanHistory.removedOwnedItem(listOf(gone1, gone2), listed, ladder))
-        assertEquals(null, LoanHistory.removedOwnedItem(listOf(gone1), listed, drill))
+        val unused = ItemId("3".repeat(32))
+        val archived = listOf(ArchivedItem(unused, "Saw"), ArchivedItem(drill, "Drill"), ArchivedItem(ladder, "Ladder"))
+        val drillLoan = loan(drill, LoanRole.OWNER, LoanStatus.RETURNED, 300, 301, outcome = ReturnOutcome.OK, returnedDay = 301)
+        val result = LoanHistory.archivedOwnedItems(archived, listOf(gone1, borrowed, gone2, drillLoan))
+        assertEquals(listOf(drill, ladder, unused), result.map { it.item })
+        assertEquals(listOf(gone2.loan, gone1.loan), result[1].entries.map { it.loan.loan }, "only my loans as owner, newest first")
+        assertTrue(result[2].entries.isEmpty())
+        assertEquals("Saw", result[2].name)
+        assertEquals(result[1], LoanHistory.archivedOwnedItem(archived, listOf(gone1, borrowed, gone2, drillLoan), ladder))
+        assertEquals(null, LoanHistory.archivedOwnedItem(archived, listOf(gone1), ItemId("4".repeat(32))))
     }
 
-    @Test fun aRemovedItemWhoseNameThisDeviceCannotReadHasAnEmptyName() {
-        val unreadable = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 100, 102, outcome = ReturnOutcome.OK, returnedDay = 102).copy(itemName = "")
-        assertEquals("", LoanHistory.removedOwnedItems(listOf(unreadable), emptyList()).single().name)
+    @Test fun nothingArchivedMeansNothingToList() {
+        assertTrue(LoanHistory.archivedOwnedItems(emptyList(), listOf(loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 1, 2))).isEmpty())
     }
 
-    @Test fun removedItemsAreEmptyWhenNothingWasRemovedAndNeverIncludeOthersItems() {
-        assertTrue(LoanHistory.removedOwnedItems(emptyList(), emptyList()).isEmpty())
-        val theirs = loan(ladder, LoanRole.STEWARD, LoanStatus.RETURNED, 1, 2)
-        assertTrue(LoanHistory.removedOwnedItems(listOf(theirs), emptyList()).isEmpty())
+    @Test fun historyWithAPersonHoldsOnlyLoansIWasPartyToWithThemNewestFirst() {
+        val lent = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 100, 102, outcome = ReturnOutcome.OK, returnedDay = 102)
+        val borrowed = loan(drill, LoanRole.BORROWER, LoanStatus.DECLINED, 200, 202)
+        val other = loan(ladder, LoanRole.OWNER, LoanStatus.RETURNED, 300, 302, other = cat, outcome = ReturnOutcome.OK, returnedDay = 302)
+        val steward = loan(ladder, LoanRole.STEWARD, LoanStatus.RETURNED, 400, 402)
+        val result = LoanHistory.withPerson(listOf(lent, other, steward, borrowed), bea)
+        assertEquals(listOf(borrowed.loan, lent.loan), result.map { it.loan.loan })
+        assertTrue(LoanHistory.withPerson(listOf(steward), bea).isEmpty(), "a loan seen only as a steward is not mine")
+        assertTrue(LoanHistory.withPerson(emptyList(), bea).isEmpty())
     }
 }

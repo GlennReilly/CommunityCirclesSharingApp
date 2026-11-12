@@ -35,7 +35,9 @@ enum class EventType(val wire: String) {
     PAUSE_PROPOSE("pause.propose"),
     PAUSE_REVIEW("pause.review"),
     PAUSE_LIFT("pause.lift"),
-    PAUSE_APPEAL("pause.appeal");
+    PAUSE_APPEAL("pause.appeal"),
+    /** The owner puts an archived item back on the list (ADR 0075). */
+    ITEM_RESTORE("item.restore");
 
     companion object {
         fun fromWire(text: String): EventType? = entries.firstOrNull { it.wire == text }

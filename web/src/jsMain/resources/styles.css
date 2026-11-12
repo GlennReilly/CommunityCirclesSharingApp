@@ -83,6 +83,8 @@ legend { font-weight: 600; padding: 0 0.25rem; }
 fieldset div, .check-row { display: flex; align-items: center; }
 .check-row { margin-top: 1rem; }
 form input[type="checkbox"] + label, form input[type="radio"] + label { display: inline; margin: 0; font-weight: normal; }
+/* The tick box itself is 24 px; its sentence is the tap area, at least 44 px high, and tapping it ticks the box. */
+.check-row label, fieldset div label { display: flex; align-items: center; flex: 1; min-height: 2.75rem; }
 
 /* A password field: the show/hide eye sits inside the right end of the field (ADR 0057). */
 .secret-field { position: relative; width: 100%; }
@@ -158,3 +160,7 @@ p.fingerprint { font-family: ui-monospace, monospace; font-size: 1.375rem; lette
 /* Display names (ADR 0068): the confirmation is said in words; unconfirmed reads quieter, never by colour alone. */
 .name-status { font-size: 0.85em; font-weight: normal; }
 .name-status.unconfirmed { opacity: 0.85; }
+
+/* A name is a link to the member's page (ADR 0076). Padding gives it a 44 px tap area; the negative margin takes the room back,
+   so the text lines up as if it were not a link. The name stays on one line unless it cannot fit. */
+a.person-name { display: inline-block; max-width: 100%; box-sizing: border-box; padding: 0.7rem 0.25rem; margin: -0.7rem -0.25rem; overflow-wrap: anywhere; }

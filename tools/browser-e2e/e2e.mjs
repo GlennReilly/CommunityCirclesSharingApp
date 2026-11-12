@@ -87,7 +87,7 @@ try {
   await checkAccessibility(alice, 'check identity, letting in');
   await alice.evaluate(`(() => { const b = document.getElementById("${letIn}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   if (await buttonHidden(alice, letIn)) throw new Error('Let them in stays hidden after the tick'); ok('"Let them in" appears only after ticking that she checked bea in person');
-  await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'Let in. They can read the circle') + ' && location.hash === "#/members"', 'let in, back on members');
+  await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'has been let in. The circle opens for their device') + ' && location.hash === "#/members"', 'let in, back on members');
   await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, 'document.getElementById("name-form") !== null', 'bea is asked for her name'); ok('bea can now read the circle and is asked for her name first');
   // ADR 0069: a name another member holds is taken, whatever the case, and the person is told so on the same page.
@@ -175,11 +175,11 @@ try {
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'has confirmed'), 'alice sees bea confirm'); await click(alice, 'handover-loan'); await sleep(1200);
     await syncUntil(bea, 'location.hash = "#/borrow"; ' + has(bea, 'How did it go:'), 'bea sees it out');
     await bea.evaluate('(() => { const f = document.querySelector("form[id^=return-form-]"); f.elements.namedItem("outcome").value = "' + outcome + '"; f.requestSubmit(); return true; })()');
-    await until(bea, has(bea, 'Thank you. Reported back.'), 'bea returned'); await sleep(1200);
+    await until(bea, has(bea, 'Thank you. The item is reported back.'), 'bea returned'); await sleep(1200);
     await syncUntil(alice, 'location.hash = "#/borrow"; ' + has(alice, 'It came back fine'), 'alice sees the return');
   }
   await lendOnceAndReturnOk();
-  await click(alice, 'confirm-return'); await until(alice, '!' + has(alice, 'It came back fine') + ' && ' + has(alice, 'Confirmed. Thank you.'), 'confirmed'); ok('the owner confirmed a return');
+  await click(alice, 'confirm-return'); await until(alice, '!' + has(alice, 'It came back fine') + ' && ' + has(alice, 'The return is confirmed. Thank you.'), 'confirmed'); ok('the owner confirmed a return');
   await lendOnceAndReturnOk();
   await alice.evaluate('(() => { const d = [...document.querySelectorAll("details")].find(x => x.textContent.includes("Report a problem")); d.open = true; return true; })()');
   await alice.evaluate('(() => { const f = document.querySelector("form[id^=dispute-form-]"); f.elements.namedItem("claim").value = "DAMAGE"; f.elements.namedItem("note").value = "the rail is bent"; f.requestSubmit(); return true; })()');
@@ -206,6 +206,21 @@ try {
   await search(alice, ''); await until(alice, 'document.getElementById("history-count").textContent === "4 loans"', 'clearing shows all again');
   ok('the owner history search filters loans by outcome words and person, and clears');
   await checkAccessibility(alice, 'item loan history');
+  // Person page (ADR 0076): a name in the history opens the member's page, which shows only what it should.
+  await alice.evaluate('document.querySelector("a.person-name").click()');
+  await until(alice, 'location.hash.startsWith("#/members/person/") && ' + has(alice, 'Your history with this member'), 'the person page from a history name');
+  { const t = await text(alice);
+    if (!t.includes('Bea') || !t.includes('Check identity in person') || !t.includes('Skill offers') || !t.includes('Items on the list')) throw new Error('person page content: ' + t);
+    if ((t.match(/Dates:/g) || []).length !== 4) throw new Error('person page should list the 4 loans between alice and bea: ' + t);
+    if (t.includes('Garage at the back') || /\b(Level|points)\b/i.test(t) || /pause/i.test(t)) throw new Error('person page shows what it must not: ' + t); }
+  ok('clicking a name in the loan history opens that member\'s page with their items, skills and the history between the two (no details, level, points or pauses)');
+  await checkAccessibility(alice, 'a member page');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("a.person-name") !== null', 'members page with name links');
+  await alice.evaluate('[...document.querySelectorAll("a.person-name")].find(a => a.textContent === "Bea").click()');
+  await until(alice, 'location.hash.startsWith("#/members/person/") && ' + has(alice, 'Check identity in person'), 'the person page from the Members page');
+  ok('clicking a name on the Members page opens that member\'s page');
+  await alice.evaluate('document.querySelector("[data-action=check-person]").click()'); await until(alice, 'location.hash === "#/members/check"', 'check identity from the person page'); ok('Check identity in person from the member page opens the check page');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items for the person page');
   await bea.evaluate('location.hash = "#/borrow"'); await until(bea, has(bea, 'My borrowing history'), 'bea has a history link');
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'bea history');
   const borrowerHistory = await text(bea);
@@ -224,7 +239,7 @@ try {
   await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees the archived item gone'); ok('archiving the item took it off bea\'s list too');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Archived items') + ' && ' + has(alice, 'Long ladder'), 'alice sees the archived item');
   await checkAccessibility(alice, 'items with an archived item');
-  await click(alice, 'item-history'); await until(alice, has(alice, 'You archived this item.') + ' && ' + has(alice, 'cannot be restored') + ' && ' + has(alice, 'Dates:'), 'alice archived item history');
+  await click(alice, 'item-history'); await until(alice, has(alice, 'You archived this item.') + ' && ' + has(alice, 'You can restore it to put it back on the list.') + ' && ' + has(alice, 'Dates:'), 'alice archived item history');
   if (((await text(alice)).match(/Dates:/g) || []).length !== 4) throw new Error('archived item history should keep 4 loans: ' + await text(alice));
   if ((await text(alice)).includes('Garage at the back')) throw new Error('archived item history shows the private description');
   ok('an archived item stays reachable from the Items page with all 4 loans and no private details');
@@ -233,6 +248,18 @@ try {
   await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'No longer on the list.'), 'bea history after removal');
   if (await bea.evaluate('document.querySelector("[data-action=borrow-item]") !== null')) throw new Error('borrow again offered for an archived item');
   ok('an archived item shows "No longer on the list." and no borrow-again button');
+  // Restore (ADR 0075): the owner puts it back; history stays, the borrower can ask again, then it is archived again so the rest of the script is unchanged.
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Archived items') + ' && document.querySelector("[data-action=restore-item]") !== null', 'alice sees Restore');
+  await click(alice, 'restore-item'); await until(alice, has(alice, 'Restored. The item is back on your list.') + ' && ' + has(alice, 'Long ladder') + ' && !' + has(alice, 'Archived items'), 'alice restored the ladder');
+  await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced restore');
+  await click(alice, 'item-history'); await until(alice, has(alice, 'Loan history') + ' && ' + has(alice, 'Dates:'), 'alice history of the restored ladder');
+  if (((await text(alice)).match(/Dates:/g) || []).length !== 4) throw new Error('restored item should keep 4 loans: ' + await text(alice));
+  await syncUntil(bea, 'location.hash = "#/borrow/history"; ' + has(bea, 'Ask to borrow again') + ' && !' + has(bea, 'No longer on the list.'), 'bea can ask again after the restore');
+  ok('restoring put the ladder back with all 4 loans; the borrower no longer sees "No longer on the list." and can ask again');
+  await bea.evaluate('location.hash = "#/items"'); await until(bea, has(bea, 'Long ladder'), 'bea sees the restored item');
+  await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice on items');
+  await click(alice, 'retire-item'); await until(alice, has(alice, 'Archived items'), 'archived again'); await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced second archive');
+  await syncUntil(bea, 'location.hash = "#/items"; ' + has(bea, 'Nothing has been shared yet.'), 'bea sees the second archive');
   await alice.evaluate('location.hash = "#/home"');
   // Live updates: nobody clicks "Sync now" for Bea here, and the page only polls once a minute, so this proves the event stream works.
   await bea.evaluate('location.hash = "#/items"'); await sleep(4000); // let both event streams connect
@@ -305,7 +332,7 @@ try {
   ok('"Confirm identity" appears only after "I checked this person\'s identity in person" is ticked');
   await checkAccessibility(alice, 'check identity, confirming');
   await alice.evaluate(`document.getElementById("${confirmForm}").requestSubmit()`);
-  await until(alice, has(alice, 'You confirmed their identity.') + ' && ' + has(alice, 'Bea (identity confirmed)'), 'alice confirmed bea'); ok('alice confirmed bea\'s identity');
+  await until(alice, has(alice, 'You confirmed this member\'s identity.') + ' && ' + has(alice, 'Bea (identity confirmed)'), 'alice confirmed bea'); ok('alice confirmed bea\'s identity');
   await syncUntil(alice, has(alice, 'Up to date'), 'alice pushed the confirmation');
   await syncUntil(bea, 'location.hash = "#/members"; ' + has(bea, 'Bea (identity confirmed) (you)') + ' && ' + has(bea, 'Identity confirmed by Alice Smith.'), 'bea sees her identity confirmed'); ok('bea sees her identity confirmed by Alice Smith');
   // Stewards: the lone steward is told the circle needs another, adds Bea, and the rules form waits for all three numbers.
@@ -317,7 +344,7 @@ try {
   if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with two of four'); await setField(alice, 'steward-rules-form', 'fallback-days', '14');
   if (!(await buttonHidden(alice, 'steward-rules-form'))) throw new Error('rules button visible with three of four'); await setField(alice, 'steward-rules-form', 'recovery-threshold', '0');
   if (await buttonHidden(alice, 'steward-rules-form')) throw new Error('rules button hidden with all four'); ok('the rules button waits for all four numbers');
-  await click(alice, 'steward-add'); await until(alice, has(alice, 'Done. It takes effect now.'), 'bea made steward'); await until(alice, has(alice, 'Steward since') , 'two stewards listed');
+  await click(alice, 'steward-add'); await until(alice, has(alice, 'The steward change takes effect now.'), 'bea made steward'); await until(alice, has(alice, 'Steward since') , 'two stewards listed');
   ok('alice made bea a steward (a lone steward needs no one else to agree)');
   await syncUntil(bea, 'location.hash = "#/stewards"; ' + has(bea, 'Can vote from'), 'bea sees she is cooling off'); ok('bea, the new steward, sees when she can vote from');
   if (await bea.evaluate('document.querySelector("[data-action=steward-remove]") === null')) throw new Error('a steward is not offered Step down'); ok('with two stewards a steward may step down or propose removal');
@@ -343,7 +370,7 @@ try {
   const authId = authenticator.result.authenticatorId;
   await click(alice, 'lock'); await until(alice, has(alice, 'Unlock with this device'), 'locked again');
   await alice.send('WebAuthn.setUserVerified', { authenticatorId: authId, isUserVerified: false });
-  await click(alice, 'unlock-passkey'); await until(alice, has(alice, 'That did not unlock it'), 'failed check, no unlock', 30000); ok('when the fingerprint check fails the passkey button fails kindly and nothing opens');
+  await click(alice, 'unlock-passkey'); await until(alice, has(alice, 'Unlocking with this device did not work'), 'failed check, no unlock', 30000); ok('when the fingerprint check fails the passkey button fails kindly and nothing opens');
   await alice.send('WebAuthn.setUserVerified', { authenticatorId: authId, isUserVerified: true });
   await submit(alice, 'unlock-form', { passphrase: PASS_NEW }); await until(alice, 'document.querySelector("[data-action=passkey-off]") !== null', 'unlocked by passphrase again'); ok('the passphrase still works beside the passkey'); await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, '2 members'), 'home again');
   // A second device: alice's phone is paired from her laptop, the characters are compared on the check page, it reads her things, and is removed again.
@@ -373,13 +400,13 @@ try {
   await alice.evaluate('(() => { const b = document.getElementById("confirm-device-form").elements.namedItem("fingerprints-match"); b.checked = true; b.dispatchEvent(new Event("input", { bubbles: true })); return true; })()');
   if (await buttonHidden(alice, 'confirm-device-form')) throw new Error('Add this device stays hidden after the tick'); ok('"Add this device" appears only after ticking that the characters match');
   await alice.evaluate('document.getElementById("confirm-device-form").requestSubmit()');
-  await until(alice, has(alice, 'Added. The new device will open') + ' && location.hash === "#/settings"', 'device added'); await sleep(1500); await click(alice, 'sync');
+  await until(alice, has(alice, 'The new device has been added.') + ' && location.hash === "#/settings"', 'device added'); await sleep(1500); await click(alice, 'sync');
   await click(phone, 'check-now'); await until(phone, has(phone, 'Circle home'), 'phone is in', 25000); ok('the phone was added and opened the circle');
   await phone.evaluate('location.hash = "#/items"'); await until(phone, has(phone, 'Drill') + ' && ' + has(phone, 'Yours'), 'phone sees alice\'s own items'); ok('the phone sees alice\'s own items as hers');
   await phone.evaluate('location.hash = "#/settings"'); await until(phone, has(phone, 'Phone (this device)'), 'phone names itself'); ok('the phone lists itself by the name alice gave it');
   await checkAccessibility(phone, 'settings of the added device');
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=remove-device]") !== null', 'alice sees the phone to remove');
-  await alice.evaluate('document.querySelector("[data-action=remove-device]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key is being changed.'), 'phone removed');
+  await alice.evaluate('document.querySelector("[data-action=remove-device]").click()'); await until(alice, has(alice, 'The device has been removed. The circle\'s key is being changed.'), 'phone removed');
   await sleep(1500); await click(alice, 'sync'); await click(phone, 'sync');
   await until(phone, has(phone, 'Cannot sign in to the circle'), 'phone cut off'); ok('the removed phone is told it cannot sign in');
   // Recovery code: alice writes down 12 words, proves she copied three, then a clean browser restores her from them.
@@ -394,7 +421,7 @@ try {
   if (places.length !== 3) throw new Error('places: ' + places); ok('a recovery code of 12 words is shown; three places are asked back: ' + places.join(', '));
   if (!(await buttonHidden(alice, 'recovery-check-form'))) throw new Error('check button visible before the words are typed');
   for (const p of places) await setField(alice, 'recovery-check-form', 'word-' + p, 'wrongword');
-  await alice.evaluate('document.getElementById("recovery-check-form").requestSubmit()'); await until(alice, has(alice, 'do not match the ones shown'), 'wrong words refused'); ok('wrong words are refused and nothing is saved');
+  await alice.evaluate('document.getElementById("recovery-check-form").requestSubmit()'); await until(alice, has(alice, 'do not match the recovery code shown'), 'wrong words refused'); ok('wrong words are refused and nothing is saved');
   for (const p of places) await setField(alice, 'recovery-check-form', 'word-' + p, words[p - 1].toUpperCase());
   await alice.evaluate('document.getElementById("recovery-check-form").requestSubmit()'); await until(alice, has(alice, 'Your recovery code is saved') + ' && ' + has(alice, 'A recovery code is set up'), 'code saved'); ok('with the right words the recovery code is saved');
   await sleep(1500); await click(alice, 'sync'); await until(alice, has(alice, 'Up to date'), 'alice synced the recovery device');
@@ -469,7 +496,7 @@ try {
   if (!(await buttonHidden(alice, 'make-shares-form'))) throw new Error('make-shares button visible while empty');
   await setField(alice, 'make-shares-form', 'share-threshold', '2');
   if (await buttonHidden(alice, 'make-shares-form')) throw new Error('make-shares button hidden with a number');
-  await alice.evaluate('document.getElementById("make-shares-form").requestSubmit()'); await until(alice, has(alice, 'Sent. Each of the 2 stewards'), 'shares sent'); ok('alice split the key 2 of 2 between the stewards');
+  await alice.evaluate('document.getElementById("make-shares-form").requestSubmit()'); await until(alice, has(alice, 'The key shares were sent. Each of the 2 stewards'), 'shares sent'); ok('alice split the key 2 of 2 between the stewards');
   await sleep(1500); await click(alice, 'sync');
   await syncUntil(bea, 'location.hash = "#/stewards/recovery-shares"; ' + has(bea, 'Show my share code'), 'bea has a share'); ok('bea, the other steward, was sent a share');
   await click(bea, 'share-show'); await until(bea, 'document.querySelector("input[id^=share-code-]") !== null', 'bea code shown');
@@ -483,10 +510,10 @@ try {
   // Removal: Bea steps down as a steward, Alice removes her as a member; Bea can no longer sign in.
   await bea.evaluate('location.hash = "#/stewards"'); await until(bea, 'document.querySelector("[data-action=steward-remove]") !== null', 'bea step down button');
   await bea.evaluate('(() => { const mine = [...document.querySelectorAll("li")].find(li => li.textContent.includes("Step down as steward")); mine.querySelector("button").click(); return true; })()');
-  await until(bea, has(bea, 'Done. It takes effect now.'), 'bea stepped down'); await sleep(1500); await click(bea, 'sync'); ok('bea stepped down as a steward');
+  await until(bea, has(bea, 'The steward change takes effect now.'), 'bea stepped down'); await sleep(1500); await click(bea, 'sync'); ok('bea stepped down as a steward');
   await alice.evaluate('location.hash = "#/members"');
   await syncUntil(alice, 'document.querySelector("[data-action=remove-member]") !== null', 'alice is offered Remove'); ok('alice is offered "Remove this person" once bea is not a steward');
-  await alice.evaluate('document.querySelector("[data-action=remove-member]").click()'); await until(alice, has(alice, 'Removed. The circle\'s key has been changed.'), 'removed');
+  await alice.evaluate('document.querySelector("[data-action=remove-member]").click()'); await until(alice, has(alice, 'has been removed from the circle. The circle\'s key has been changed.'), 'removed');
   await until(alice, '!document.querySelector("[data-action=remove-member]") && ' + has(alice, 'Show my QR code'), 'bea gone from the list'); ok('alice removed bea; the key was changed in the same action');
   if (await alice.evaluate(has(alice, 'Change the key'))) throw new Error('a rotation prompt after a removal that already rotated'); ok('no rotation prompt, because the removal rotated the key');
   await sleep(1500); await click(alice, 'sync'); await sleep(1500);

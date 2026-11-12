@@ -42,6 +42,7 @@ val SUPPORTED_TYPES: Set<EventType> = setOf(
     EventType.STEWARD_POLICY,
     EventType.ITEM_UPSERT,
     EventType.ITEM_RETIRE,
+    EventType.ITEM_RESTORE,
     EventType.ITEM_DETAIL,
     EventType.LOAN_REQUEST,
     EventType.LOAN_RESPOND,

@@ -171,7 +171,7 @@ class MarketView(
 internal class MarketResult(val view: MarketView, val rejected: Map<EventId, String>)
 
 private val MARKET_TYPES = setOf(
-    EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_DETAIL,
+    EventType.ITEM_UPSERT, EventType.ITEM_RETIRE, EventType.ITEM_RESTORE, EventType.ITEM_DETAIL,
     EventType.LOAN_REQUEST, EventType.LOAN_RESPOND, EventType.LOAN_HANDOVER, EventType.LOAN_RETURN, EventType.LOAN_CANCEL, EventType.VOUCH,
     EventType.STANDING_CONFIRM, EventType.LOAN_DISPUTE, EventType.LOAN_RESOLVE,
     EventType.PAUSE_PROPOSE, EventType.PAUSE_REVIEW, EventType.PAUSE_APPEAL, EventType.PAUSE_LIFT, EventType.CONFIG_UPDATE, EventType.STANDING_NOTE,
@@ -226,6 +226,7 @@ internal class MarketFold(
     private fun apply(e: Envelope, payload: CborMap, id: EventId): String? = when (EventType.fromWire(e.type)) {
         EventType.ITEM_UPSERT -> parse(MarketPayloads.parseItemUpsert(payload)) { upsert(e.author, it) }
         EventType.ITEM_RETIRE -> parse(MarketPayloads.parseItemRetire(payload)) { retire(e.author, it) }
+        EventType.ITEM_RESTORE -> parse(MarketPayloads.parseItemRestore(payload)) { restore(e.author, it) }
         EventType.ITEM_DETAIL -> parse(MarketPayloads.parseItemDetail(payload)) { detail(e.author, it) }
         EventType.LOAN_REQUEST -> parse(MarketPayloads.parseLoanRequest(payload)) { request(e.author, it, e.day, id) }
         EventType.STANDING_CONFIRM -> if (payload.entries.containsKey("noteId")) parse(MarketPayloads.parseNoteConfirmation(payload)) { confirmNote(e.author, it, e.day) } else parse(MarketPayloads.parseReturnConfirmation(payload)) { confirm(e.author, it, e.day) }
@@ -274,6 +275,15 @@ internal class MarketFold(
         if (item.owner != author) return "only the owner may retire an item"
         if (item.retired) return "item is already retired"
         items[v.item] = item.copy(retired = true)
+        return null
+    }
+
+    /** Only the owner, only an archived item. Everything else about the item (id, key, details, photos, loans) is as it was (ADR 0075). */
+    private fun restore(author: MemberId, v: ItemRestore): String? {
+        val item = items[v.item] ?: return "unknown item"
+        if (item.owner != author) return "only the owner may restore an item"
+        if (!item.retired) return "item is not archived"
+        items[v.item] = item.copy(retired = false)
         return null
     }
 

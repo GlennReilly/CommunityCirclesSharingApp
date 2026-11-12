@@ -5,7 +5,7 @@ import circles.app.HistoryDispute
 import circles.app.HistoryEntry
 import circles.app.HistoryOutcome
 import circles.app.LoanHistory
-import circles.app.RemovedItem
+import circles.policy.ItemId
 import circles.app.AppModel
 import circles.app.HomeData
 import circles.app.MemberSummary
@@ -159,6 +159,7 @@ const val ACTION_PASSKEY_ON = "passkey-on"
 const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
 const val ACTION_ITEM_HISTORY = "item-history"
+const val ACTION_RESTORE_ITEM = "restore-item"
 const val ID_HISTORY_SEARCH = "history-search"
 const val ID_HISTORY_COUNT = "history-count"
 const val ATTR_HISTORY_TEXT = "data-history-text"
@@ -275,17 +276,34 @@ const val CHECKED_IN_PERSON = "I checked this person's identity in person"
 /** A tick box that must be ticked before its form's submit button shows. */
 const val ATTR_MUST_CHECK = "data-must-check"
 
-/** A member's name as every page shows it; members who have not chosen one yet read [UNNAMED_MEMBER]. */
+/**
+ * A member's name as PLAIN TEXT; members who have not chosen one yet read [UNNAMED_MEMBER]. A view must not print this
+ * into the page: every name people read is a link made by [personName] (ADR 0076). Plain text is only for places that
+ * cannot hold a link: a search attribute, a menu option, a notice. Each such line carries a `plain-name:` comment saying
+ * why, and `PersonNameSourceScanTest` fails for any other use.
+ */
 fun nameOf(home: HomeData, member: MemberId): String = home.names[member]?.name ?: UNNAMED_MEMBER
 
-/** The name, then in smaller words whether a member confirmed it (words, not colour alone; ADR 0068). */
-fun FlowOrPhrasingContent.personName(home: HomeData, member: MemberId) {
+/**
+ * The one way a view shows a member's name (ADR 0076): the name is a link to the member's page, then in smaller words
+ * whether a member confirmed it (words, not colour alone; ADR 0068). [showStatus] false leaves the words off, for a
+ * name inside a sentence; [link] false is for the member's own page, where the name is the heading.
+ */
+fun FlowOrPhrasingContent.personName(home: HomeData, member: MemberId, showStatus: Boolean = true, link: Boolean = true) {
     val named = home.names[member]
-    span {
-        classes = setOf("person-name")
-        +(named?.name ?: UNNAMED_MEMBER)
+    val text = named?.name ?: UNNAMED_MEMBER
+    if (link) {
+        a(href = PersonLink.href(member)) {
+            classes = setOf("person-name")
+            +text
+        }
+    } else {
+        span {
+            classes = setOf("person-name")
+            +text
+        }
     }
-    if (named != null) {
+    if (named != null && showStatus) {
         +" "
         span {
             classes = setOf("name-status", if (named.confirmed) "confirmed" else "unconfirmed")
@@ -382,6 +400,7 @@ fun FlowContent.shell(state: AppState) {
                 Screen.Items -> items(model.home, state)
                 Screen.Verify -> verifyPage(model.home, state)
                 Screen.CheckIdentity -> checkIdentityPage(model.home, state)
+                Screen.Person -> personPage(model.home, state)
                 Screen.CheckDevice -> checkDevicePage(state)
                 Screen.ItemTag -> itemTagPage(model.home, state)
                 Screen.Skills -> skills(model.home)
@@ -487,7 +506,7 @@ private fun FlowContent.passphraseField(autocomplete: String, hint: Boolean) {
         p {
             id = "passphrase-help"
             +"At least $MIN_PASSPHRASE_CHARS characters; a few random words is good. Lendger never stores it: you type it when you open Lendger, or let your browser's password manager fill it in if you choose to save it there. "
-            +"It protects your keys on this device, and it cannot be recovered if you forget it."
+            +"Your passphrase protects your keys on this device, and it cannot be recovered if you forget it."
         }
     } else {
         p {
@@ -795,11 +814,20 @@ private fun FlowContent.myCode(home: HomeData, fingerprint: String, state: AppSt
 }
 
 /** One line under a member's name: whether someone checked their identity in person, in words (ADR 0071). */
-private fun identityLine(home: HomeData, person: MemberSummary): String = when {
-    person.nameConfirmed && person.iConfirmed -> "You confirmed their identity."
-    person.nameConfirmed -> "Identity confirmed by ${person.nameConfirmedBy.joinToString(", ") { nameOf(home, it) }}."
-    person.isMe -> "Nobody has confirmed your identity yet. Meet a member in person and let them check your QR code."
-    else -> "Nobody has confirmed their identity yet."
+private fun FlowOrPhrasingContent.identityLine(home: HomeData, person: MemberSummary) {
+    when {
+        person.nameConfirmed && person.iConfirmed -> +"You confirmed this member's identity."
+        person.nameConfirmed -> {
+            +"Identity confirmed by "
+            person.nameConfirmedBy.forEachIndexed { index, who ->
+                if (index > 0) +", "
+                personName(home, who, showStatus = false)
+            }
+            +"."
+        }
+        person.isMe -> +"Nobody has confirmed your identity yet. Meet a member in person and let them check your QR code."
+        else -> +"Nobody has confirmed this member's identity yet."
+    }
 }
 
 /** Who is in the circle, how to bring someone in, and (for stewards) who is waiting at the door. */
@@ -819,7 +847,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                         add(if (person.devices == 1) "1 device" else "${person.devices} devices")
                     }.joinToString(", ")
                 }
-                if (person.displayName != null) p { +identityLine(home, person) }
+                if (person.displayName != null) p { identityLine(home, person) }
                 if (person.isMe) {
                     details {
                         summary { +"Show my QR code" }
@@ -836,7 +864,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                 if (person.canRemove) {
                     details {
                         summary { +"Remove from the circle" }
-                        p { +"This cuts off all their devices at once and changes the circle's key, so they cannot read anything new. What they already read stays with them. They can be invited again." }
+                        p { +"Removing this member cuts off all of their devices at once and changes the circle's key, so they cannot read anything new. What they already read stays with them. They can be invited again." }
                         button(type = ButtonType.button) {
                             attributes[ATTR_ACTION] = ACTION_REMOVE_MEMBER
                             attributes[ATTR_MEMBER] = person.member.v
@@ -906,6 +934,76 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
 }
 
 /**
+ * One member's page (ADR 0076): who they are, their items on the list and skill offers, and what has passed between
+ * the two of you. It never shows their level, points or pauses, a loan you were not part of, or an item's private details.
+ */
+private fun FlowContent.personPage(home: HomeData, state: AppState) {
+    h1 { +Screen.Person.title }
+    val person = state.viewing?.let { member -> home.people.firstOrNull { it.member == member } }
+    if (person == null) {
+        p { +"This member is not in the circle any more." }
+        p { a(href = Screen.Members.fragment) { +"Back to members" } }
+        return
+    }
+    h2 {
+        personName(home, person.member, link = false)
+        if (person.isMe) +" (you)"
+    }
+    if (person.displayName != null) p { identityLine(home, person) }
+    if (person.isSteward) p { +"Steward of the circle." }
+    if (person.isMe) {
+        p { a(href = Screen.Settings.fragment) { +"Change your name or your devices in Settings" } }
+    } else {
+        person.vouchedByMeUntil?.let { p { +"You vouch for this member until ${CalendarDay.format(it)}." } }
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
+            attributes[ATTR_MEMBER] = person.member.v
+            +"Check identity in person"
+        }
+        p { +"To confirm who this member is, or to vouch for them, meet in person and use Check identity in person." }
+    }
+    val items = home.items.filter { it.owner == person.member }
+    section {
+        h2 { +"Items on the list" }
+        if (items.isEmpty()) p { +"No items on the list." }
+        for (item in items) {
+            div {
+                h3 { +item.name }
+                p { +itemClassLabel(item.itemClass).substringBefore(":") }
+                if (!item.ownedByMe) itemAccess(item)
+            }
+        }
+    }
+    val skills = home.skills.filter { it.owner == person.member }
+    section {
+        h2 { +"Skill offers" }
+        if (skills.isEmpty()) p { +"No skill offers." }
+        for (skill in skills) {
+            div {
+                h3 { +skill.name }
+                if (skill.details.isNotBlank()) p { +skill.details }
+                if (skill.openTo.isNotEmpty()) p { +(skill.openTo.joinToString(". ") { openToLabel(it) } + ".") }
+            }
+        }
+    }
+    if (!person.isMe) {
+        val history = LoanHistory.withPerson(home.loans, person.member)
+        section {
+            h2 { +"Your history with this member" }
+            if (history.isEmpty()) p { +"You have not lent to or borrowed from this member yet." }
+            for (entry in history) {
+                div {
+                    h3 { +entry.loan.itemName.ifBlank { UNREADABLE_ITEM_NAME } }
+                    p { +(if (entry.loan.role == LoanRole.OWNER) "You lent it." else "You borrowed it.") }
+                    historyEntry(entry)
+                }
+            }
+        }
+    }
+    p { a(href = Screen.Members.fragment) { +"Back to members" } }
+}
+
+/**
  * Checking a member in person (ADR 0071): the QR route first, the characters as the fallback, then what the check is
  * for. With a waiting device it is the steward's let-in step; otherwise confirming identity and vouching.
  */
@@ -916,7 +1014,7 @@ private fun FlowContent.checkIdentityPage(home: HomeData, state: AppState) {
     val waiting = check?.device?.let { device -> home.waiting.firstOrNull { it.device == device } }
     when {
         check == null || person == null -> p { +"This person is not in the circle any more." }
-        check.device != null && (waiting == null || !home.isSteward) -> p { +"Nobody is waiting with that device any more: they have been let in, or left." }
+        check.device != null && (waiting == null || !home.isSteward) -> p { +"Nobody is waiting with that device any more: the newcomer has been let in, or has left." }
         person.isMe -> p { +"That is you. To be checked by someone else, show them your QR code on the Members page." }
         else -> {
             p {
@@ -956,8 +1054,8 @@ private fun FlowContent.identityActions(home: HomeData, person: MemberSummary, l
         h2 { +"Confirm identity" }
         when {
             person.canConfirmName -> confirmIdentityForm(person)
-            person.displayName == null -> p { +"They have not chosen a name yet, so there is nothing to confirm." }
-            person.nameConfirmed -> p { +identityLine(home, person) }
+            person.displayName == null -> p { +"This member has not chosen a name yet, so there is nothing to confirm." }
+            person.nameConfirmed -> p { identityLine(home, person) }
             else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm someone's identity." }
         }
     }
@@ -1009,7 +1107,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
     }
     if (home.items.isEmpty()) {
         p { +"Nothing has been shared yet." }
-        removedItems(home)
+        archivedItems(home)
         return
     }
     ul {
@@ -1036,26 +1134,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
                     }
                 }
                 item.description?.takeIf { it.isNotBlank() }?.let { p { +"Details: $it" } }
-                if (!item.ownedByMe) {
-                    val access = item.access
-                    if (access == null || access.canAsk) {
-                        button(type = ButtonType.button) {
-                            attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
-                            attributes[ATTR_ITEM] = item.item.v
-                            +"Ask to borrow"
-                        }
-                    } else {
-                        p { +"Not yet. This is not open to you at the moment." }
-                        details {
-                            summary { +"Why, and how to unlock" }
-                            ul { for (reason in access.reasons) li { +reason } }
-                            if (access.howToUnlock.isNotEmpty()) {
-                                h3 { +"How to unlock" }
-                                ul { for (step in access.howToUnlock) li { +step } }
-                            }
-                        }
-                    }
-                }
+                if (!item.ownedByMe) itemAccess(item)
                 if (item.ownedByMe) {
                     button(type = ButtonType.button) {
                         attributes[ATTR_ACTION] = ACTION_EDIT_ITEM
@@ -1074,7 +1153,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
                     }
                     details {
                         summary { +"Archive" }
-                        p { +"This takes the item off everyone's list. An archived item cannot be restored; to lend it again, add it as a new item. Its loan history is kept." }
+                        p { +"This takes the item off everyone's list. You can restore an archived item later. Its loan history is kept." }
                         button(type = ButtonType.button) {
                             attributes[ATTR_ACTION] = ACTION_RETIRE_ITEM
                             attributes[ATTR_ITEM] = item.item.v
@@ -1085,7 +1164,29 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
             }
         }
     }
-    removedItems(home)
+    archivedItems(home)
+}
+
+/** Someone else's item: the button to ask for it, or why not yet and how to unlock (shared by the Items page and a member's page). */
+private fun FlowContent.itemAccess(item: ItemSummary) {
+    val access = item.access
+    if (access == null || access.canAsk) {
+        button(type = ButtonType.button) {
+            attributes[ATTR_ACTION] = ACTION_BORROW_ITEM
+            attributes[ATTR_ITEM] = item.item.v
+            +"Ask to borrow"
+        }
+    } else {
+        p { +"Not yet. This is not open to you at the moment." }
+        details {
+            summary { +"Why, and how to unlock" }
+            ul { for (reason in access.reasons) li { +reason } }
+            if (access.howToUnlock.isNotEmpty()) {
+                h3 { +"How to unlock" }
+                ul { for (step in access.howToUnlock) li { +step } }
+            }
+        }
+    }
 }
 
 /** Adding an item ([existing] null) or changing one: the same fields, on a page of their own. */
@@ -1170,7 +1271,6 @@ private fun outcomeLabel(outcome: ReturnOutcome): String = when (outcome) {
 
 private fun window(loan: LoanSummary): String = "${CalendarDay.format(loan.fromDay)} to ${CalendarDay.format(loan.toDay)}"
 
-private fun who(home: HomeData, loan: LoanSummary): String = nameOf(home, loan.other)
 
 /** How a loan's end day reads today (ADR 0059): plain, kind words with the date; it changes nothing about standing. */
 fun dueLine(toDay: Int, today: Int): String {
@@ -1253,7 +1353,7 @@ private fun FlowContent.borrow(home: HomeData) {
                     loanButton(ACTION_DECLINE_LOAN, loan, "Decline")
                     details {
                         summary { +"Approve with different dates" }
-                        p { +"If the dates asked for do not suit you, approve others. They can cancel if the new dates do not suit them." }
+                        p { +"If the dates asked for do not suit you, approve other dates. The borrower can cancel the loan if the new dates do not suit them." }
                         form {
                             id = FORM_LOAN_CHANGE_PREFIX + loan.loan.v
                             attributes[ATTR_LOAN] = loan.loan.v
@@ -1287,9 +1387,16 @@ private fun FlowContent.borrow(home: HomeData) {
                     if (loan.datesChanged && loan.role == LoanRole.BORROWER) p { +"The owner approved other dates than you asked for. If they do not suit you, cancel and ask again." }
                     if (loan.role == LoanRole.BORROWER && !loan.iConfirmedHandover) loanButton(ACTION_CANCEL_LOAN, loan, "Cancel this loan")
                     if (loan.iConfirmedHandover) {
-                        p { +"You have confirmed. Waiting for ${who(home, loan)} to confirm too." }
+                        p {
+                            +"You have confirmed. Waiting for "
+                            personName(home, loan.other, showStatus = false)
+                            +" to confirm too."
+                        }
                     } else {
-                        if (loan.otherConfirmedHandover) p { +"${who(home, loan).replaceFirstChar { it.uppercase() }} has confirmed." }
+                        if (loan.otherConfirmedHandover) p {
+                            personName(home, loan.other, showStatus = false)
+                            +" has confirmed."
+                        }
                         loanButton(ACTION_HANDOVER, loan, "We handed it over")
                     }
                 }
@@ -1306,7 +1413,11 @@ private fun FlowContent.borrow(home: HomeData) {
                     if (loan.role == LoanRole.OWNER && loan.toDay < home.today) {
                         details {
                             summary { +"Ask them to return it" }
-                            p { +"Ask ${who(home, loan)} in person, or wherever your group talks: Lendger sends nothing." }
+                            p {
+                                +"Ask "
+                                personName(home, loan.other, showStatus = false)
+                                +" in person, or wherever your group talks: Lendger sends nothing."
+                            }
                         }
                     }
                     if (loan.role == LoanRole.BORROWER) {
@@ -1331,7 +1442,11 @@ private fun FlowContent.borrow(home: HomeData) {
                             formSubmit("Report it back", ready = true)
                         }
                     } else {
-                        p { +"With ${who(home, loan)}. They will report it back." }
+                        p {
+                            +"With "
+                            personName(home, loan.other, showStatus = false)
+                            +". The borrower will report it back."
+                        }
                     }
                 }
             }
@@ -1470,26 +1585,29 @@ private fun FlowContent.historyEntry(entry: HistoryEntry) {
     entry.dispute?.let { p { +historyDisputeText(it, entry.claim) } }
 }
 
-/** Every loan of one item the member owns, or owned and removed (ADR 0072, 0073). */
+/** Every loan of one item the member owns, or has archived (ADR 0072, 0073, 0075). */
 private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     h1 { +Screen.ItemHistory.title }
     val listed = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
-    val removed = if (listed == null) state.historyOf?.let { LoanHistory.removedOwnedItem(home.loans, home.items, it) } else null
-    if (listed == null && removed == null) {
+    val archived = if (listed == null) state.historyOf?.let { LoanHistory.archivedOwnedItem(home.archivedItems, home.loans, it) } else null
+    if (listed == null && archived == null) {
         p { +"That item is no longer on your list." }
         p { a(href = Screen.Items.fragment) { +"Back to items" } }
         return
     }
-    val name = listed?.name ?: removed?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
-    val entries = listed?.let { LoanHistory.forOwnedItem(home.loans, it.item) } ?: removed?.entries.orEmpty()
+    val name = listed?.name ?: archived?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
+    val entries = listed?.let { LoanHistory.forOwnedItem(home.loans, it.item) } ?: archived?.entries.orEmpty()
     h2 { +name }
-    if (removed != null) p { +"You archived this item. Its loans are kept here. An archived item cannot be restored; to lend it again, add it as a new item." }
+    if (archived != null) {
+        p { +"You archived this item. Its loans are kept here. You can restore it to put it back on the list." }
+        restoreButton(archived.item)
+    }
     if (entries.isEmpty()) p { +"Nobody has asked to borrow this yet." }
     historySearch(entries.size)
     section {
         for (entry in entries) {
             div {
-                attributes[ATTR_HISTORY_TEXT] = historySearchText(entry, name, nameOf(home, entry.loan.other))
+                attributes[ATTR_HISTORY_TEXT] = historySearchText(entry, name, nameOf(home, entry.loan.other)) // plain-name: search text, not shown
                 h3 { personName(home, entry.loan.other) }
                 historyEntry(entry)
             }
@@ -1498,22 +1616,31 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
     p { a(href = Screen.Items.fragment) { +"Back to items" } }
 }
 
+private fun FlowContent.restoreButton(item: ItemId) {
+    button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_RESTORE_ITEM
+        attributes[ATTR_ITEM] = item.v
+        +"Restore"
+    }
+}
+
 /** What an owner sees for an archived item whose name this device cannot read. */
 const val UNREADABLE_ITEM_NAME = "An archived item"
 
-/** Removed items the member owned, so their loan history stays reachable (ADR 0073). */
-private fun FlowContent.removedItems(home: HomeData) {
-    val removed = LoanHistory.removedOwnedItems(home.loans, home.items)
-    if (removed.isEmpty()) return
+/** Archived items the member owns, so their loan history stays reachable and they can be restored (ADR 0073, 0075). */
+private fun FlowContent.archivedItems(home: HomeData) {
+    val archived = LoanHistory.archivedOwnedItems(home.archivedItems, home.loans)
+    if (archived.isEmpty()) return
     h2 { +"Archived items" }
-    p { +"Items you took off the list. Their loan history is still here." }
+    p { +"Items you took off the list. Their loan history is still here, and you can restore them." }
     ul {
         classes = setOf("cards")
-        for (item in removed) {
+        for (item in archived) {
             li {
                 h3 { +item.name.ifBlank { UNREADABLE_ITEM_NAME } }
                 p { +(if (item.entries.size == 1) "1 loan" else "${item.entries.size} loans") }
-                button(type = ButtonType.button) {
+                restoreButton(item.item)
+                if (item.entries.isNotEmpty()) button(type = ButtonType.button) {
                     attributes[ATTR_ACTION] = ACTION_ITEM_HISTORY
                     attributes[ATTR_ITEM] = item.item.v
                     +"Loan history"
@@ -1538,7 +1665,7 @@ private fun FlowContent.borrowHistoryPage(home: HomeData) {
                 personName(home, entry.owner)
             }
             for (past in entry.entries) div {
-                attributes[ATTR_HISTORY_TEXT] = historySearchText(past, entry.itemName, nameOf(home, entry.owner))
+                attributes[ATTR_HISTORY_TEXT] = historySearchText(past, entry.itemName, nameOf(home, entry.owner)) // plain-name: search text, not shown
                 historyEntry(past)
             }
             when (val again = entry.again) {
@@ -1822,9 +1949,17 @@ private fun FlowContent.agreeButton(proposal: ProposalSummary) {
     }
 }
 
-private fun proposalText(home: HomeData, proposal: ProposalSummary): String = when (proposal.change) {
-    StewardChange.ADD -> "Make ${proposal.member?.let { nameOf(home, it) }} a steward"
-    StewardChange.REMOVE -> "Remove ${proposal.member?.let { nameOf(home, it) }} as a steward"
+private fun FlowOrPhrasingContent.proposalText(home: HomeData, proposal: ProposalSummary) {
+    val member = proposal.member
+    when (proposal.change) {
+        StewardChange.ADD -> if (member != null) { +"Make "; personName(home, member, showStatus = false); +" a steward" } else +"Make a member a steward"
+        StewardChange.REMOVE -> if (member != null) { +"Remove "; personName(home, member, showStatus = false); +" as a steward" } else +"Remove a steward"
+        StewardChange.POLICY -> +policyProposalText(proposal)
+    }
+}
+
+private fun policyProposalText(proposal: ProposalSummary): String = when (proposal.change) {
+    StewardChange.ADD, StewardChange.REMOVE -> ""
     StewardChange.POLICY -> proposal.settings?.let {
         "Change the rules: ${it.quorum} to agree, ${it.inactiveDays} quiet days, ${it.fallbackDelayDays} days to wait, " +
             (if (it.recoveryThreshold == 0) "no recovery shares" else "${it.recoveryThreshold} stewards to rebuild the key")
@@ -1875,7 +2010,7 @@ private fun FlowContent.stewards(home: HomeData) {
             ul {
                 for (proposal in home.proposals) {
                     li {
-                        p { +proposalText(home, proposal) }
+                        p { proposalText(home, proposal) }
                         p { +"${proposal.agreeing} of ${proposal.needed} stewards agree." }
                         if (proposal.iAgree) p { +"You agree." }
                         if (proposal.canAgree) agreeButton(proposal)
@@ -2078,7 +2213,7 @@ private fun FlowContent.devicesSection(home: HomeData, state: AppState) {
                     if (!device.isThisOne) {
                         details {
                             summary { +"Remove this device" }
-                            p { +"It is cut off at once and the circle's key is changed, so it cannot read anything new. What it already read stays on it." }
+                            p { +"Removing this device cuts it off at once and changes the circle's key, so the device cannot read anything new. What it already read stays on it." }
                             button(type = ButtonType.button) {
                                 attributes[ATTR_ACTION] = ACTION_REMOVE_DEVICE
                                 attributes[ATTR_DEVICE_ID] = device.device.v
@@ -2359,7 +2494,13 @@ private fun FlowContent.pausesPage(home: HomeData) {
                 h2 { +(if (pause.status == PauseStatus.LIVE) "Your access is paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "A pause has been proposed for you") }
                 p { +"Reason given: ${pause.reason}" }
                 p { +"Essentials stay open to you. ${pause.agreeing} of ${pause.needed} reviewers have agreed." }
-                if (pause.reviewers.isNotEmpty()) p { +"Agreed so far: ${pause.reviewers.joinToString(", ") { nameOf(home, it) }}" }
+                if (pause.reviewers.isNotEmpty()) p {
+                    +"Agreed so far: "
+                    pause.reviewers.forEachIndexed { index, who ->
+                        if (index > 0) +", "
+                        personName(home, who, showStatus = false)
+                    }
+                }
                 if (pause.appeal != null) p { +"Your appeal: ${pause.appeal}" }
                 if (pause.canAppeal) {
                     p { +"You can write one note to the reviewers. Any of them may then lift the pause." }
@@ -2381,7 +2522,10 @@ private fun FlowContent.pausesPage(home: HomeData) {
                     }
                 }
             } else {
-                h2 { +"${nameOf(home, pause.subject)}: ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}" }
+                h2 {
+                    personName(home, pause.subject, showStatus = false)
+                    +": ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}"
+                }
                 p { +"Reason: ${pause.reason}" }
                 p { +"${pause.agreeing} of ${pause.needed} reviewers have agreed." }
                 if (pause.appeal != null) p { +"The member's appeal: ${pause.appeal}" }
@@ -2407,8 +2551,8 @@ private fun FlowContent.pausesPage(home: HomeData) {
             ul {
                 for (entry in home.pauseHistory) {
                     li {
-                        val who = if (entry.role == PauseRole.SUBJECT) "You" else nameOf(home, entry.subject)
-                        +"$who: ${pauseHistoryLine(entry)} Reason: ${entry.reason}"
+                        if (entry.role == PauseRole.SUBJECT) +"You" else personName(home, entry.subject, showStatus = false)
+                        +": ${pauseHistoryLine(entry)} Reason: ${entry.reason}"
                         if (entry.appeal != null) +" Appeal: ${entry.appeal}"
                     }
                 }
@@ -2430,7 +2574,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
                     name = FIELD_PAUSE_SUBJECT
                     for (member in home.pauseCandidates) option {
                         value = member.v
-                        +nameOf(home, member)
+                        +nameOf(home, member) // plain-name: an option in a menu cannot hold a link
                     }
                 }
                 label {
@@ -2490,7 +2634,10 @@ private fun FlowContent.contributions(home: HomeData) {
             h2 { +"Waiting for your confirmation" }
             for (note in c.toConfirm) {
                 div {
-                    p { +"${nameOf(home, note.other)} says they ${contributionPhrase(note.kind, mine = false)}.${if (note.text.isNotBlank()) " \"${note.text}\"" else ""}" }
+                    p {
+                        personName(home, note.other, showStatus = false)
+                        +" says they ${contributionPhrase(note.kind, mine = false)}.${if (note.text.isNotBlank()) " \"${note.text}\"" else ""}"
+                    }
                     button(type = ButtonType.button) {
                         attributes[ATTR_ACTION] = ACTION_NOTE_CONFIRM
                         attributes[ATTR_NOTE_ID] = note.note.v
@@ -2528,7 +2675,7 @@ private fun FlowContent.contributions(home: HomeData) {
                         name = FIELD_NOTE_WITH
                         for (member in c.candidates) option {
                             value = member.v
-                            +nameOf(home, member)
+                            +nameOf(home, member) // plain-name: an option in a menu cannot hold a link
                         }
                     }
                     label {
@@ -2549,13 +2696,18 @@ private fun FlowContent.contributions(home: HomeData) {
             h2 { +"Your recent contributions" }
             ul {
                 for (note in c.mine) li {
-                    val what = contributionPhrase(note.kind, mine = true).replace("them", nameOf(home, note.other))
+                    val phrase = contributionPhrase(note.kind, mine = true)
                     val state = when (note.status) {
                         NoteStatus.COUNTED -> "confirmed and counted."
                         NoteStatus.WAITING -> "waiting for them to confirm."
                         NoteStatus.LAPSED -> "not confirmed in time, so it did not count."
                     }
-                    +"You $what: $state"
+                    +"You "
+                    // The phrase says "them" where the other person is; the name takes its place, as a link.
+                    +phrase.substringBefore("them")
+                    personName(home, note.other, showStatus = false)
+                    +phrase.substringAfter("them")
+                    +": $state"
                 }
             }
         }
@@ -2782,14 +2934,18 @@ private fun FlowContent.verifyPage(home: HomeData, state: AppState) {
         Fingerprint.compact(person.fingerprint) == link.fingerprint -> {
             p {
                 role = "status"
-                +"Matches. This is ${nameOf(home, person.member)}: the key you hold for them is the one in their code."
+                +"Matches. This is "
+                personName(home, person.member, showStatus = false)
+                +": the key you hold for them is the one in their code."
             }
             identityActions(home, person, waiting)
         }
         else -> {
             p {
                 role = "alert"
-                +"Does not match. The code says ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for ${nameOf(home, person.member)} reads ${person.fingerprint}. Do not trust this person until you have checked them in person."
+                +"Does not match. The code says ${link.fingerprint.chunked(FINGERPRINT_GROUP).joinToString(" ")}, but the key you hold for "
+                personName(home, person.member, showStatus = false)
+                +" reads ${person.fingerprint}. Do not trust this person until you have checked them in person."
             }
         }
     }

@@ -1,6 +1,7 @@
 package circles.web
 
 import circles.app.AppModel
+import circles.app.ArchivedItem
 import circles.app.HomeData
 import circles.app.PauseHistoryEntry
 import circles.app.InviteLink
@@ -58,11 +59,12 @@ private fun home(
     refused: Int = 0,
     items: List<ItemSummary> = emptyList(),
     loans: List<LoanSummary> = emptyList(),
+    archived: List<ArchivedItem> = emptyList(),
     people: List<MemberSummary> = emptyList(),
     myName: String? = "Alice",
     names: Map<MemberId, NameSummary> = mapOf(me to NameSummary("Alice", confirmed = true), bea to NameSummary("Bea", confirmed = false)),
 ) = HomeData(
-    circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, loans = loans, today = 20_759, people = people,
+    circle, me, steward, canRead, members, waiting, changesWaiting = 0, refusedChanges = refused, items = items, archivedItems = archived, loans = loans, today = 20_759, people = people,
     myName = myName, names = if (canRead) names else emptyMap(),
 )
 
@@ -506,7 +508,7 @@ class ShellViewTest {
         val html = items(home(items = listOf(ladder, drill)))
         assertTrue("Ladder" in html && "Drill" in html)
         assertTrue("Yours" in html)
-        assertTrue("""Shared by <span class="person-name">Bea</span>""" in html)
+        assertTrue("""Shared by <a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in html)
         assertTrue("Details: Garage at the back" in html)
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_EDIT_ITEM"""").findAll(html).count())
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_RETIRE_ITEM"""").findAll(html).count())
@@ -518,7 +520,7 @@ class ShellViewTest {
     @Test fun archivingAnItemNeedsASecondDeliberateClick() {
         val html = items(home(items = listOf(ladder)))
         assertTrue(html.indexOf("<details") < html.indexOf(ACTION_RETIRE_ITEM))
-        assertTrue("cannot be restored" in html && "Archive this item" in html && "Remove from the list" !in html)
+        assertTrue("Archive this item" in html && "Remove from the list" !in html)
     }
 
     @Test fun theAddItemPageHasNameKindAndDetailsAndAHiddenButton() {
@@ -625,7 +627,7 @@ class ShellViewTest {
         assertFalse("hidden" in button, "a choice is already selected, so the button shows")
         val theirs = borrow(loan("d", LoanRole.OWNER, LoanStatus.ACTIVE))
         assertFalse(FORM_RETURN_PREFIX in theirs)
-        assertTrue("They will report it back" in theirs)
+        assertTrue("The borrower will report it back" in theirs)
     }
 
     @Test fun finishedLoansShowHowTheyEnded() {
@@ -777,7 +779,7 @@ class ShellViewTest {
     @Test fun proposalsShowProgressAndOnlyThoseWhoCanVoteSeeAgree() {
         val add = ProposalSummary(StewardChange.ADD, MemberId("c".repeat(32)), null, agreeing = 1, needed = 2, iAgree = false, canAgree = true)
         val html = stewards(true, listOf(meSteward, beaSteward), listOf(add))
-        assertTrue("Make $UNNAMED_MEMBER a steward" in html)
+        assertTrue(">$UNNAMED_MEMBER</a> a steward" in html && "Make <a" in html)
         assertTrue("1 of 2 stewards agree." in html)
         assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_ADD" $ATTR_SUBJECT="${"c".repeat(32)}"""" in html)
         val mine = stewards(true, listOf(meSteward, beaSteward), listOf(add.copy(iAgree = true, canAgree = false)))
@@ -797,7 +799,7 @@ class ShellViewTest {
         assertTrue("""$ATTR_SUBJECT="1:60:14:3"""" in sharesHtml)
         assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_SETTINGS" $ATTR_SUBJECT="1:60:14:0"""" in html)
         val removal = ProposalSummary(StewardChange.REMOVE, bea, null, 1, 2, false, true)
-        assertTrue("Remove Bea as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
+        assertTrue(">Bea</a> as a steward" in stewards(true, listOf(meSteward, beaSteward), listOf(removal)))
     }
 
     @Test fun onlyStewardsSeeWhoCanBeProposedAndTheRulesForm() {
@@ -831,7 +833,7 @@ class ShellViewTest {
         val html = members(home(people = listOf(mine2, removable)))
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_REMOVE_MEMBER"""").findAll(html).count())
         assertTrue("""$ATTR_MEMBER="${bea.v}"""" in html)
-        assertTrue("cuts off all their devices at once and changes the circle's key" in html)
+        assertTrue("cuts off all of their devices at once and changes the circle's key" in html)
         assertTrue("What they already read stays with them" in html)
         assertTrue(html.indexOf("<details") < html.indexOf(ACTION_REMOVE_MEMBER), "a second click is needed")
         assertFalse(ACTION_REMOVE_MEMBER in members(home(people = listOf(mine2, removable.copy(canRemove = false)))))
@@ -909,7 +911,7 @@ class ShellViewTest {
         assertEquals(1, Regex("""$ATTR_ACTION="$ACTION_REMOVE_DEVICE"""").findAll(html).count())
         assertTrue("""$ATTR_DEVICE_ID="${phone.device.v}"""" in html)
         assertTrue(html.indexOf("<details") < html.indexOf(ACTION_REMOVE_DEVICE), "a second click is needed")
-        assertTrue("the circle's key is changed" in html)
+        assertTrue("changes the circle's key" in html)
     }
 
     @Test fun settingsShowsTheDeviceLinkAndTheAddDeviceFormWhichLeadsToTheCheck() {
@@ -1394,7 +1396,7 @@ class ShellViewTest {
     }
 
     @Test fun openingAMembersCodeSaysMatchesOrDoesNotMatchAfterWorkingOutTheFingerprintItself() {
-        assertTrue("Matches. This is Bea" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee")))
+        assertTrue("""Matches. This is <a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in verifyHtml(linkFor(bea, "aaaabbbbccccddddeeee")))
         val wrong = verifyHtml(linkFor(bea, "ffffffffffffffffffff"))
         assertTrue("Does not match" in wrong && """role="alert"""" in wrong && "aaaa bbbb cccc dddd eeee" in wrong && "ffff ffff ffff ffff ffff" in wrong)
         assertTrue("That is your own code." in verifyHtml(linkFor(me, "0123456789abcdef0123")))
@@ -1483,10 +1485,10 @@ class NamesViewTest {
 
     @Test fun membersShowNamesWithTheirStateAndTheConfirmFormNeedsTheInPersonTick() {
         val html = render(open(home(people = listOf(alice, beaToConfirm))).copy(screen = Screen.Members))
-        assertTrue("""<span class="person-name">Alice</span> <span class="name-status confirmed">$NAME_CONFIRMED</span> (you)""" in html)
-        assertTrue("""<span class="person-name">Bea</span> <span class="name-status unconfirmed">$NAME_NOT_CONFIRMED</span>""" in html)
-        assertTrue("Identity confirmed by Bea." in html)
-        assertTrue("Nobody has confirmed their identity yet." in html)
+        assertTrue("""<a href="#/members/person/${me.v}" class="person-name">Alice</a> <span class="name-status confirmed">$NAME_CONFIRMED</span> (you)""" in html)
+        assertTrue("""<a href="#/members/person/${bea.v}" class="person-name">Bea</a> <span class="name-status unconfirmed">$NAME_NOT_CONFIRMED</span>""" in html)
+        assertTrue("""Identity confirmed by <a href="#/members/person/${bea.v}" class="person-name">Bea</a>.""" in html)
+        assertTrue("Nobody has confirmed this member's identity yet." in html)
         assertFalse(FORM_CONFIRM_NAME_PREFIX in html, "the form is on the check page, not on the card (ADR 0071)")
         val check = render(open(home(people = listOf(alice, beaToConfirm))).copy(screen = Screen.CheckIdentity, checking = PersonCheck(bea)))
         assertTrue("Checking: " in check && "No camera?" in check && """<p class="fingerprint">1111 2222 3333 4444 5555</p>""" in check)
@@ -1511,7 +1513,7 @@ class NamesViewTest {
         val waiting = listOf(WaitingDevice(device, stranger, "7777 7777 7777 7777 7777"))
         val people = listOf(alice, MemberSummary(stranger, isMe = false, isSteward = false, devices = 2, fingerprint = "9999 8888 7777 6666 5555"))
         val html = render(open(home(waiting = waiting, people = people)).copy(screen = Screen.Members))
-        assertTrue(html.substringAfter("Waiting to be let in").let { "$UNNAMED_MEMBER</span> <button" in it && ">Check and let in<" in it })
+        assertTrue(html.substringAfter("Waiting to be let in").let { "$UNNAMED_MEMBER</a> <button" in it && ">Check and let in<" in it })
         assertFalse(html.substringAfter("Waiting to be let in").contains(NAME_NOT_CONFIRMED), "no confirmation state without a name")
         val state = reduce(open(home(waiting = waiting, people = people)).copy(screen = Screen.Members), AppAction.CheckPerson(PersonCheck(stranger, device)))
         assertEquals(Screen.CheckIdentity, state.screen)
@@ -1555,7 +1557,7 @@ class NamesViewTest {
     @Test fun aVerifiedCodeOffersToConfirmTheIdentity() {
         val link = circles.app.VerifyLink(circle, bea, "11112222333344445555")
         val html = render(open(home(people = listOf(alice, beaToConfirm))).copy(screen = Screen.Verify, verifying = link))
-        assertTrue("Matches. This is Bea" in html)
+        assertTrue("""Matches. This is <a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in html)
         assertTrue("""id="$FORM_CONFIRM_NAME_PREFIX${bea.v}"""" in html && "Confirm identity<" in html)
         assertFalse("1111 2222" in html, "after a match the characters are not needed")
     }
@@ -1669,37 +1671,133 @@ class NamesViewTest {
         assertFalse(ID_HISTORY_SEARCH in render(open().copy(screen = Screen.BorrowHistory)))
     }
 
-    // ---- archived items (ADR 0073, wording 0074) ----
+    // ---- archived items (ADR 0073, wording 0074, restore 0075) ----
 
-    @Test fun anArchivedItemIsListedOnTheItemsPageWithItsHistoryButtonEvenWhenNothingElseIsListed() {
+    private val archivedLadder = listOf(ArchivedItem(ladder.item, "Ladder"))
+
+    @Test fun anArchivedItemIsListedOnTheItemsPageWithRestoreAndHistoryEvenWhenNothingElseIsListed() {
         val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702))
-        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items))
+        val html = render(open(home(items = emptyList(), loans = loans, archived = archivedLadder)).copy(screen = Screen.Items))
         assertTrue("Nothing has been shared yet." in html && "Archived items" in html && "Ladder" in html)
-        assertTrue(ACTION_ITEM_HISTORY in html && ladder.item.v in html && "1 loan" in html)
-        val withItems = render(open(home(items = listOf(drill), loans = loans)).copy(screen = Screen.Items))
+        assertTrue(ACTION_ITEM_HISTORY in html && ACTION_RESTORE_ITEM in html && ladder.item.v in html && "1 loan" in html && ">Restore<" in html)
+        val withItems = render(open(home(items = listOf(drill), loans = loans, archived = archivedLadder)).copy(screen = Screen.Items))
         assertTrue("Archived items" in withItems)
-        assertFalse("Archived items" in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.Items)), "a listed item is not removed")
+        assertFalse("Archived items" in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.Items)), "a listed item is not archived")
         assertFalse("Archived items" in render(open(home(items = emptyList())).copy(screen = Screen.Items)))
     }
 
-    @Test fun theHistoryOfAnArchivedItemOpensAndSaysItWasArchivedWithoutPrivateDetails() {
+    @Test fun anArchivedItemNobodyAskedForCanStillBeRestoredButHasNoHistoryButton() {
+        val html = render(open(home(items = emptyList(), archived = archivedLadder)).copy(screen = Screen.Items))
+        assertTrue(ACTION_RESTORE_ITEM in html && "0 loans" in html)
+        assertFalse(ACTION_ITEM_HISTORY in html)
+    }
+
+    @Test fun theHistoryOfAnArchivedItemOffersRestoreAndSaysItCanBeRestoredWithoutPrivateDetails() {
         val loans = listOf(
             past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702),
             past("2", LoanRole.OWNER, LoanStatus.RETURNED, 20_710, 20_712, ReturnOutcome.LATE, returned = 20_713),
         )
-        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
-        assertTrue("Ladder" in html && "You archived this item." in html && "cannot be restored" in html && "add it as a new item." in html)
+        val html = render(open(home(items = emptyList(), loans = loans, archived = archivedLadder)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("Ladder" in html && "You archived this item." in html && "You can restore it to put it back on the list." in html)
+        assertFalse("cannot be restored" in html, "the old wording is gone")
+        assertTrue(ACTION_RESTORE_ITEM in html)
         assertEquals(2, Regex("Dates: ").findAll(html).count())
         assertTrue("Returned late." in html)
         assertFalse("PRIVATE-DETAILS" in html)
-        assertTrue("no longer on your list" in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = drill.item)), "an item I never owned has no history")
+        assertTrue("no longer on your list" in render(open(home(items = emptyList(), loans = loans, archived = archivedLadder)).copy(screen = Screen.ItemHistory, historyOf = drill.item)), "an item I never owned has no history")
+        assertFalse(ACTION_RESTORE_ITEM in render(open(home(items = listOf(ladder), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item)), "a listed item has nothing to restore")
     }
 
-    @Test fun anArchivedItemWhoseNameCannotBeReadIsCalledWhatItIs() {
-        val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702).copy(itemName = ""))
-        val html = render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+    @Test fun anArchivedItemWithNoNameIsCalledWhatItIs() {
+        val html = render(open(home(items = emptyList(), archived = listOf(ArchivedItem(ladder.item, "")))).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
         assertEquals("An archived item", UNREADABLE_ITEM_NAME)
         assertTrue(UNREADABLE_ITEM_NAME in html)
-        assertTrue(UNREADABLE_ITEM_NAME in render(open(home(items = emptyList(), loans = loans)).copy(screen = Screen.Items)))
+        assertTrue(UNREADABLE_ITEM_NAME in render(open(home(items = emptyList(), archived = listOf(ArchivedItem(ladder.item, "")))).copy(screen = Screen.Items)))
+    }
+
+    @Test fun theArchiveDisclosureNoLongerSaysItCannotBePutBack() {
+        val html = render(open(home(items = listOf(ladder))).copy(screen = Screen.Items))
+        assertTrue("You can restore an archived item later." in html)
+        assertFalse("cannot be restored" in html || "cannot be put back" in html)
+    }
+
+    // ---- person pages (ADR 0076) ----
+
+    private val beaSummary = MemberSummary(bea, isMe = false, isSteward = true, devices = 1, fingerprint = "ab12 cd34", displayName = "Bea", nameConfirmedBy = listOf(me))
+    private val meSummary = MemberSummary(me, isMe = true, isSteward = true, devices = 1, fingerprint = "ef56 7890", displayName = "Alice")
+    private val beaSkill = circles.app.SkillSummary(circles.event.SkillId("5".repeat(32)), "Bike repair", "Punctures and brakes", setOf(circles.event.OpenTo.GIFT), bea, ownedByMe = false)
+
+    private fun personState(member: MemberId, home: HomeData) = open(home).copy(screen = Screen.Person, viewing = member)
+
+    @Test fun everyNameOnTheMembersPageIsALinkToThePersonPageAndNeverPlainText() {
+        val html = render(open(home(people = listOf(meSummary, beaSummary))).copy(screen = Screen.Members))
+        assertTrue("""<a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in html, html)
+        assertTrue("""<a href="#/members/person/${me.v}" class="person-name">Alice</a>""" in html)
+        assertFalse("""<span class="person-name">""" in html, "no plain-text name")
+        assertTrue(NAME_CONFIRMED in html, "the identity words stay outside the link")
+    }
+
+    @Test fun namesInSentencesAndHistoriesAreLinksToo() {
+        val loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702))
+        val history = render(open(home(items = listOf(ladder), loans = loans, archived = emptyList())).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
+        assertTrue("""href="#/members/person/${bea.v}"""" in history)
+        val borrow = render(open(home(items = listOf(drill), loans = listOf(past("2", LoanRole.BORROWER, LoanStatus.ACTIVE, 20_759, 20_760, item = drill)))).copy(screen = Screen.Borrow))
+        assertTrue("""href="#/members/person/${bea.v}"""" in borrow)
+        val verifyLine = identityLineHtml()
+        assertTrue("""href="#/members/person/${me.v}"""" in verifyLine, "who confirmed an identity is linked")
+        assertTrue("Identity confirmed by" in verifyLine)
+    }
+
+    private fun identityLineHtml() = render(open(home(people = listOf(meSummary, beaSummary))).copy(screen = Screen.Members))
+
+    @Test fun thePersonPageShowsTheMemberTheirItemsAndSkillsAndOnlyMyHistoryWithThem() {
+        val loans = listOf(
+            past("1", LoanRole.BORROWER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_702, item = drill),
+            past("2", LoanRole.OWNER, LoanStatus.DECLINED, 20_710, 20_711),
+            past("3", LoanRole.STEWARD, LoanStatus.RETURNED, 20_720, 20_721, ReturnOutcome.OK, returned = 20_721),
+        )
+        val html = render(personState(bea, home(items = listOf(ladder, drill), loans = loans, people = listOf(meSummary, beaSummary), names = mapOf(me to NameSummary("Alice", true), bea to NameSummary("Bea", true))).copy(skills = listOf(beaSkill))))
+        assertTrue("Member" in html && "Bea" in html && NAME_CONFIRMED in html && "Identity confirmed by" in html)
+        assertTrue("Steward of the circle." in html)
+        assertTrue("Items on the list" in html && "Drill" in html && ACTION_BORROW_ITEM in html && "Ask to borrow" in html, "the existing ask-to-borrow logic")
+        assertFalse("Ladder" in html.substringAfter("Items on the list").substringBefore("Skill offers"), "only Bea's items; the ladder is mine")
+        assertTrue("Skill offers" in html && "Bike repair" in html && "Punctures and brakes" in html)
+        assertTrue("Your history with this member" in html)
+        assertEquals(2, Regex("Dates: ").findAll(html).count(), "the two loans between us; the steward-view loan is not shown")
+        assertTrue("You lent it." in html && "You borrowed it." in html && "Declined." in html)
+        assertFalse(circles.app.CalendarDay.format(20_720) in html, "a loan I was not part of is not shown")
+        assertFalse("PRIVATE-DETAILS" in html && "Garage at the back" in html, "no private description")
+        assertTrue(ACTION_CHECK_PERSON in html && "Check identity in person" in html && """$ATTR_MEMBER="${bea.v}"""" in html)
+        assertFalse("Level" in html || "points" in html.lowercase() || "pause" in html.lowercase(), "no level, points or pauses")
+    }
+
+    @Test fun myOwnPersonPageLinksToSettingsInsteadOfCheckingMe() {
+        val html = render(personState(me, home(items = listOf(ladder), people = listOf(meSummary, beaSummary))))
+        assertTrue("(you)" in html && """href="#/settings"""" in html && "Change your name or your devices in Settings" in html)
+        assertFalse(ACTION_CHECK_PERSON in html)
+        assertFalse("Your history with this member" in html)
+        assertTrue("Ladder" in html, "my own items on the list")
+    }
+
+    @Test fun aMemberWhoIsGoneFallsBackToAMessageAndTheMembersLink() {
+        val html = render(personState(bea, home(people = listOf(meSummary))))
+        assertTrue("This member is not in the circle any more." in html && """href="#/members"""" in html)
+    }
+
+    @Test fun thePersonAddressIsParsedStrictlyAndTheStateIsForgottenOnLeavingOrLocking() {
+        assertEquals(bea, PersonLink.parse("#/members/person/${bea.v}"))
+        assertEquals(null, PersonLink.parse("#/members/person/BEA"))
+        assertEquals(null, PersonLink.parse("#/members/person/${bea.v}x"))
+        assertEquals(null, PersonLink.parse("#/members"))
+        assertEquals(Screen.Person, Screen.fromFragment("#/members/person/${bea.v}"))
+        val shown = reduce(open(), AppAction.ShowPerson(bea))
+        assertEquals(Screen.Person, shown.screen)
+        assertEquals(bea, shown.viewing)
+        assertEquals(null, reduce(shown, AppAction.Navigate(Screen.Members)).viewing, "forgotten on leaving")
+        assertEquals(Screen.Members, reduce(open(), AppAction.Navigate(Screen.Person)).screen, "no member chosen: back to Members")
+        assertEquals(null, reduce(shown, AppAction.ModelChanged(AppModel.NoIdentity)).viewing, "forgotten on lock or sign-out")
+        assertEquals(shown.viewing, reduce(shown, AppAction.ModelChanged(AppModel.Open(home()))).viewing, "kept while the circle stays open")
+        assertEquals(AppState().screen, reduce(AppState(), AppAction.ShowPerson(bea)).screen, "not when signed out")
+        assertTrue(Screen.Person in Screen.subPages && Screen.Person !in Screen.navigation)
     }
 }

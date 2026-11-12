@@ -18,6 +18,7 @@ enum class Screen(val path: String, val title: String) {
     Verify("verify", "Check identity"),
     CheckIdentity("members/check", "Check identity"),
     CheckDevice("settings/check-device", "Check the new device"),
+    Person("members/person", "Member"),
     ItemTag("items/tag", "Item tag"),
     ItemHistory("items/history", "Loan history"),
     BorrowHistory("borrow/history", "My borrowing history"),
@@ -37,7 +38,7 @@ enum class Screen(val path: String, val title: String) {
 
         /** The screen for a URL fragment such as `#/items`; anything unknown or empty is [Home] (the guard in `reduce` then decides what a signed-out visitor sees). */
         fun fromFragment(fragment: String): Screen =
-            entries.firstOrNull { FRAGMENT_PREFIX + it.path == fragment } ?: Home
+            if (PersonLink.parse(fragment) != null) Person else entries.firstOrNull { FRAGMENT_PREFIX + it.path == fragment } ?: Home
 
         /** Pages for a browser with no identity yet: a choice, then one page per choice. */
         val signedOut: Set<Screen> = setOf(Welcome, StartCircle, JoinCircle, PairDevice, Restore)
@@ -46,11 +47,24 @@ enum class Screen(val path: String, val title: String) {
         val beforeSignIn: Set<Screen> = signedOut + SignIn
 
         /** Pages reached from another page, not from the navigation bar. */
-        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares, Pauses, AddSkill, EditSkill, Verify, CheckIdentity, CheckDevice, ItemTag, ItemHistory, BorrowHistory, YourName)
+        val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares, Pauses, AddSkill, EditSkill, Verify, CheckIdentity, CheckDevice, ItemTag, ItemHistory, BorrowHistory, Person, YourName)
 
         /** Screens shown in the navigation bar once signed in. */
         val navigation: List<Screen> = entries.filter { it !in beforeSignIn && it !in subPages }
     }
 
     val fragment: String get() = FRAGMENT_PREFIX + path
+}
+
+/** The address of a member's page, `#/members/person/{member}` (ADR 0076). Every display name in the pages links to it. */
+object PersonLink {
+    const val PREFIX = "#/members/person/"
+    private const val ID_CHARS = 32
+    private val hex = Regex("^[0-9a-f]{$ID_CHARS}$")
+
+    fun href(member: circles.policy.MemberId): String = PREFIX + member.v
+
+    /** The member an address points at, or null when it is not a person address. */
+    fun parse(fragment: String): circles.policy.MemberId? =
+        fragment.takeIf { it.startsWith(PREFIX) }?.removePrefix(PREFIX)?.takeIf { hex.matches(it) }?.let { circles.policy.MemberId(it) }
 }

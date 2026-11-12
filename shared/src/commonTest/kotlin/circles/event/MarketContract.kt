@@ -152,6 +152,72 @@ abstract class MarketContract {
     }
 
     @Test
+    fun archivingThenRestoringPutsTheItemBackAsItWasWithItsKeyDetailPhotosAndLoans() = runTest {
+        val w = world()
+        val owner = w.founder.identity.registration
+        w.log += w.founder.itemUpsert(w.circle, DAY, w.item, "Extension ladder", ItemClass.ESSENTIAL, w.keyId, w.itemKey, listOf(owner), null, listOf(photo(1), photo(2)))
+        w.log += w.founder.itemDetail(w.circle, DAY, w.item, w.keyId, w.itemKey, CborMap.of("address" to CborText(ADDRESS)))
+        val (loan, request) = w.request()
+        w.log += listOf(request, w.approve(loan), w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan), w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK))
+        val before = w.foldAs(w.founder).market.items.getValue(w.item)
+        w.log += w.founder.itemRetire(w.circle, DAY + 1, w.item)
+        assertTrue(w.foldAs(w.founder).market.items.getValue(w.item).retired)
+        w.log += w.founder.itemRestore(w.circle, DAY + 2, w.item)
+        val view = w.foldAs(w.founder)
+        assertEquals(emptyList(), view.rejected)
+        val after = view.market.items.getValue(w.item)
+        assertEquals(false, after.retired)
+        assertEquals(before, after, "same id, name, class, key id, key wraps, sealed details and photos")
+        assertEquals(ADDRESS, w.addressOf(view), "the owner still reads the details, with the same key")
+        assertEquals(LoanStatus.RETURNED, view.market.loans.getValue(loan).status, "old loans stay")
+    }
+
+    @Test
+    fun aRestoredItemTakesRequestsAgainAndChangesAgain() = runTest {
+        val w = world()
+        w.shareItem()
+        w.log += w.founder.itemRetire(w.circle, DAY, w.item)
+        val (_, whileArchived) = w.request()
+        assertEquals(listOf("item is retired"), w.reasons(listOf(whileArchived)))
+        w.log += w.founder.itemRestore(w.circle, DAY + 1, w.item)
+        val (loan, again) = w.request(by = w.carol)
+        w.log += again
+        w.log += w.founder.itemUpsert(w.circle, DAY + 1, w.item, "Longer ladder", ItemClass.ESSENTIAL, w.keyId, w.itemKey, listOf(w.founder.identity.registration))
+        val view = w.foldAs(w.founder)
+        assertEquals(emptyList(), view.rejected)
+        assertEquals(LoanStatus.REQUESTED, view.market.loans.getValue(loan).status)
+        assertEquals("Longer ladder", view.market.items.getValue(w.item).name)
+    }
+
+    @Test
+    fun onlyTheOwnerMayRestoreAndOnlyAnArchivedItemAndAnUnknownItemIsRefused() = runTest {
+        val w = world()
+        w.shareItem()
+        assertEquals(listOf("item is not archived"), w.reasons(listOf(w.founder.itemRestore(w.circle, DAY, w.item))))
+        w.log += w.founder.itemRetire(w.circle, DAY, w.item)
+        assertEquals(listOf("only the owner may restore an item"), w.reasons(listOf(w.bea.itemRestore(w.circle, DAY, w.item))))
+        assertEquals(listOf("unknown item"), w.reasons(listOf(w.founder.itemRestore(w.circle, DAY, newItemId(w.crypto)))))
+        assertTrue(w.foldAs(w.founder, w.log + w.bea.itemRestore(w.circle, DAY, w.item)).market.items.getValue(w.item).retired, "a refused restore changes nothing")
+        w.log += w.founder.itemRestore(w.circle, DAY + 1, w.item)
+        assertEquals(listOf("item is not archived"), w.reasons(listOf(w.founder.itemRestore(w.circle, DAY + 2, w.item))), "twice is refused")
+    }
+
+    @Test
+    fun aLoanOpenAtArchiveTimeIsUntouchedByArchivingAndRestoring() = runTest {
+        val w = world()
+        w.shareItem()
+        val (loan, request) = w.request()
+        w.log += listOf(request, w.approve(loan), w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan))
+        w.log += w.founder.itemRetire(w.circle, DAY + 1, w.item)
+        w.log += w.founder.itemRestore(w.circle, DAY + 2, w.item)
+        val view = w.foldAs(w.founder)
+        assertEquals(LoanStatus.ACTIVE, view.market.loans.getValue(loan).status)
+        w.log += w.bea.loanReturn(w.circle, DAY + 3, loan, ReturnOutcome.OK)
+        assertEquals(LoanStatus.RETURNED, w.foldAs(w.founder).market.loans.getValue(loan).status)
+        assertEquals(emptyList(), w.foldAs(w.founder).rejected)
+    }
+
+    @Test
     fun onlyTheOwnerMayChangeRetireOrAttachDetailToAnItem() = runTest {
         val w = world()
         w.shareItem()

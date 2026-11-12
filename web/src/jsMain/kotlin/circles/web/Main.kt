@@ -186,6 +186,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             window.history.replaceState(null, "", window.location.pathname + window.location.search + Screen.Verify.fragment)
             return true
         }
+        PersonLink.parse(window.location.hash)?.let { member ->
+            dispatch(AppAction.ShowPerson(member))
+            return true
+        }
         ItemLink.parse(window.location.hash)?.let { link ->
             dispatch(AppAction.ItemLinkSeen(link.item))
             window.history.replaceState(null, "", window.location.pathname + window.location.search + Screen.Items.fragment)
@@ -383,42 +387,44 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         busyLaunch((event.asDynamic().submitter as? Element) ?: form.querySelector("#$SUBMIT_ID")) {
             if (form.id.startsWith(FORM_CONFIRM_NAME_PREFIX)) {
                 val member = form.getAttribute(ATTR_MEMBER)?.let(::MemberId)
-                if (member != null) reportName(circleApp.confirmName(member), "Confirmed. Others now see that you checked their identity.")
+                if (member != null) reportName(circleApp.confirmName(member), "Identity confirmed. Others now see that you checked this member's identity in person.")
                 return@busyLaunch
             }
             if (form.id.startsWith(FORM_LET_IN_PREFIX)) {
                 val device = form.getAttribute(ATTR_DEVICE)?.let(::DeviceId)
+                val home = (state.model as? AppModel.Open)?.home
+                val who = Notices.nameFor(home, home?.waiting?.firstOrNull { it.device == device }?.member, Notices.NEW_MEMBER)
                 if (device != null && circleApp.admit(device)) {
-                    dispatch(AppAction.Notice("Let in. They can read the circle once their device syncs."))
+                    dispatch(AppAction.Notice(Notices.letIn(who)))
                     window.location.hash = Screen.Members.fragment
                 } else {
-                    dispatch(AppAction.Notice("Could not let them in just now. Try again after the next sync."))
+                    dispatch(AppAction.Notice(Notices.letInFailed(who)))
                 }
                 return@busyLaunch
             }
             if (form.id.startsWith(FORM_DISPUTE_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val claim = DisputeClaim.entries.firstOrNull { it.name == field(FIELD_CLAIM) }
-                if (loan != null && claim != null) reportLoan(circleApp.disputeReturn(loan, claim, field(FIELD_NOTE)), "Reported. A steward who is not part of this loan will decide.", null)
+                if (loan != null && claim != null) reportLoan(circleApp.disputeReturn(loan, claim, field(FIELD_NOTE)), "Your report was sent. A steward who is not part of this loan will decide.", null)
                 return@busyLaunch
             }
             if (form.id.startsWith(FORM_LOAN_CHANGE_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val from = CalendarDay.parse(field(FIELD_FROM))
                 val to = CalendarDay.parse(field(FIELD_TO))
-                if (loan == null || from == null || to == null) dispatch(AppAction.Notice("Choose both dates."))
-                else reportLoan(circleApp.respondToLoan(loan, true, "", from, to), "Approved with the new dates. They can now read the details.", null)
+                if (loan == null || from == null || to == null) dispatch(AppAction.Notice("Choose both a start date and an end date."))
+                else reportLoan(circleApp.respondToLoan(loan, true, "", from, to), "Approved with the new dates. The borrower can now read the item's details.", null)
                 return@busyLaunch
             }
             if (form.id.startsWith(FORM_RETURN_PREFIX)) {
                 val loan = form.getAttribute(ATTR_LOAN)?.let(::LoanId)
                 val outcome = ReturnOutcome.entries.firstOrNull { it.name == field(FIELD_OUTCOME) }
-                if (loan != null && outcome != null) reportLoan(circleApp.returnLoan(loan, outcome), "Thank you. Reported back.", null)
+                if (loan != null && outcome != null) reportLoan(circleApp.returnLoan(loan, outcome), "Thank you. The item is reported back.", null)
                 return@busyLaunch
             }
             when (form.id) {
                 FORM_MY_NAME -> reportName(circleApp.setMyName(field(FIELD_DISPLAY_NAME)), "Thank you. Your name is saved.")
-                FORM_RENAME -> reportName(circleApp.setMyName(field(FIELD_DISPLAY_NAME)), "Your name is changed.")
+                FORM_RENAME -> reportName(circleApp.setMyName(field(FIELD_DISPLAY_NAME)), "Your name has been changed.")
                 FORM_START -> report(circleApp.startCircle(field(FIELD_PASSPHRASE)))
                 FORM_JOIN -> state.pendingInvite?.let { report(circleApp.join(it, field(FIELD_PASSPHRASE))) }
                 FORM_LINK -> {
@@ -432,8 +438,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val from = CalendarDay.parse(field(FIELD_FROM))
                     val to = CalendarDay.parse(field(FIELD_TO))
                     val item = state.borrowing
-                    if (from == null || to == null || item == null) dispatch(AppAction.Notice("Choose both dates."))
-                    else reportLoan(circleApp.requestLoan(item, from, to, field(FIELD_NOTE)), "Request sent.", Screen.Borrow)
+                    if (from == null || to == null || item == null) dispatch(AppAction.Notice("Choose both a start date and an end date."))
+                    else reportLoan(circleApp.requestLoan(item, from, to, field(FIELD_NOTE)), "Your request to borrow was sent.", Screen.Borrow)
                 }
                 FORM_CHANGE_PASSPHRASE -> dispatch(
                     AppAction.Notice(
@@ -460,18 +466,18 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     val inactive = field(FIELD_INACTIVE).toIntOrNull()
                     val fallback = field(FIELD_FALLBACK).toIntOrNull()
                     val recovery = field(FIELD_RECOVERY).toIntOrNull()
-                    if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers."))
+                    if (quorum == null || inactive == null || fallback == null || recovery == null) dispatch(AppAction.Notice("Fill in all four numbers for the steward rules."))
                     else reportSteward(circleApp.proposeStewardSettings(quorum, inactive, fallback, recovery))
                 }
                 FORM_PHOTO_ADD -> state.editing?.let { item ->
                     val file = (form.elements.namedItem(FIELD_PHOTO_FILE) as? HTMLInputElement)?.files?.item(0)
-                    if (file == null) dispatch(AppAction.Notice("Choose a photo first."))
+                    if (file == null) dispatch(AppAction.Notice("Choose a photo file to add to the item first."))
                     else when (val prepared = prepareImage(file)) {
                         is PrepareResult.Ready -> reportPhoto(circleApp.addPhoto(item, field(FIELD_PHOTO_ALT), prepared.image.photo, prepared.image.thumb))
-                        PrepareResult.NotAnImage -> dispatch(AppAction.Notice("That file could not be read as a picture."))
-                        PrepareResult.TooLarge -> dispatch(AppAction.Notice("That picture is too large to use. Try a smaller one."))
-                        PrepareResult.CannotShrink -> dispatch(AppAction.Notice("That picture cannot be made small enough. Try another."))
-                        is PrepareResult.NotClean -> dispatch(AppAction.Notice("That picture could not be cleaned of its location details, so it was not used. (${prepared.why})"))
+                        PrepareResult.NotAnImage -> dispatch(AppAction.Notice("The file you chose could not be read as a picture."))
+                        PrepareResult.TooLarge -> dispatch(AppAction.Notice("The picture you chose is too large to use. Try a smaller one."))
+                        PrepareResult.CannotShrink -> dispatch(AppAction.Notice("The picture you chose cannot be made small enough. Try another one."))
+                        is PrepareResult.NotClean -> dispatch(AppAction.Notice("The picture you chose could not be cleaned of its location details, so it was not used. (${prepared.why})"))
                     }
                 }
                 FORM_SKILL_ADD, FORM_SKILL_EDIT -> {
@@ -491,9 +497,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(
                         AppAction.Notice(
                             when (result) {
-                                circles.app.NoteResult.Sent -> "Sent. It counts once they confirm it."
+                                circles.app.NoteResult.Sent -> "Your note was sent. It counts once the person named in it confirms it."
                                 is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                                else -> "That cannot be done right now."
+                                else -> "Your note could not be sent right now. Try syncing, then try again."
                             },
                         ),
                     )
@@ -502,7 +508,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     fun tenths(name: String): Int? = field(name).toDoubleOrNull()?.let { (it * 10 + 0.5).toInt() }
                     val numbers = listOf(tenths("rules-regular"), tenths("rules-trusted"), tenths("rules-steward")) +
                         listOf("rules-halflife", "rules-vouches", "rules-vouch-days", "rules-reviewers", "rules-pause-days", "rules-cooldown").map { field(it).toIntOrNull() }
-                    if (numbers.any { it == null }) dispatch(AppAction.Notice("Fill in every number."))
+                    if (numbers.any { it == null }) dispatch(AppAction.Notice("Fill in every number of the circle rules."))
                     else reportRules(circleApp.proposeRules(rulesOf(numbers.map { it!! })))
                 }
                 FORM_PAUSE_PROPOSE -> dispatch(
@@ -521,11 +527,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(
                         AppAction.Notice(
                             when (val result = if (threshold == null) null else circleApp.makeRecoveryShares(threshold)) {
-                                null -> "Enter a whole number."
-                                is ShareMakingResult.Sent -> "Sent. Each of the ${result.stewards} stewards now has a share; any ${result.threshold} can rebuild the key."
-                                is ShareMakingResult.BadThreshold -> "Choose a number from ${result.min} to ${result.max}."
-                                ShareMakingResult.NoKey -> "This device does not have the current key."
-                                ShareMakingResult.NotAllowed -> "Only a steward can make shares."
+                                null -> "Enter a whole number for how many stewards are needed to rebuild the key."
+                                is ShareMakingResult.Sent -> "The key shares were sent. Each of the ${result.stewards} stewards now has a share, and any ${result.threshold} of them can rebuild the key."
+                                is ShareMakingResult.BadThreshold -> "Choose how many stewards are needed to rebuild the key: a number from ${result.min} to ${result.max}."
+                                ShareMakingResult.NoKey -> "This device does not have the circle's current key, so it cannot make key shares."
+                                ShareMakingResult.NotAllowed -> "Only a steward can make key shares."
                             },
                         ),
                     )
@@ -536,8 +542,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             is RebuildResult.Rebuilt -> "The key is rebuilt and this device can read the circle again (key number ${result.epoch})."
                             RebuildResult.NoCodes -> "Paste at least one share code."
                             is RebuildResult.BadCode -> if (result.mistyped) "Code ${result.position} has a mistake in it. Check it with the steward who read it out." else "Code ${result.position} is not a share code."
-                            RebuildResult.DifferentEpochs -> "These codes are for different keys. Use codes for the same key number."
-                            RebuildResult.AlreadyHaveKey -> "This device already has that key."
+                            RebuildResult.DifferentEpochs -> "These share codes are for different keys. Use codes for the same key number."
+                            RebuildResult.AlreadyHaveKey -> "This device already has the circle key those codes would rebuild."
                             is RebuildResult.Wrong -> result.reason.replaceFirstChar { it.uppercase() } + "."
                             RebuildResult.NotAllowed -> "Only a steward can rebuild the key."
                         },
@@ -560,13 +566,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             is AddDeviceResult.Added -> {
                                 dispatch(AppAction.CheckNewDevice(null))
                                 window.location.hash = Screen.Settings.fragment
-                                "Added. The new device will open as soon as it checks in."
+                                "The new device has been added. It opens as soon as it checks in."
                             }
                             AddDeviceResult.BadCode -> "That does not look like a device code. Copy the whole code shown on the new device."
-                            AddDeviceResult.AlreadyKnown -> "That device is already part of the circle."
+                            AddDeviceResult.AlreadyKnown -> "The device you entered is already part of the circle."
                             AddDeviceResult.NameTooLong -> "Keep the name to $MAX_DEVICE_NAME_CHARS characters or fewer."
                             AddDeviceResult.NotLetInYet -> "A steward needs to let you in before you can add a device."
-                            AddDeviceResult.NotAllowed -> "That cannot be done right now."
+                            AddDeviceResult.NotAllowed -> "The device could not be added right now. Try syncing, then try again."
                         },
                     ),
                 ) }
@@ -579,9 +585,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             dispatch(AppAction.Notice("Your recovery code is saved. Keep the paper safe."))
                             window.location.hash = Screen.Settings.fragment
                         }
-                        RecoveryCodeResult.WrongWords -> dispatch(AppAction.Notice("Those words do not match the ones shown. Check your paper and try again."))
+                        RecoveryCodeResult.WrongWords -> dispatch(AppAction.Notice("The words you typed do not match the recovery code shown. Check your paper and try again."))
                         RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can make a recovery code."))
-                        else -> dispatch(AppAction.Notice("That cannot be done right now."))
+                        else -> dispatch(AppAction.Notice("The recovery code could not be saved right now. Try syncing, then try again."))
                     }
                 }
                 FORM_RESTORE -> state.pendingRestore?.let { link ->
@@ -589,7 +595,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(
                         AppAction.Notice(
                             when (val result = circleApp.restoreFromCode(link, field(FIELD_WORDS), field(FIELD_PASSPHRASE))) {
-                                RestoreResult.Restored -> "Restored. This browser is now a device of your account."
+                                RestoreResult.Restored -> "Your account has been restored. This browser is now one of your devices."
                                 is RestoreResult.BadWords -> when (val problem = result.problem) {
                                     is RecoveryParse.WrongCount -> "A recovery code has 12 words; you typed ${problem.count}."
                                     is RecoveryParse.UnknownWord -> "Word ${problem.position} (\"${problem.word}\") is not one of the recovery words. Check the spelling."
@@ -623,7 +629,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     is NameResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
                     is NameResult.NameTaken -> result.message
                     NameResult.NotLetInYet -> "A steward needs to let you in before you can set your name."
-                    NameResult.NotAllowed -> "That cannot be done right now. Try syncing, then again."
+                    NameResult.NotAllowed -> "Your name could not be saved right now. Try syncing, then try again."
                 },
             ),
         )
@@ -638,7 +644,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             ItemResult.BadName -> dispatch(AppAction.Notice("Give the item a name of 1 to 80 characters."))
             is ItemResult.DescriptionTooLong -> dispatch(AppAction.Notice("Keep the details to ${result.maximum} characters or fewer."))
             ItemResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can add items."))
-            ItemResult.NotAllowed -> dispatch(AppAction.Notice("That item cannot be changed here."))
+            ItemResult.NotAllowed -> dispatch(AppAction.Notice("Only the owner of an item can change it, and only while it is on the list."))
         }
     }
 
@@ -650,11 +656,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             }
             is LoanResult.BadDates -> dispatch(AppAction.Notice("Choose dates from today on, with the end not before the start and at most ${result.maximumDays} days."))
             is LoanResult.NoteTooLong -> dispatch(AppAction.Notice("Keep the note to ${result.maximum} characters or fewer."))
-            is LoanResult.NotYet -> dispatch(AppAction.Notice("Not yet: " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
+            is LoanResult.NotYet -> dispatch(AppAction.Notice("You cannot ask for this item yet. " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
             LoanResult.AlreadyBooked -> dispatch(AppAction.Notice("Someone else has been promised that item for some of those days. Try other dates."))
             is LoanResult.Paused -> dispatch(AppAction.Notice((result.reasons + "You can still borrow essentials. Open Pauses to appeal.").joinToString(" ")))
             LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
-            LoanResult.NotAllowed -> dispatch(AppAction.Notice("That cannot be done right now. Try syncing, then again."))
+            LoanResult.NotAllowed -> dispatch(AppAction.Notice("The loan step could not be done right now. Try syncing, then try again."))
         }
     }
 
@@ -664,7 +670,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 when (result) {
                     is SkillResult.Saved -> done
                     is SkillResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                    SkillResult.NotAllowed -> "That cannot be done right now."
+                    SkillResult.NotAllowed -> "The skill offer could not be saved right now. Try syncing, then try again."
                 },
             ),
         )
@@ -678,10 +684,10 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     PhotoResult.Saved -> done
                     PhotoResult.Offline -> "Could not reach the server, so the photo was not added. Try again when you are online."
                     PhotoResult.Full -> "The circle's photo storage is full."
-                    PhotoResult.TooMany -> "An item can have ${circles.event.MAX_PHOTOS_PER_ITEM} photos. Remove one first."
-                    PhotoResult.TooBig -> "That photo is too large once prepared."
+                    PhotoResult.TooMany -> "An item can have ${circles.event.MAX_PHOTOS_PER_ITEM} photos. Remove one of its photos first."
+                    PhotoResult.TooBig -> "The photo you chose is too large once it has been prepared."
                     is PhotoResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                    PhotoResult.NotAllowed -> "That cannot be done right now."
+                    PhotoResult.NotAllowed -> "The photo could not be added right now. Try syncing, then try again."
                 },
             ),
         )
@@ -691,9 +697,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         dispatch(
             AppAction.Notice(
                 when (result) {
-                    is RulesResult.Sent -> if (result.takesEffect) "Done. The new rules apply from today." else "Sent. The rules change when enough stewards agree."
+                    is RulesResult.Sent -> if (result.takesEffect) "The new circle rules apply from today." else "Your proposal for new circle rules was sent. The rules change when enough stewards agree."
                     is RulesResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                    RulesResult.NotAllowed -> "Only a steward can do that."
+                    RulesResult.NotAllowed -> "Only a steward can change the circle rules."
                 },
             ),
         )
@@ -703,9 +709,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         dispatch(
             AppAction.Notice(
                 when (result) {
-                    is StewardResult.Sent -> if (result.takesEffect) "Done. It takes effect now." else "Sent. It takes effect when enough stewards agree."
+                    is StewardResult.Sent -> if (result.takesEffect) "The steward change takes effect now." else "Your steward proposal was sent. It takes effect when enough stewards agree."
                     is StewardResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                    StewardResult.NotAllowed -> "Only a steward can do that."
+                    StewardResult.NotAllowed -> "Only a steward can change who the stewards are."
                 },
             ),
         )
@@ -730,7 +736,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_UNLOCK_PASSKEY -> when (val result = circleApp?.unlockWithPasskey()) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Lendger (${result.reason})."))
-                    else -> dispatch(AppAction.Notice("That did not unlock it. Try again, or type your passphrase."))
+                    else -> dispatch(AppAction.Notice("Unlocking with this device did not work. Try again, or type your passphrase."))
                 }
                 ACTION_PASSKEY_ON -> dispatch(
                     AppAction.Notice(
@@ -743,7 +749,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         },
                     ),
                 )
-                ACTION_PASSKEY_OFF -> { circleApp?.disablePasskey(); dispatch(AppAction.Notice("Turned off. Your passphrase still works.")) }
+                ACTION_PASSKEY_OFF -> { circleApp?.disablePasskey(); dispatch(AppAction.Notice("Unlocking with this device is turned off. Your passphrase still works.")) }
                 ACTION_SYNC -> circleApp?.syncNow()
                 ACTION_RECOVERY_START -> {
                     val draft = circleApp?.prepareRecoveryCode(state.origin)
@@ -759,18 +765,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     window.location.hash = Screen.Settings.fragment
                 }
                 ACTION_REMOVE_MEMBER -> target.getAttribute(ATTR_MEMBER)?.let { id ->
+                    val removedName = Notices.nameFor((state.model as? AppModel.Open)?.home, MemberId(id), Notices.THAT_MEMBER)
                     dispatch(
                         AppAction.Notice(
                             when (circleApp?.removeMember(MemberId(id))) {
-                                RemoveResult.Removed -> "Removed. The circle's key has been changed."
+                                RemoveResult.Removed -> Notices.memberRemoved(removedName)
                                 RemoveResult.IsSteward -> "A steward must first step down on the Stewards page."
-                                RemoveResult.NotInCircle -> "That person is not in the circle."
+                                RemoveResult.NotInCircle -> "That member is not in the circle."
                                 else -> "Only a steward can remove someone."
                             },
                         ),
                     )
                 }
-                ACTION_ROTATE_KEY -> dispatch(AppAction.Notice(if (circleApp?.rotateKeyNow() == RemoveResult.Removed) "The circle's key has been changed." else "There is nothing to change right now."))
+                ACTION_ROTATE_KEY -> dispatch(AppAction.Notice(if (circleApp?.rotateKeyNow() == RemoveResult.Removed) "The circle's key has been changed." else "The circle's key does not need to be changed right now."))
                 ACTION_LEAVE -> dispatch(
                     AppAction.Notice(
                         when (circleApp?.leaveCircle()) {
@@ -781,7 +788,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     ),
                 )
                 ACTION_REMOVE_DEVICE -> target.getAttribute(ATTR_DEVICE_ID)?.let { id ->
-                    dispatch(AppAction.Notice(if (circleApp?.removeDevice(DeviceId(id)) == DeviceRemoval.Removed) "Removed. The circle's key is being changed." else "That device cannot be removed."))
+                    dispatch(AppAction.Notice(if (circleApp?.removeDevice(DeviceId(id)) == DeviceRemoval.Removed) "The device has been removed. The circle's key is being changed." else "The device cannot be removed."))
                 }
                 ACTION_EXPORT -> when (val result = circleApp?.exportCircle()) {
                     is ExportResult.Ready -> {
@@ -789,7 +796,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         dispatch(AppAction.Notice(exportNotice(result)))
                     }
                     ExportResult.Incomplete -> dispatch(AppAction.Notice("This device does not have the whole log yet. Press Sync now, then try again."))
-                    ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Open the circle first."))
+                    ExportResult.NotAllowed, null -> dispatch(AppAction.Notice("Sign in to the circle before exporting it."))
                 }
                 ACTION_RULES_AGREE -> target.getAttribute(ATTR_RULES)?.split(':')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 9 }?.let {
                     reportRules(circleApp?.proposeRules(rulesOf(it)) ?: RulesResult.NotAllowed)
@@ -798,9 +805,9 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(
                         AppAction.Notice(
                             when (val result = circleApp?.confirmContribution(circles.event.NoteId(id))) {
-                                circles.app.NoteResult.Sent -> "Confirmed. Thank you."
+                                circles.app.NoteResult.Sent -> "The note has been confirmed. Thank you."
                                 is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-                                else -> "That cannot be done right now."
+                                else -> "The note could not be confirmed right now. Try syncing, then try again."
                             },
                         ),
                     )
@@ -809,13 +816,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.EditSkill(circles.event.SkillId(it)))
                     window.location.hash = Screen.EditSkill.fragment
                 }
-                ACTION_RETIRE_SKILL -> target.getAttribute(ATTR_SKILL)?.let { reportSkill(circleApp?.retireSkill(circles.event.SkillId(it)) ?: SkillResult.NotAllowed, "Removed.") }
+                ACTION_RETIRE_SKILL -> target.getAttribute(ATTR_SKILL)?.let { reportSkill(circleApp?.retireSkill(circles.event.SkillId(it)) ?: SkillResult.NotAllowed, "The skill offer was removed.") }
                 ACTION_PAUSE_REVIEW -> target.getAttribute(ATTR_PAUSE)?.let { id ->
                     val agree = target.getAttribute(ATTR_AGREE) == "true"
-                    dispatch(AppAction.Notice(pauseText(circleApp?.reviewPause(PauseId(id), agree) ?: PauseResult.NotAllowed, if (agree) "You agreed." else "Your answer was recorded.")))
+                    dispatch(AppAction.Notice(pauseText(circleApp?.reviewPause(PauseId(id), agree) ?: PauseResult.NotAllowed, if (agree) "You agreed to the pause." else "Your answer about the pause was recorded.")))
                 }
                 ACTION_PAUSE_LIFT -> target.getAttribute(ATTR_PAUSE)?.let { id ->
-                    dispatch(AppAction.Notice(pauseText(circleApp?.liftPause(PauseId(id)) ?: PauseResult.NotAllowed, "Done. The pause is lifted.")))
+                    dispatch(AppAction.Notice(pauseText(circleApp?.liftPause(PauseId(id)) ?: PauseResult.NotAllowed, "The pause has been lifted.")))
                 }
                 ACTION_SHARE_SHOW -> target.getAttribute(ATTR_EPOCH)?.toIntOrNull()?.let { epoch ->
                     dispatch(AppAction.ShareCodeShown(epoch, circleApp?.shareCode(epoch)))
@@ -844,12 +851,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     }
                 }
                 ACTION_VOUCH -> target.getAttribute(ATTR_MEMBER)?.let { id ->
+                    val vouchName = Notices.nameFor((state.model as? AppModel.Open)?.home, MemberId(id), Notices.THAT_MEMBER)
                     dispatch(
                         AppAction.Notice(
                             when (circleApp?.vouchFor(MemberId(id))) {
-                                is VouchResult.Done -> "You vouched for them."
+                                is VouchResult.Done -> Notices.vouched(vouchName)
                                 VouchResult.NotLetInYet -> "A steward needs to let you in before you can vouch."
-                                else -> "You cannot vouch for them right now."
+                                else -> Notices.vouchRefused(vouchName)
                             },
                         ),
                     )
@@ -863,13 +871,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     dispatch(AppAction.BorrowItem(ItemId(it)))
                     window.location.hash = Screen.RequestLoan.fragment
                 }
-                ACTION_APPROVE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), true, "") ?: LoanResult.NotAllowed, "Approved. They can now read the details.", null) }
-                ACTION_DECLINE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), false, "") ?: LoanResult.NotAllowed, "Declined.", null) }
-                ACTION_CONFIRM_RETURN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmReturn(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed. Thank you.", null) }
-                ACTION_UPHOLD -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.UPHELD) ?: LoanResult.NotAllowed, "Decided: the owner's report is upheld.", null) }
-                ACTION_DISMISS_DISPUTE -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.DISMISSED) ?: LoanResult.NotAllowed, "Decided: the return counts as reported.", null) }
-                ACTION_CANCEL_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.cancelLoan(LoanId(it)) ?: LoanResult.NotAllowed, "Cancelled.", null) }
-                ACTION_HANDOVER -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmHandover(LoanId(it)) ?: LoanResult.NotAllowed, "Confirmed.", null) }
+                ACTION_APPROVE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), true, "") ?: LoanResult.NotAllowed, "Approved. The borrower can now read the item's details.", null) }
+                ACTION_DECLINE_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.respondToLoan(LoanId(it), false, "") ?: LoanResult.NotAllowed, "The request was declined.", null) }
+                ACTION_CONFIRM_RETURN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmReturn(LoanId(it)) ?: LoanResult.NotAllowed, "The return is confirmed. Thank you.", null) }
+                ACTION_UPHOLD -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.UPHELD) ?: LoanResult.NotAllowed, "Decided: the owner's report about the return is upheld.", null) }
+                ACTION_DISMISS_DISPUTE -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.resolveDispute(LoanId(it), DisputeOutcome.DISMISSED) ?: LoanResult.NotAllowed, "Decided: the return counts as the borrower reported it.", null) }
+                ACTION_CANCEL_LOAN -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.cancelLoan(LoanId(it)) ?: LoanResult.NotAllowed, "The loan was cancelled.", null) }
+                ACTION_HANDOVER -> target.getAttribute(ATTR_LOAN)?.let { reportLoan(circleApp?.confirmHandover(LoanId(it)) ?: LoanResult.NotAllowed, "Your hand-over is confirmed.", null) }
                 ACTION_EDIT_ITEM -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.EditItem(ItemId(it)))
                     window.location.hash = Screen.EditItem.fragment
@@ -877,6 +885,15 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_CHECK_PERSON -> target.getAttribute(ATTR_MEMBER)?.let { member ->
                     dispatch(AppAction.CheckPerson(PersonCheck(MemberId(member), target.getAttribute(ATTR_DEVICE)?.let(::DeviceId))))
                     window.location.hash = Screen.CheckIdentity.fragment
+                }
+                ACTION_RESTORE_ITEM -> target.getAttribute(ATTR_ITEM)?.let { id ->
+                    when (circleApp?.restoreItem(ItemId(id))) {
+                        is ItemResult.Saved -> {
+                            dispatch(AppAction.Notice("Restored. The item is back on your list."))
+                            window.location.hash = Screen.Items.fragment
+                        }
+                        else -> dispatch(AppAction.Notice("Only the owner can restore an archived item, and only an archived one."))
+                    }
                 }
                 ACTION_ITEM_HISTORY -> target.getAttribute(ATTR_ITEM)?.let {
                     dispatch(AppAction.ShowItemHistory(ItemId(it)))
@@ -891,7 +908,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_REMOVE_PHOTO -> {
                     val item = target.getAttribute(ATTR_ITEM)
                     val photo = target.getAttribute(ATTR_PHOTO)
-                    if (item != null && photo != null) reportPhoto(circleApp?.removePhoto(ItemId(item), photo) ?: PhotoResult.NotAllowed, "Removed.")
+                    if (item != null && photo != null) reportPhoto(circleApp?.removePhoto(ItemId(item), photo) ?: PhotoResult.NotAllowed, "The photo was removed.")
                 }
                 ACTION_RETIRE_ITEM -> target.getAttribute(ATTR_ITEM)?.let { id ->
                     reportItem(circleApp?.retireItem(ItemId(id)) ?: ItemResult.NotAllowed)
@@ -900,7 +917,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_INVITE -> circleApp?.makeInvite()?.let { dispatch(AppAction.InviteMade(it.format(window.location.origin))) }
                 ACTION_COPY -> state.newInvite?.let {
                     window.navigator.asDynamic().clipboard.writeText(it)
-                    dispatch(AppAction.Notice("Link copied."))
+                    dispatch(AppAction.Notice("The link was copied to the clipboard."))
                 }
             }
         }
@@ -966,7 +983,7 @@ internal fun exportNotice(result: ExportResult.Ready): String {
 private fun pauseText(result: PauseResult, done: String): String = when (result) {
     PauseResult.Sent -> done
     is PauseResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
-    PauseResult.NotAllowed -> "You cannot do that right now."
+    PauseResult.NotAllowed -> "The pause step could not be done right now. Try syncing, then try again."
 }
 
 private fun rulesOf(n: List<Int>) = circles.event.ConfigSettings(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8])

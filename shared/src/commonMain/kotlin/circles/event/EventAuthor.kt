@@ -122,6 +122,9 @@ class EventAuthor(
     fun itemRetire(circle: CircleId, day: Int, item: ItemId): Envelope =
         build(circle, EventType.ITEM_RETIRE, day, CborMap.EMPTY, MarketPayloads.itemRetire(ItemRetire(item)))
 
+    fun itemRestore(circle: CircleId, day: Int, item: ItemId): Envelope =
+        build(circle, EventType.ITEM_RESTORE, day, CborMap.EMPTY, MarketPayloads.itemRestore(ItemRestore(item)))
+
     /** Seals [detail] with the item key, so only the owner and approved borrowers can read it (spec 5). */
     fun itemDetail(circle: CircleId, day: Int, item: ItemId, detailKeyId: String, itemKey: ByteString, detail: CborMap): Envelope {
         val sealed = ItemKeys.sealDetail(cipher, itemKey, circle, item.v, detail)

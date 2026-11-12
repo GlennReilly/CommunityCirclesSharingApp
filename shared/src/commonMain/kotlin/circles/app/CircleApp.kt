@@ -102,6 +102,9 @@ data class ItemSummary(
     val access: AccessSummary? = null,
 )
 
+/** An archived item of mine: its name is what the fold holds for it (ADR 0073, 0075). */
+data class ArchivedItem(val item: ItemId, val name: String)
+
 /** The circle's rules and the proposals for new ones (ADR 0051). */
 data class RulesSummary(
     val current: circles.event.ConfigSettings,
@@ -437,6 +440,8 @@ data class HomeData(
     val refusedChanges: Int,
     /** Items that are not retired, newest events last. */
     val items: List<ItemSummary> = emptyList(),
+    /** Items this member owns that are archived (retired), so they can be looked at and restored (ADR 0075). */
+    val archivedItems: List<ArchivedItem> = emptyList(),
     /** Loans this member borrows or lends, in the order they were asked for. */
     val loans: List<LoanSummary> = emptyList(),
     /** Today as a day number, for date pickers. */
@@ -1587,6 +1592,18 @@ class CircleApp(
         return ItemResult.Saved(item)
     }
 
+    /** Puts one of my archived items back on the list, as it was (ADR 0075). The key is changed afterwards if the usual rule (ADR 0049) asks for it. */
+    suspend fun restoreItem(item: ItemId): ItemResult {
+        val s = session ?: return ItemResult.NotAllowed
+        val view = replica.fold(s.circle, crypto, cipher, s.identity)
+        if (view.market.items[item]?.let { it.owner == s.identity.member && it.retired } != true) return ItemResult.NotAllowed
+        s.author.keyRing = view.keys
+        s.engine.enqueue(s.circle, s.author.itemRestore(s.circle, today(), item))
+        s.scheduler.trigger(SyncTrigger.LOCAL_WRITE)
+        refresh()
+        return ItemResult.Saved(item)
+    }
+
     /** Vouches for another member for [VOUCH_DAYS] days (ADR 0042). Only members at REGULAR or above can. */
     suspend fun vouchFor(member: MemberId): VouchResult {
         val s = session ?: return VouchResult.NotAllowed
@@ -1909,6 +1926,7 @@ class CircleApp(
                             canResolve = canResolve(loan, me, view.stewards, now),
                         )
                     },
+                archivedItems = view.market.items.values.filter { it.retired && it.owner == me }.map { ArchivedItem(it.item, it.name) },
                 items = view.market.items.values.filter { !it.retired && it.owner !in view.market.departed }.map { state ->
                     ItemSummary(
                         item = state.item,

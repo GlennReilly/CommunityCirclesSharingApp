@@ -78,6 +78,18 @@ async function keyboardAndStructure(chrome, name) {
     const headings = [...document.querySelectorAll('h1,h2,h3,h4')].map(h => Number(h.tagName[1]));
     if (headings.filter(h => h === 1).length !== 1) problems.push('expected exactly one h1, found ' + headings.filter(h => h === 1).length);
     headings.forEach((h, i) => { if (i > 0 && h > headings[i - 1] + 1) problems.push('heading level jumps from h' + headings[i - 1] + ' to h' + h); });
+    // Tick boxes and radio buttons are drawn 24 px; their label is the tap area and must be at least 44 px high (WCAG 2.5.8 comfort size).
+    for (const box of document.querySelectorAll('input[type=checkbox],input[type=radio]')) {
+      if (!box.checkVisibility()) continue;
+      const label = box.labels && box.labels[0]; const r = label && label.getBoundingClientRect();
+      if (!label || r.height < 43.5 || r.width < 43.5) problems.push('tick box "' + (label ? label.textContent.trim().slice(0, 30) : box.name) + '" has a tap area of ' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : 'none') + ' px, under 44');
+    }
+    // A member's name is a link; its tap area is at least 44 px high (ADR 0076).
+    for (const link of document.querySelectorAll('a.person-name')) {
+      if (!link.checkVisibility()) continue;
+      const r = link.getBoundingClientRect();
+      if (r.height < 43.5) problems.push('name link "' + link.textContent.trim().slice(0, 30) + '" has a tap area of ' + Math.round(r.width) + 'x' + Math.round(r.height) + ' px, under 44');
+    }
     const focusable = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]')]
       .filter(e => !e.disabled && e.tabIndex >= 0 && e.checkVisibility() && e.type !== 'hidden' && !e.hidden);
     return JSON.stringify({ problems, count: focusable.length });
@@ -157,7 +169,7 @@ async function screenshot(chrome, name) {
   await sleep(300);
   if (process.env.SHOT_WIDTH) { // narrow check: sideways overflow, and controls smaller than the 44 px touch target (the invisible touch area counts)
     const m = JSON.parse(await chrome.evaluate(`JSON.stringify({ overflow: document.documentElement.scrollWidth - window.innerWidth, client: document.documentElement.clientWidth, edges: ['#notice', 'main section > div', 'main ul.cards > li', 'main'].map(q => { const e = document.querySelector(q); if (!e) return q + ' none'; const r = e.getBoundingClientRect(); return q + ' ' + Math.round(r.left) + '..' + Math.round(r.right); }),
-      small: [...document.querySelectorAll('main button, main input, main select, main a.button')].filter(e => e.checkVisibility()).map(e => { const r = e.getBoundingClientRect(); return { t: (e.innerText || e.id || e.tagName).trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) }; }).filter(x => x.h < 32 || x.w < 32) })`));
+      small: [...document.querySelectorAll('main button, main input:not([type=checkbox]):not([type=radio]), main select, main a.button')].filter(e => e.checkVisibility()).map(e => { const r = e.getBoundingClientRect(); return { t: (e.innerText || e.id || e.tagName).trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) }; }).filter(x => x.h < 32 || x.w < 32) })`));
     console.log('narrow ' + name + ': client ' + m.client + ' ' + m.edges.join(', ') + '; overflow ' + m.overflow + ' px, small controls ' + JSON.stringify(m.small));
   }
   const shot = await chrome.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });

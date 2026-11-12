@@ -77,7 +77,10 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0071](0071-checking-identity-in-person.md) | Checking identity in person: one check page, fingerprints only as the fallback | Accepted |
 | [0072](0072-loan-history.md) | Loan history for owners and borrowers, with "Borrow again" | Accepted (the consequence that removed items are unreachable is superseded by 0073) |
 | [0073](0073-removed-items-in-loan-history.md) | Removed items keep a reachable loan history; history pages can be searched | Accepted (wording "Removed" is now "Archived", see 0074) |
-| [0074](0074-archived-items-wording.md) | Items are "archived", not "removed" (wording only) | Accepted |
+| [0074](0074-archived-items-wording.md) | Items are "archived", not "removed" (wording only) | Accepted ("no restore" superseded by 0075) |
+| [0075](0075-restore-archived-items.md) | An archived item can be restored | Accepted |
+| [0076](0076-person-pages-and-name-links.md) | Every member name is a link to a person page | Accepted |
+| [0077](0077-messages-make-sense-on-their-own.md) | Messages make sense on their own | Accepted |
 
 ## Open decisions still to record
 
