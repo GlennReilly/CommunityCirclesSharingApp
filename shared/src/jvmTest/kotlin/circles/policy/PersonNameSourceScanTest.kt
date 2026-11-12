@@ -37,6 +37,25 @@ class PersonNameSourceScanTest {
         assertTrue(found.isEmpty(), "Show a member's name with personName (ADR 0076), or say why plain text is needed with a plain-name: comment:\n" + found.joinToString("\n"))
     }
 
+    /**
+     * ADR 0078: a menu option holds plain text, so every menu of members goes through the one `memberMenu` helper, which also
+     * writes a "View <name>" link per member with `personName`. The option line with its justification must exist once,
+     * inside that helper, and the helper must carry the link.
+     */
+    @Test
+    fun plainNamesInMenuOptionsAreJustifiedByTheLinkBesideTheMenu() {
+        val view = File(root, "web/src/jsMain/kotlin/circles/web/ShellView.kt").readLines()
+        val optionLines = view.withIndex().filter { (_, line) -> "an option in a menu cannot hold a link" in line }.map { it.index }
+        assertTrue(optionLines.size == 1, "exactly one plain-text menu option (in memberMenu), found ${optionLines.size}")
+        val start = view.indexOfLast { it.contains("fun FlowContent.memberMenu(") }
+        assertTrue(start in 0 until optionLines.single(), "the option must sit inside memberMenu")
+        val end = (start + 1 until view.size).first { view[it] == "}" }
+        val body = view.subList(start, end).joinToString("\n")
+        assertTrue(optionLines.single() < end && "personName(" in body && "ATTR_VIEW_OF" in body && "ATTR_MEMBER_MENU" in body, "memberMenu must write a View link per member with personName")
+        val users = view.count { it.contains("memberMenu(home,") }
+        assertTrue(users >= 2, "the pause and thank-you menus use memberMenu, found $users")
+    }
+
     @Test
     fun theScanCatchesWhatItIsFor() {
         assertTrue(problemsIn("""p { +"Owned by ${'$'}{nameOf(home, owner)}" }"""))

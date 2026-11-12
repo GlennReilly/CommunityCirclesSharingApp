@@ -81,6 +81,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0075](0075-restore-archived-items.md) | An archived item can be restored | Accepted |
 | [0076](0076-person-pages-and-name-links.md) | Every member name is a link to a person page | Accepted |
 | [0077](0077-messages-make-sense-on-their-own.md) | Messages make sense on their own | Accepted |
+| [0078](0078-person-page-actions-member-menus-approval-wording.md) | Person page actions, links beside member menus, and the approval notice wording | Accepted |
 
 ## Open decisions still to record
 

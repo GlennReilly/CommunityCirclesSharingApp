@@ -345,6 +345,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             val shown = filterRows(field.value, ATTR_SKILL_TEXT)
             document.getElementById(ID_SKILL_COUNT)?.textContent = if (shown == 1) "1 offer" else "$shown offers"
         }
+        (event.target as? HTMLSelectElement)?.takeIf { it.hasAttribute(ATTR_MEMBER_MENU) }?.let { menu ->
+            // The link beside a menu of members follows the choice (ADR 0078).
+            val views = document.querySelectorAll("[$ATTR_VIEW_OF]")
+            for (index in 0 until views.length) {
+                val view = views.item(index) as? HTMLElement ?: continue
+                if (view.getAttribute(ATTR_VIEW_OF) == menu.id) view.hidden = view.getAttribute(ATTR_VIEW_MEMBER) != menu.value
+            }
+        }
         (event.target as? HTMLInputElement)?.takeIf { it.id == ID_HISTORY_SEARCH }?.let { field ->
             val shown = filterRows(field.value, ATTR_HISTORY_TEXT)
             // A borrowed item with no loan left showing is hidden with them.

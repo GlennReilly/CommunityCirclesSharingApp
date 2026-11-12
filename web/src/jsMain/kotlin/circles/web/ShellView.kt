@@ -160,6 +160,10 @@ const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
 const val ACTION_ITEM_HISTORY = "item-history"
 const val ACTION_RESTORE_ITEM = "restore-item"
+/** A menu of members (ADR 0078): the select carries [ATTR_MEMBER_MENU]; next to it a "View <name>" link per member, only the chosen one showing. */
+const val ATTR_MEMBER_MENU = "data-member-menu"
+const val ATTR_VIEW_OF = "data-view-of"
+const val ATTR_VIEW_MEMBER = "data-view-member"
 const val ID_HISTORY_SEARCH = "history-search"
 const val ID_HISTORY_COUNT = "history-count"
 const val ATTR_HISTORY_TEXT = "data-history-text"
@@ -934,6 +938,61 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
 }
 
 /**
+ * What the viewer can do about another member (ADR 0078). Every button is a launch point: it opens the check page (ADR 0071),
+ * where the in-person tick is still required, so the person page never confirms or vouches by itself. A button that
+ * would not work is not shown; one plain sentence says why instead.
+ */
+private fun FlowContent.personActions(home: HomeData, person: MemberSummary) {
+    fun launch(label: String) = button(type = ButtonType.button) {
+        attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
+        attributes[ATTR_MEMBER] = person.member.v
+        +label
+    }
+    launch("Check identity in person")
+    p { +"To confirm who this member is, or to vouch for them, meet in person. Each button below opens the check page, where you tick that you checked in person." }
+    when {
+        person.canConfirmName -> launch("Confirm identity")
+        person.displayName == null -> p { +"This member has not chosen a name yet, so there is nothing to confirm." }
+        person.nameConfirmed -> p { +"This member's identity is already confirmed." }
+        else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm a member's identity." }
+    }
+    val vouchedUntil = person.vouchedByMeUntil
+    when {
+        vouchedUntil != null -> p { +"You vouch for this member until ${CalendarDay.format(vouchedUntil)}." }
+        home.canVouch -> launch("Vouch")
+        else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can vouch for another member." }
+    }
+}
+
+/**
+ * A menu of members with, beside it, a link to the chosen member's page (ADR 0078). An option cannot hold a link, so each
+ * member also has a hidden "View <name>" link (through [personName]); the page script shows the chosen one when the menu changes.
+ */
+private fun FlowContent.memberMenu(home: HomeData, fieldId: String, members: List<MemberId>) {
+    select {
+        id = fieldId
+        name = fieldId
+        attributes[ATTR_MEMBER_MENU] = "true"
+        for (member in members) option {
+            value = member.v
+            +nameOf(home, member) // plain-name: an option in a menu cannot hold a link; the member menu shows a link beside it
+        }
+    }
+    p {
+        attributes["aria-live"] = "polite"
+        for ((index, member) in members.withIndex()) {
+            span {
+                attributes[ATTR_VIEW_OF] = fieldId
+                attributes[ATTR_VIEW_MEMBER] = member.v
+                if (index != 0) attributes["hidden"] = "true"
+                +"View "
+                personName(home, member, showStatus = false)
+            }
+        }
+    }
+}
+
+/**
  * One member's page (ADR 0076): who they are, their items on the list and skill offers, and what has passed between
  * the two of you. It never shows their level, points or pauses, a loan you were not part of, or an item's private details.
  */
@@ -954,13 +1013,7 @@ private fun FlowContent.personPage(home: HomeData, state: AppState) {
     if (person.isMe) {
         p { a(href = Screen.Settings.fragment) { +"Change your name or your devices in Settings" } }
     } else {
-        person.vouchedByMeUntil?.let { p { +"You vouch for this member until ${CalendarDay.format(it)}." } }
-        button(type = ButtonType.button) {
-            attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
-            attributes[ATTR_MEMBER] = person.member.v
-            +"Check identity in person"
-        }
-        p { +"To confirm who this member is, or to vouch for them, meet in person and use Check identity in person." }
+        personActions(home, person)
     }
     val items = home.items.filter { it.owner == person.member }
     section {
@@ -2569,14 +2622,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
                     attributes["for"] = FIELD_PAUSE_SUBJECT
                     +"Member: "
                 }
-                select {
-                    id = FIELD_PAUSE_SUBJECT
-                    name = FIELD_PAUSE_SUBJECT
-                    for (member in home.pauseCandidates) option {
-                        value = member.v
-                        +nameOf(home, member) // plain-name: an option in a menu cannot hold a link
-                    }
-                }
+                memberMenu(home, FIELD_PAUSE_SUBJECT, home.pauseCandidates)
                 label {
                     attributes["for"] = FIELD_PAUSE_REASON
                     +"Reason: "
@@ -2670,14 +2716,7 @@ private fun FlowContent.contributions(home: HomeData) {
                         attributes["for"] = FIELD_NOTE_WITH
                         +"Who: "
                     }
-                    select {
-                        id = FIELD_NOTE_WITH
-                        name = FIELD_NOTE_WITH
-                        for (member in c.candidates) option {
-                            value = member.v
-                            +nameOf(home, member) // plain-name: an option in a menu cannot hold a link
-                        }
-                    }
+                    memberMenu(home, FIELD_NOTE_WITH, c.candidates)
                     label {
                         attributes["for"] = FIELD_NOTE_TEXT
                         +"A few words (optional): "

@@ -212,13 +212,25 @@ try {
   { const t = await text(alice);
     if (!t.includes('Bea') || !t.includes('Check identity in person') || !t.includes('Skill offers') || !t.includes('Items on the list')) throw new Error('person page content: ' + t);
     if ((t.match(/Dates:/g) || []).length !== 4) throw new Error('person page should list the 4 loans between alice and bea: ' + t);
-    if (t.includes('Garage at the back') || /\b(Level|points)\b/i.test(t) || /pause/i.test(t)) throw new Error('person page shows what it must not: ' + t); }
+    if (t.includes('Garage at the back') || /\byour level\b|\bpoints\b/i.test(t) || /pause/i.test(t)) throw new Error('person page shows what it must not: ' + t); }
   ok('clicking a name in the loan history opens that member\'s page with their items, skills and the history between the two (no details, level, points or pauses)');
   await checkAccessibility(alice, 'a member page');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("a.person-name") !== null', 'members page with name links');
   await alice.evaluate('[...document.querySelectorAll("a.person-name")].find(a => a.textContent === "Bea").click()');
   await until(alice, 'location.hash.startsWith("#/members/person/") && ' + has(alice, 'Check identity in person'), 'the person page from the Members page');
   ok('clicking a name on the Members page opens that member\'s page');
+  { const labels = JSON.parse(await alice.evaluate('JSON.stringify([...document.querySelectorAll("main [data-action=check-person]")].map(b => b.textContent))'));
+    if (labels[0] !== 'Check identity in person' || !labels.includes('Confirm identity')) throw new Error('person page buttons: ' + JSON.stringify(labels));
+    if (await alice.evaluate('document.querySelector("form[id^=confirm-name-]") !== null')) throw new Error('the person page confirms by itself'); }
+  ok('the person page offers Check identity in person first, then Confirm identity because alice may confirm, and confirms nothing itself');
+  await alice.evaluate('[...document.querySelectorAll("main [data-action=check-person]")].find(b => b.textContent === "Confirm identity").click()');
+  await until(alice, 'location.hash === "#/members/check" && document.querySelector("form[id^=confirm-name-]") !== null', 'Confirm identity opens the check page with the confirm form');
+  if (!(await alice.evaluate(has(alice, 'I checked this person\'s identity in person')))) throw new Error('the in-person tick is missing on the check page');
+  ok('Confirm identity opens the check page, where the in-person tick is still required');
+  await checkAccessibility(alice, 'check identity from a member page');
+  await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("a.person-name") !== null', 'members again');
+  await alice.evaluate('[...document.querySelectorAll("a.person-name")].find(a => a.textContent === "Bea").click()');
+  await until(alice, 'location.hash.startsWith("#/members/person/")', 'person page again');
   await alice.evaluate('document.querySelector("[data-action=check-person]").click()'); await until(alice, 'location.hash === "#/members/check"', 'check identity from the person page'); ok('Check identity in person from the member page opens the check page');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items for the person page');
   await bea.evaluate('location.hash = "#/borrow"'); await until(bea, has(bea, 'My borrowing history'), 'bea has a history link');
@@ -312,6 +324,24 @@ try {
   await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your level: 1'), 'bea standing');
   await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your level: 3') + ' && ' + has(alice, 'Stewards are treated as at least Level 3'), 'alice standing'); ok('standing pages: bea is at Level 1, alice (steward) counts as Level 3');
   await checkAccessibility(alice, 'my standing');
+  // Menus of members (ADR 0078): a link to the chosen member sits beside the menu and follows the choice.
+  await until(alice, 'document.querySelector("select[data-member-menu]") !== null', 'a member menu on the standing page');
+  { const r = JSON.parse(await alice.evaluate(`(() => {
+      const sel = document.querySelector('select[data-member-menu]');
+      const shown = () => [...document.querySelectorAll('[data-view-of="' + sel.id + '"]')].filter(e => !e.hidden).map(e => e.textContent.trim());
+      const before = shown();
+      const href = document.querySelector('[data-view-of="' + sel.id + '"] a').getAttribute('href');
+      // a second member is not in this circle, so add one to the menu and its links to test that the choice moves the link
+      const other = 'f'.repeat(32); const opt = document.createElement('option'); opt.value = other; opt.textContent = 'Zed'; sel.appendChild(opt);
+      const span = document.querySelector('[data-view-of="' + sel.id + '"]').cloneNode(true); span.setAttribute('data-view-member', other); span.hidden = true; span.querySelector('a').textContent = 'Zed'; span.querySelector('a').setAttribute('href', '#/members/person/' + other);
+      document.querySelector('[data-view-of="' + sel.id + '"]').parentElement.appendChild(span);
+      sel.value = other; sel.dispatchEvent(new Event('input', { bubbles: true }));
+      const after = shown(); const live = document.querySelector('[data-view-of="' + sel.id + '"]').parentElement.getAttribute('aria-live');
+      return JSON.stringify({ before, after, href, live, optionText: opt.textContent }); })()`));
+    if (r.before.length !== 1 || !r.before[0].startsWith('View ') || !r.href.startsWith('#/members/person/')) throw new Error('member menu link: ' + JSON.stringify(r));
+    if (r.after.length !== 1 || r.after[0] !== 'View Zed' || r.live !== 'polite') throw new Error('the link did not follow the choice: ' + JSON.stringify(r));
+    ok('beside a menu of members there is a "View <name>" link to their page, and it follows the choice'); }
+  await alice.evaluate('location.hash = "#/standing"');
   // Checking identity (ADR 0071): the card has only "Check identity"; vouching and confirming live on the check page.
   await alice.evaluate('location.hash = "#/members"'); await until(alice, 'document.querySelector("[data-action=check-person]") !== null', 'check button for alice');
   if (await alice.evaluate('document.querySelector("[data-action=vouch], form[id^=confirm-name-]") !== null')) throw new Error('vouch or confirm is still on the members card');

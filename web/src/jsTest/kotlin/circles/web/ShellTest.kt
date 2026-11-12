@@ -1768,7 +1768,7 @@ class NamesViewTest {
         assertFalse(circles.app.CalendarDay.format(20_720) in html, "a loan I was not part of is not shown")
         assertFalse("PRIVATE-DETAILS" in html && "Garage at the back" in html, "no private description")
         assertTrue(ACTION_CHECK_PERSON in html && "Check identity in person" in html && """$ATTR_MEMBER="${bea.v}"""" in html)
-        assertFalse("Level" in html || "points" in html.lowercase() || "pause" in html.lowercase(), "no level, points or pauses")
+        assertFalse("Your level" in html || "level:" in html.lowercase() || "points" in html.lowercase() || "pause" in html.lowercase(), "no level, points or pauses of the member")
     }
 
     @Test fun myOwnPersonPageLinksToSettingsInsteadOfCheckingMe() {
@@ -1799,5 +1799,52 @@ class NamesViewTest {
         assertEquals(shown.viewing, reduce(shown, AppAction.ModelChanged(AppModel.Open(home()))).viewing, "kept while the circle stays open")
         assertEquals(AppState().screen, reduce(AppState(), AppAction.ShowPerson(bea)).screen, "not when signed out")
         assertTrue(Screen.Person in Screen.subPages && Screen.Person !in Screen.navigation)
+    }
+
+    // ---- person page actions and member menus (ADR 0078) ----
+
+    private fun personActions(person: MemberSummary, canVouch: Boolean = false) =
+        render(personState(bea, home(people = listOf(meSummary, person), names = mapOf(me to NameSummary("Alice", true), bea to NameSummary("Bea", person.nameConfirmed))).copy(canVouch = canVouch)))
+
+    private fun launchButtons(html: String) = Regex("""<button[^>]*$ATTR_ACTION="$ACTION_CHECK_PERSON"[^>]*>([^<]*)<""").findAll(html).map { it.groupValues[1] }.toList()
+
+    @Test fun theConfirmAndVouchButtonsAppearOnlyWhenUsableAndOnlyOpenTheCheckPage() {
+        val usable = personActions(beaSummary.copy(isSteward = false, nameConfirmedBy = emptyList(), canConfirmName = true), canVouch = true)
+        assertEquals(listOf("Check identity in person", "Confirm identity", "Vouch"), launchButtons(usable))
+        assertFalse(FORM_CONFIRM_NAME_PREFIX in usable || """$ATTR_ACTION="$ACTION_VOUCH"""" in usable, "the person page confirms and vouches nothing by itself (ADR 0071)")
+        assertFalse(CHECKED_IN_PERSON in usable)
+        assertTrue("where you tick that you checked in person" in usable)
+    }
+
+    @Test fun anUnusableButtonIsReplacedByOnePlainSentenceWhy() {
+        val confirmed = personActions(beaSummary.copy(canConfirmName = false))
+        assertEquals(listOf("Check identity in person"), launchButtons(confirmed))
+        assertTrue("This member&#39;s identity is already confirmed." in confirmed || "This member's identity is already confirmed." in confirmed)
+        assertTrue("can vouch for another member" in confirmed)
+        val noName = personActions(beaSummary.copy(displayName = null, nameConfirmedBy = emptyList(), canConfirmName = false))
+        assertTrue("has not chosen a name yet, so there is nothing to confirm" in noName)
+        val noRight = personActions(beaSummary.copy(nameConfirmedBy = emptyList(), canConfirmName = false))
+        assertTrue("can confirm a member" in noRight && "Confirm identity" !in launchButtons(noRight))
+        val vouched = personActions(beaSummary.copy(vouchedByMeUntil = 20_800), canVouch = true)
+        assertTrue("You vouch for this member until" in vouched)
+        assertFalse("Vouch" in launchButtons(vouched))
+    }
+
+    @Test fun myOwnPageHasNoConfirmOrVouchButtons() {
+        val html = render(personState(me, home(people = listOf(meSummary, beaSummary)).copy(canVouch = true)))
+        assertFalse(ACTION_CHECK_PERSON in html)
+    }
+
+    @Test fun aMenuOfMembersHasALinkBesideItForTheChosenMemberOnly() {
+        val html = render(open(home().copy(canProposePause = true, pauseCandidates = listOf(bea, MemberId("c".repeat(32))))).copy(screen = Screen.Pauses))
+        assertTrue("""$ATTR_MEMBER_MENU="true"""" in html && """id="$FIELD_PAUSE_SUBJECT"""" in html)
+        assertTrue("""<option value="${bea.v}">Bea</option>""" in html, "the option is plain text; a menu cannot hold a link")
+        val views = Regex("""<span[^>]*$ATTR_VIEW_OF="$FIELD_PAUSE_SUBJECT"[^>]*>[\s\S]*?</span>""").findAll(html).map { it.value }.toList()
+        assertEquals(2, views.size)
+        assertTrue("hidden" !in views[0].substringBefore(">") && """$ATTR_VIEW_MEMBER="${bea.v}"""" in views[0], "the first (chosen) member's link shows")
+        assertTrue("hidden" in views[1].substringBefore(">"), "the others are hidden until chosen")
+        assertTrue("""View <a href="#/members/person/${bea.v}" class="person-name">Bea</a>""" in views[0])
+        val note = render(open(home().copy(standing = StandingSummary(circles.policy.Tier.TRUSTED, "3.0", emptyList(), emptyList()), contributions = circles.app.ContributionsSummary(candidates = listOf(bea), notesLeft = 3))).copy(screen = Screen.Standing))
+        assertTrue("""id="$FIELD_NOTE_WITH"""" in note && """$ATTR_VIEW_OF="$FIELD_NOTE_WITH"""" in note)
     }
 }
