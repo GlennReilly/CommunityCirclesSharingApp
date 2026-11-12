@@ -27,6 +27,9 @@ object CalendarDay {
         return "${y.toString().padStart(4, '0')}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}"
     }
 
+    /** The year, month (1 to 12) and day of month of a day number. */
+    fun civil(days: Int): CivilDate = toCivil(days).let { (y, m, d) -> CivilDate(y, m, d) }
+
     private fun daysInMonth(year: Int, month: Int): Int = when (month) {
         2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) 29 else 28
         4, 6, 9, 11 -> 30
@@ -55,3 +58,6 @@ object CalendarDay {
         return Triple(year, month, day)
     }
 }
+
+/** A calendar date. */
+data class CivilDate(val year: Int, val month: Int, val day: Int)

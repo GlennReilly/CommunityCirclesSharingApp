@@ -345,6 +345,19 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             val shown = filterRows(field.value, ATTR_SKILL_TEXT)
             document.getElementById(ID_SKILL_COUNT)?.textContent = if (shown == 1) "1 offer" else "$shown offers"
         }
+        (event.target as? HTMLSelectElement)?.takeIf { it.id == FIELD_DATE_FORMAT }?.let { select ->
+            // Choosing a date format applies at once (with the other two choices as they stand in the form).
+            val form = select.closest("form") as? HTMLFormElement ?: return@let
+            fun value(name: String) = (form.elements.namedItem(name) as? HTMLSelectElement)?.value
+            val chosen = Appearance.fromKeys(value(FIELD_TEXT_SIZE), value(FIELD_THEME), select.value)
+            saveAppearance(chosen)
+            dispatch(AppAction.AppearanceChanged(chosen))
+        }
+        (event.target as? HTMLInputElement)?.takeIf { it.type == "date" }?.let { input ->
+            // The box shows the browser's own format; under it the same date is written in the chosen one.
+            val echo = document.querySelector("[$ATTR_DATE_ECHO=\"${input.id}\"]")
+            echo?.textContent = CalendarDay.parse(input.value)?.let { DateText.show(it) }.orEmpty()
+        }
         (event.target as? HTMLSelectElement)?.takeIf { it.hasAttribute(ATTR_MEMBER_MENU) }?.let { menu ->
             // The link beside a menu of members follows the choice (ADR 0078).
             val views = document.querySelectorAll("[$ATTR_VIEW_OF]")
@@ -460,7 +473,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     ),
                 )
                 FORM_APPEARANCE -> {
-                    val chosen = Appearance.fromKeys(field(FIELD_TEXT_SIZE), field(FIELD_THEME))
+                    val chosen = Appearance.fromKeys(field(FIELD_TEXT_SIZE), field(FIELD_THEME), field(FIELD_DATE_FORMAT))
                     saveAppearance(chosen)
                     dispatch(AppAction.AppearanceChanged(chosen))
                     dispatch(AppAction.Notice("Saved."))
@@ -934,10 +947,11 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
 
 private const val STORE_TEXT_SIZE = "circles.textSize"
 private const val STORE_THEME = "circles.theme"
+private const val STORE_DATE_FORMAT = "circles.dateFormat"
 
 /** Reads the saved choice (local storage can be unavailable, then the defaults hold). */
 private fun loadAppearance(): Appearance = try {
-    Appearance.fromKeys(window.localStorage.getItem(STORE_TEXT_SIZE), window.localStorage.getItem(STORE_THEME))
+    Appearance.fromKeys(window.localStorage.getItem(STORE_TEXT_SIZE), window.localStorage.getItem(STORE_THEME), window.localStorage.getItem(STORE_DATE_FORMAT))
 } catch (e: Throwable) {
     Appearance()
 }
@@ -948,6 +962,7 @@ private fun saveAppearance(appearance: Appearance) {
     try {
         window.localStorage.setItem(STORE_TEXT_SIZE, appearance.textSize.key)
         window.localStorage.setItem(STORE_THEME, appearance.theme.key)
+        window.localStorage.setItem(STORE_DATE_FORMAT, appearance.dateFormat.key)
     } catch (e: Throwable) {
         // Not saved for next time; still applied now.
     }
@@ -956,6 +971,7 @@ private fun saveAppearance(appearance: Appearance) {
 private fun applyAppearance(appearance: Appearance) {
     document.documentElement?.setAttribute("data-text", appearance.textSize.key)
     document.documentElement?.setAttribute("data-theme", appearance.theme.key)
+    DateText.current = appearance.dateFormat
 }
 
 fun main() {

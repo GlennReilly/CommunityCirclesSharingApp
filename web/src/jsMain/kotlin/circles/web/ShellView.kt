@@ -118,6 +118,10 @@ const val FIELD_CURRENT = "current"
 const val FIELD_NEW = "new"
 const val FIELD_MINUTES = "minutes"
 const val FORM_APPEARANCE = "appearance-form"
+const val FIELD_DATE_FORMAT = "date-format"
+const val ID_DATE_FORMAT_EXAMPLE = "date-format-example"
+/** A text under a date box that shows the date in the chosen format; its value is the id of the date input (ADR 0080). */
+const val ATTR_DATE_ECHO = "data-date-echo"
 const val FIELD_TEXT_SIZE = "text-size"
 const val FIELD_THEME = "theme"
 const val FIELD_LINK = "invite-link"
@@ -321,6 +325,7 @@ fun FlowOrPhrasingContent.personName(home: HomeData, member: MemberId, showStatu
  * into the DOM and the tests render it to a string. Focus goes to the `main` landmark after a screen change.
  */
 fun FlowContent.shell(state: AppState) {
+    DateText.current = state.appearance.dateFormat // every date on this page is written in the chosen format (ADR 0080)
     header {
         // The app's name is not a heading: each page has exactly one h1 of its own.
         p {
@@ -780,7 +785,7 @@ private fun FlowContent.letInForm(waiting: WaitingDevice) {
 private fun FlowContent.vouchPart(home: HomeData, person: MemberSummary) {
     val vouchedUntil = person.vouchedByMeUntil
     if (vouchedUntil != null) {
-        p { +"You vouch for them until ${CalendarDay.format(vouchedUntil)}." }
+        p { +"You vouch for them until ${DateText.show(vouchedUntil)}." }
     } else if (home.canVouch) {
         p { +"Vouch only for people you know. ${home.rules.current.vouchesForRegular} vouches from members at ${TierText.orAbove(Tier.REGULAR)} give a new member ${TierText.label(Tier.REGULAR)} access." }
         button(type = ButtonType.button) {
@@ -858,7 +863,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                         myCode(home, person.fingerprint, state)
                     }
                 } else {
-                    person.vouchedByMeUntil?.let { p { +"You vouch for them until ${CalendarDay.format(it)}." } }
+                    person.vouchedByMeUntil?.let { p { +"You vouch for them until ${DateText.show(it)}." } }
                     button(type = ButtonType.button) {
                         attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
                         attributes[ATTR_MEMBER] = person.member.v
@@ -956,14 +961,14 @@ private fun FlowContent.personActions(home: HomeData, person: MemberSummary) {
         person.nameConfirmed -> p { +"This member's identity is already confirmed." }
         else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm a member's identity." }
     }
-    if (home.isSteward && !person.isSteward && !person.nameConfirmed) {
-        p { +"This member cannot become a steward until someone has confirmed their identity." }
-    }
     val vouchedUntil = person.vouchedByMeUntil
     when {
-        vouchedUntil != null -> p { +"You vouch for this member until ${CalendarDay.format(vouchedUntil)}." }
+        vouchedUntil != null -> p { +"You vouch for this member until ${DateText.show(vouchedUntil)}." }
         home.canVouch -> launch("Vouch")
         else -> p { +"Only members at ${TierText.orAbove(Tier.REGULAR)}, or a steward, can vouch for another member." }
+    }
+    if (home.isSteward && !person.isSteward && !person.nameConfirmed) {
+        p { +"This member cannot become a steward until someone has confirmed their identity." }
     }
 }
 
@@ -1223,6 +1228,15 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
     archivedItems(home)
 }
 
+/** The date a date box holds, written in the chosen format under the box (the box itself shows the browser's own format, ADR 0080). */
+private fun FlowContent.dateEcho(inputId: String, day: Int?) {
+    p {
+        attributes[ATTR_DATE_ECHO] = inputId
+        attributes["aria-live"] = "polite"
+        +(day?.let { DateText.show(it) } ?: "")
+    }
+}
+
 /** Someone else's item: the button to ask for it, or why not yet and how to unlock (shared by the Items page and a member's page). */
 private fun FlowContent.itemAccess(item: ItemSummary) {
     val access = item.access
@@ -1325,13 +1339,13 @@ private fun outcomeLabel(outcome: ReturnOutcome): String = when (outcome) {
     ReturnOutcome.LOST_REPORTED -> "Lost, reported (no penalty for telling)"
 }
 
-private fun window(loan: LoanSummary): String = "${CalendarDay.format(loan.fromDay)} to ${CalendarDay.format(loan.toDay)}"
+private fun window(loan: LoanSummary): String = DateText.showRange(loan.fromDay, loan.toDay)
 
 
 /** How a loan's end day reads today (ADR 0059): plain, kind words with the date; it changes nothing about standing. */
 fun dueLine(toDay: Int, today: Int): String {
     val left = toDay - today
-    val date = CalendarDay.format(toDay)
+    val date = DateText.show(toDay)
     return when {
         left == 0 -> "Due back today ($date)."
         left > 0 -> "Due back in $left ${if (left == 1) "day" else "days"}, on $date."
@@ -1421,10 +1435,11 @@ private fun FlowContent.borrow(home: HomeData) {
                                 input(type = InputType.date, name = field) {
                                     id = "$field-${loan.loan.v}"
                                     required = true
-                                    value = CalendarDay.format(day)
-                                    attributes["min"] = CalendarDay.format(home.today)
+                                    value = CalendarDay.format(day) // iso: the value of a date input is always YYYY-MM-DD
+                                    attributes["min"] = CalendarDay.format(home.today) // iso: the value of a date input is always YYYY-MM-DD
                                     attributes[ATTR_MIN] = ISO_DATE_CHARS.toString()
                                 }
+                                dateEcho("$field-${loan.loan.v}", day)
                             }
                             formSubmit("Approve with these dates", ready = true)
                         }
@@ -1636,7 +1651,7 @@ private fun FlowContent.historySearch(total: Int) {
 private fun FlowContent.historyEntry(entry: HistoryEntry) {
     val loan = entry.loan
     p { +"Dates: ${window(loan)}" }
-    loan.returnedDay?.takeIf { it != loan.toDay }?.let { p { +"Reported back: ${CalendarDay.format(it)}" } }
+    loan.returnedDay?.takeIf { it != loan.toDay }?.let { p { +"Reported back: ${DateText.show(it)}" } }
     p { +historyOutcomeText(entry.outcome) }
     entry.dispute?.let { p { +historyDisputeText(it, entry.claim) } }
 }
@@ -1767,9 +1782,10 @@ private fun FlowContent.requestForm(item: ItemSummary?, home: HomeData) {
             input(type = InputType.date, name = field) {
                 id = field
                 required = true
-                attributes["min"] = CalendarDay.format(home.today)
+                attributes["min"] = CalendarDay.format(home.today) // iso: the value of a date input is always YYYY-MM-DD
                 attributes[ATTR_MIN] = ISO_DATE_CHARS.toString()
             }
+            dateEcho(field, null)
         }
         label {
             attributes["for"] = FIELD_NOTE
@@ -1809,7 +1825,7 @@ private fun FlowContent.passwordInput(field: String, label: String, autocomplete
 }
 
 /** Text size and colours: kept in this browser only, applied at once when saved. */
-private fun FlowContent.appearanceSection(current: Appearance) {
+private fun FlowContent.appearanceSection(current: Appearance, today: Int?) {
     section {
         h2 { +"Appearance" }
         form {
@@ -1844,9 +1860,29 @@ private fun FlowContent.appearanceSection(current: Appearance) {
                     }
                 }
             }
+            label {
+                attributes["for"] = FIELD_DATE_FORMAT
+                +"Date format: "
+            }
+            select {
+                id = FIELD_DATE_FORMAT
+                name = FIELD_DATE_FORMAT
+                for (choice in circles.app.DateFormat.entries) {
+                    option {
+                        value = choice.key
+                        selected = choice == current.dateFormat
+                        +choice.label
+                    }
+                }
+            }
+            p {
+                id = ID_DATE_FORMAT_EXAMPLE
+                role = "status"
+                +"Example: ${circles.app.DateFormats.show(today ?: 0, current.dateFormat)}"
+            }
             formSubmit("Save", ready = true)
         }
-        p { +"These choices stay in this browser only." }
+        p { +"These choices stay in this browser only. Boxes where you pick a date show the date the way your browser writes it, and a page cannot change that. The date you chose is also written out in words under the box." }
     }
 }
 
@@ -1868,7 +1904,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
         }
     }
     devicesSection(home, state)
-    appearanceSection(state.appearance)
+    appearanceSection(state.appearance, (state.model as? AppModel.Open)?.home?.today)
     section {
         h2 { +"Passphrase" }
         p { +"Your passphrase protects your keys on this device. Changing it does not change your identity in the circle." }
@@ -2042,8 +2078,8 @@ private fun FlowContent.stewards(home: HomeData) {
                         if (steward.isMe) +" (you)"
                     }
                     p {
-                        +(steward.sinceDay?.let { "Steward since ${CalendarDay.format(it)}" } ?: "Founding steward")
-                        steward.votesFromDay?.let { +". Can vote from ${CalendarDay.format(it)}" }
+                        +(steward.sinceDay?.let { "Steward since ${DateText.show(it)}" } ?: "Founding steward")
+                        steward.votesFromDay?.let { +". Can vote from ${DateText.show(it)}" }
                     }
                     if (home.isSteward && home.stewardCount > 1) {
                         details {
@@ -2553,7 +2589,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
     for (pause in home.pauses) {
         section {
             if (pause.role == PauseRole.SUBJECT) {
-                h2 { +(if (pause.status == PauseStatus.LIVE) "Your access is paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "A pause has been proposed for you") }
+                h2 { +(if (pause.status == PauseStatus.LIVE) "Your access is paused until ${DateText.show(pause.untilDay ?: 0)}" else "A pause has been proposed for you") }
                 p { +"Reason given: ${pause.reason}" }
                 p { +"Essentials stay open to you. ${pause.agreeing} of ${pause.needed} reviewers have agreed." }
                 if (pause.reviewers.isNotEmpty()) p {
@@ -2586,7 +2622,7 @@ private fun FlowContent.pausesPage(home: HomeData) {
             } else {
                 h2 {
                     personName(home, pause.subject, showStatus = false)
-                    +": ${if (pause.status == PauseStatus.LIVE) "paused until ${CalendarDay.format(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}"
+                    +": ${if (pause.status == PauseStatus.LIVE) "paused until ${DateText.show(pause.untilDay ?: 0)}" else "pause proposed for ${pause.days} days"}"
                 }
                 p { +"Reason: ${pause.reason}" }
                 p { +"${pause.agreeing} of ${pause.needed} reviewers have agreed." }
@@ -3031,8 +3067,8 @@ private fun FlowContent.itemTagPage(home: HomeData, state: AppState) {
 /** One line saying how an earlier pause went, with its dates. Public so the wording is tested. */
 fun pauseHistoryLine(entry: PauseHistoryEntry): String = when (entry.status) {
     PauseStatus.LIFTED ->
-        if (entry.startedDay != null) "paused from ${CalendarDay.format(entry.startedDay ?: 0)}, lifted on ${CalendarDay.format(entry.endedDay)}."
-        else "proposed on ${CalendarDay.format(entry.proposedDay)}, cancelled on ${CalendarDay.format(entry.endedDay)}."
-    PauseStatus.ENDED -> "paused from ${CalendarDay.format(entry.startedDay ?: entry.proposedDay)} to ${CalendarDay.format(entry.endedDay)}, and ended on its date."
-    else -> "proposed on ${CalendarDay.format(entry.proposedDay)}, not agreed in time, so nothing happened."
+        if (entry.startedDay != null) "paused from ${DateText.show(entry.startedDay ?: 0)}, lifted on ${DateText.show(entry.endedDay)}."
+        else "proposed on ${DateText.show(entry.proposedDay)}, cancelled on ${DateText.show(entry.endedDay)}."
+    PauseStatus.ENDED -> "paused from ${DateText.show(entry.startedDay ?: entry.proposedDay)} to ${DateText.show(entry.endedDay)}, and ended on its date."
+    else -> "proposed on ${DateText.show(entry.proposedDay)}, not agreed in time, so nothing happened."
 }

@@ -47,6 +47,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val circle = CircleId("c".repeat(32))
+/** A day in the default (long) date format, which every rendered page uses unless the state says otherwise (ADR 0080). */
+private fun ld(day: Int): String = circles.app.DateFormats.show(day, circles.app.DateFormat.LONG)
+
 private val me = MemberId("a".repeat(32))
 private val bea = MemberId("b".repeat(32))
 private val beaDevice = DeviceId("d".repeat(32))
@@ -272,7 +275,7 @@ class ShellViewTest {
                 assertTrue(match.groupValues[1].endsWith(": "), "label text was '${match.groupValues[1]}'")
             }
         }
-        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1 + 2 + 2, labels) // + the name on Settings and on the first-name page (ADR 0068)
+        assertEquals(8 + 3 + 1 + 3 + 2 + 4 + 4 + 9 + 1 - 1 + 2 + 2 + 1, labels) // + the name on Settings and on the first-name page (ADR 0068) + the date format on Settings (ADR 0080)
     }
 
     @Test fun everyPassphraseButtonStartsHiddenUntilThePassphraseIsLongEnough() {
@@ -425,7 +428,8 @@ class ShellViewTest {
         assertTrue("Text size: " in form && "Colours: " in form)
         assertTrue(Regex("""<option[^>]*value="large"[^>]*selected""").containsMatchIn(form))
         assertTrue(Regex("""<option[^>]*value="dark"[^>]*selected""").containsMatchIn(form))
-        assertEquals(2, Regex("<option[^>]*selected").findAll(form).count())
+        assertEquals(3, Regex("<option[^>]*selected").findAll(form).count(), "text size, colours and the date format")
+        assertTrue("Date format: " in form)
     }
 
     @Test fun unknownStoredAppearanceFallsBackToTheDefaults() {
@@ -591,7 +595,7 @@ class ShellViewTest {
         val html = borrow(loan("a", LoanRole.OWNER, LoanStatus.REQUESTED, note = "for the fence"))
         assertTrue("Requests to answer" in html)
         assertTrue("Note: for the fence" in html)
-        assertTrue("2026-11-03 to 2026-11-05" in html)
+        assertTrue("3 Nov 2026 to 5 Nov 2026" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_APPROVE_LOAN"""" in html && """$ATTR_ACTION="$ACTION_DECLINE_LOAN"""" in html)
         assertTrue("""$ATTR_LOAN="${"a".repeat(32)}"""" in html)
     }
@@ -678,8 +682,8 @@ class ShellViewTest {
         assertTrue("""$ATTR_MEMBER="${bea.v}"""" in html && "2 vouches from members at Level 2 or above give a new member Level 2 access." in html)
         val already = home(people = listOf(mine, theirs.copy(vouchedByMeUntil = 20_939))).copy(canVouch = true)
         assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in checkPage(already, PersonCheck(bea)))
-        assertTrue("You vouch for them until 2027-05-01." in checkPage(already, PersonCheck(bea)))
-        assertTrue("You vouch for them until 2027-05-01." in members(already), "the card still says so")
+        assertTrue("You vouch for them until 1 May 2027." in checkPage(already, PersonCheck(bea)))
+        assertTrue("You vouch for them until 1 May 2027." in members(already), "the card still says so")
         assertFalse("""$ATTR_ACTION="$ACTION_VOUCH"""" in checkPage(home(people = listOf(mine, theirs)).copy(canVouch = false), PersonCheck(bea)), "new members see no vouch button")
     }
 
@@ -755,8 +759,8 @@ class ShellViewTest {
     @Test fun theStewardsPageListsStewardsWithTheirSinceDateAndCoolingOff() {
         val html = stewards(true, listOf(meSteward, beaSteward))
         assertTrue("Founding steward" in html)
-        assertTrue("Steward since 2026-11-02" in html)
-        assertTrue("Can vote from 2026-11-09" in html)
+        assertTrue("Steward since 2 Nov 2026" in html)
+        assertTrue("Can vote from 9 Nov 2026" in html)
         assertTrue("Stewards who must agree: 2" in html)
     }
 
@@ -1302,11 +1306,12 @@ class ShellViewTest {
     // ---- return reminders (ADR 0059) ----
 
     @Test fun dueLinesUseKindPlainWords() {
-        assertEquals("Due back today (2026-11-04).", dueLine(20_761, 20_761))
-        assertEquals("Due back in 1 day, on 2026-11-05.", dueLine(20_762, 20_761))
-        assertEquals("Due back in 3 days, on 2026-11-07.", dueLine(20_764, 20_761))
-        assertEquals("Back was expected 2 days ago, on 2026-11-02.", dueLine(20_759, 20_761))
-        assertEquals("Back was expected 1 day ago, on 2026-11-03.", dueLine(20_760, 20_761))
+        DateText.current = circles.app.DateFormat.LONG
+        assertEquals("Due back today (4 Nov 2026).", dueLine(20_761, 20_761))
+        assertEquals("Due back in 1 day, on 5 Nov 2026.", dueLine(20_762, 20_761))
+        assertEquals("Due back in 3 days, on 7 Nov 2026.", dueLine(20_764, 20_761))
+        assertEquals("Back was expected 2 days ago, on 2 Nov 2026.", dueLine(20_759, 20_761))
+        assertEquals("Back was expected 1 day ago, on 3 Nov 2026.", dueLine(20_760, 20_761))
     }
 
     @Test fun theBorrowPageShowsWhenThingsAreDueAndTheOwnerGetsAnInPersonNudgeOnlyWhenLate() {
@@ -1588,12 +1593,12 @@ class NamesViewTest {
         )
         val html = render(open(home(items = listOf(ladder, drill), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
         assertTrue("Loan history" in html && "Ladder" in html && "Bea" in html)
-        assertTrue("Returned late." in html && "Reported back: ${circles.app.CalendarDay.format(20_704)}" in html)
+        assertTrue("Returned late." in html && "Reported back: ${ld(20_704)}" in html)
         assertTrue("damage reported (no penalty for telling)" in html && "report of damage was upheld" in html)
         assertTrue("Declined." in html)
         assertEquals(3, Regex("Dates: ").findAll(html).count(), "only loans of this item that I own")
         assertFalse("PRIVATE-DETAILS" in html)
-        assertTrue(html.indexOf(circles.app.CalendarDay.format(20_720)) < html.indexOf(circles.app.CalendarDay.format(20_700)), "newest first")
+        assertTrue(html.indexOf(ld(20_720)) < html.indexOf(ld(20_700)), "newest first")
     }
 
     @Test fun anOwnerHistoryWithNoLoansSaysSo() {
@@ -1645,7 +1650,7 @@ class NamesViewTest {
         val entry = circles.app.LoanHistory.entryOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_704))
         val text = historySearchText(entry, "Long Ladder", "Bea")
         assertEquals(text.lowercase(), text)
-        assertTrue("long ladder" in text && "bea" in text && "returned late" in text && circles.app.CalendarDay.format(20_700) in text)
+        assertTrue("long ladder" in text && "bea" in text && "returned late" in text && ld(20_700).lowercase() in text)
         val disputed = circles.app.LoanHistory.entryOf(past("2", LoanRole.OWNER, LoanStatus.RETURNED, 1, 2, ReturnOutcome.DAMAGED_REPORTED, 2, dispute = DisputeSummary(DisputeClaim.DAMAGE, null, 3, DisputeStatus.UPHELD)))
         assertTrue("upheld" in historySearchText(disputed, "x", "y"))
     }
@@ -1765,7 +1770,7 @@ class NamesViewTest {
         assertTrue("Your history with this member" in html)
         assertEquals(2, Regex("Dates: ").findAll(html).count(), "the two loans between us; the steward-view loan is not shown")
         assertTrue("You lent it." in html && "You borrowed it." in html && "Declined." in html)
-        assertFalse(circles.app.CalendarDay.format(20_720) in html, "a loan I was not part of is not shown")
+        assertFalse(ld(20_720) in html, "a loan I was not part of is not shown")
         assertFalse("PRIVATE-DETAILS" in html && "Garage at the back" in html, "no private description")
         assertTrue(ACTION_CHECK_PERSON in html && "Check identity in person" in html && """$ATTR_MEMBER="${bea.v}"""" in html)
         assertFalse("Your level" in html || "level:" in html.lowercase() || "points" in html.lowercase() || "pause" in html.lowercase(), "no level, points or pauses of the member")
@@ -1872,5 +1877,56 @@ class NamesViewTest {
         val confirmed = unconfirmed.copy(nameConfirmedBy = listOf(me))
         assertFalse("cannot become a steward" in render(personState(bea, home(people = listOf(meSummary, confirmed)))))
         assertFalse("cannot become a steward" in render(personState(bea, home(steward = false, people = listOf(meSummary, unconfirmed)))), "only a steward needs the hint")
+    }
+
+    // ---- date format (ADR 0080) ----
+
+    private fun loansPage(format: circles.app.DateFormat) = render(
+        open(home(items = listOf(ladder), loans = listOf(past("1", LoanRole.OWNER, LoanStatus.RETURNED, 20_700, 20_702, ReturnOutcome.OK, returned = 20_704))))
+            .copy(screen = Screen.ItemHistory, historyOf = ladder.item, appearance = Appearance(dateFormat = format)),
+    )
+
+    @Test fun everyDateOnAPageFollowsTheChosenFormat() {
+        val from = circles.app.CalendarDay.format(20_700)
+        assertEquals("2026-09-04", from)
+        assertTrue("Dates: 4 Sep 2026 to 6 Sep 2026" in loansPage(circles.app.DateFormat.LONG) && "Reported back: 8 Sep 2026" in loansPage(circles.app.DateFormat.LONG))
+        assertTrue("Dates: 04/09/2026 to 06/09/2026" in loansPage(circles.app.DateFormat.DAY_FIRST))
+        assertTrue("Dates: 09/04/2026 to 09/06/2026" in loansPage(circles.app.DateFormat.MONTH_FIRST))
+        assertTrue("Dates: 2026-09-04 to 2026-09-06" in loansPage(circles.app.DateFormat.ISO) && "Reported back: 2026-09-08" in loansPage(circles.app.DateFormat.ISO))
+    }
+
+    @Test fun theSearchTextAndDueLinesUseTheChosenFormatToo() {
+        render(open().copy(appearance = Appearance(dateFormat = circles.app.DateFormat.DAY_FIRST)))
+        assertEquals("Due back today (04/11/2026).", dueLine(20_761, 20_761))
+        val html = loansPage(circles.app.DateFormat.MONTH_FIRST)
+        assertTrue("09/04/2026" in html.substringAfter(ATTR_HISTORY_TEXT).substringBefore(">"), "a search by date finds the date as it is shown")
+        render(open())
+    }
+
+    @Test fun settingsHasADateFormatChoiceWithALiveExampleAndSaysWhatTheDateBoxesDo() {
+        val html = render(open(home()).copy(screen = Screen.Settings, appearance = Appearance(dateFormat = circles.app.DateFormat.MONTH_FIRST)))
+        assertTrue("Date format: " in html && """id="$FIELD_DATE_FORMAT"""" in html)
+        for (choice in circles.app.DateFormat.entries) assertTrue("""value="${choice.key}"""" in html && choice.label in html, choice.key)
+        assertTrue(Regex("""<option[^>]*value="month-first"[^>]*selected""").containsMatchIn(html))
+        assertTrue("""id="$ID_DATE_FORMAT_EXAMPLE"""" in html && "Example: 11/02/2026" in html)
+        assertTrue("a page cannot change that" in html && "written out in words under the box" in html)
+        val standard = render(open(home()).copy(screen = Screen.Settings))
+        assertTrue("Example: 2 Nov 2026" in standard, "the default is the long format")
+    }
+
+    @Test fun dateBoxesCarryATextUnderThemInTheChosenFormatAndKeepIsoValues() {
+        val request = LoanSummary(LoanId("1".repeat(32)), ladder.item, "Ladder", LoanRole.OWNER, bea, 20_763, 20_765, LoanStatus.REQUESTED, false, false, null, null)
+        val change = render(open(home(items = listOf(ladder), loans = listOf(request)).copy(today = 20_759)).copy(screen = Screen.Borrow, appearance = Appearance(dateFormat = circles.app.DateFormat.DAY_FIRST)))
+        assertTrue("""value="2026-11-06"""" in change, "a date box always holds YYYY-MM-DD")
+        assertTrue(Regex("""$ATTR_DATE_ECHO="from-${request.loan.v}"[^>]*>06/11/2026<""").containsMatchIn(change), "the same day written out under the box")
+        val ask = render(open(home(items = listOf(drill))).copy(screen = Screen.RequestLoan, borrowing = drill.item))
+        assertTrue("""$ATTR_DATE_ECHO="$FIELD_FROM"""" in ask && """$ATTR_DATE_ECHO="$FIELD_TO"""" in ask, "empty until a date is chosen")
+    }
+
+    @Test fun theChoiceIsKeptInTheAppearanceAndAnUnknownKeyGivesTheDefault() {
+        assertEquals(circles.app.DateFormat.ISO, Appearance.fromKeys(null, null, "iso").dateFormat)
+        assertEquals(circles.app.DateFormat.DEFAULT, Appearance.fromKeys("large", "dark", "nonsense").dateFormat)
+        assertEquals(circles.app.DateFormat.LONG, Appearance().dateFormat)
+        assertEquals(TextSize.LARGE, Appearance.fromKeys("large", null, "iso").textSize)
     }
 }

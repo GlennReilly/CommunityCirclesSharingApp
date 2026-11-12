@@ -138,6 +138,8 @@ try {
   await bea.evaluate('document.querySelector("details summary").click()'); await until(bea, 'document.querySelector("img.full[src^=\\"blob:\\"]") !== null', 'full photo after opening', 30000); ok('opening "Larger photos" loads the full-size picture');
   // Borrowing: request, answer, hand over, return.
   const iso = n => new Date(Math.floor(Date.now() / 86400000) * 86400000 + n * 86400000).toISOString().slice(0, 10);
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const showDate = (isoText, format) => { const [y, m, d] = isoText.split('-'); return { long: `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`, 'day-first': `${d}/${m}/${y}`, 'month-first': `${m}/${d}/${y}`, iso: isoText }[format]; };
   await bea.evaluate('location.hash = "#/items"'); await until(bea, has(bea, 'Long ladder'), 'bea on items');
   await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'request page');
   const loanLabels = await bea.evaluate('[...document.querySelectorAll("label")].map(l => l.textContent)');
@@ -146,6 +148,9 @@ try {
   await checkAccessibility(bea, 'ask to borrow');
   await setField(bea, 'loan-request-form', 'from', iso(0)); if (!(await buttonHidden(bea, 'loan-request-form'))) throw new Error('button visible with one date');
   await setField(bea, 'loan-request-form', 'to', iso(2)); await setField(bea, 'loan-request-form', 'note', 'for the fence');
+  { const echoed = await bea.evaluate('document.querySelector("[data-date-echo=from]").textContent');
+    if (echoed !== showDate(iso(0), 'long')) throw new Error('the date under the box should read ' + showDate(iso(0), 'long') + ': ' + echoed);
+    ok('under a date box the chosen date is written in the chosen format: ' + echoed); }
   if (await buttonHidden(bea, 'loan-request-form')) throw new Error('button hidden with both dates');
   await bea.evaluate('document.getElementById("loan-request-form").requestSubmit()');
   await until(bea, has(bea, 'Waiting for an answer') + ' && ' + has(bea, 'Long ladder'), 'bea waiting'); ok('bea asked to borrow the ladder');
@@ -238,12 +243,27 @@ try {
   const borrowerHistory = await text(bea);
   if ((borrowerHistory.match(/Dates:/g) || []).length < 4 || !borrowerHistory.includes('Long ladder') || !borrowerHistory.includes('Returned late.')) throw new Error('borrower history: ' + borrowerHistory);
   ok('the borrower sees the ladder in their borrowing history with "Ask to borrow again"');
-  for (const [, from, back] of borrowerHistory.matchAll(/Dates: (\d{4}-\d\d-\d\d) to \d{4}-\d\d-\d\d\s+Reported back: (\d{4}-\d\d-\d\d)/g)) if (back < from) throw new Error('reported back before the loan started: ' + from + ' ' + back);
+  for (const [, from, back] of borrowerHistory.matchAll(/Dates: (\d{1,2} \w{3} \d{4}) to \d{1,2} \w{3} \d{4}\s+Reported back: (\d{1,2} \w{3} \d{4})/g)) if (Date.parse(back + ' UTC') < Date.parse(from + ' UTC')) throw new Error('reported back before the loan started: ' + from + ' ' + back);
   await search(bea, 'cancelled'); await until(bea, 'document.getElementById("history-count").textContent === "0 loans" && document.body.innerText.includes("Long ladder") === false', 'no cancelled loans hides the whole item group');
   await search(bea, 'alice'); await until(bea, 'document.getElementById("history-count").textContent === "4 loans" && document.body.innerText.includes("Long ladder")', 'the owner name finds the item');
   await search(bea, '');
   ok('the borrowing history search hides an item with no matching loan');
   await checkAccessibility(bea, 'my borrowing history');
+  // Date format (ADR 0080): each choice changes the dates on the history page, is remembered, and shows a live example.
+  for (const format of ['day-first', 'month-first', 'iso', 'long']) {
+    await bea.evaluate('location.hash = "#/settings"'); await until(bea, 'document.getElementById("date-format") !== null', 'settings date format');
+    await bea.evaluate(`(() => { const s = document.getElementById('date-format'); s.value = '${format}'; s.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await until(bea, `localStorage.getItem('circles.dateFormat') === '${format}' && document.getElementById('date-format').value === '${format}'`, 'date format saved ' + format);
+    const example = await bea.evaluate('document.getElementById("date-format-example").textContent');
+    if (!example.endsWith(showDate(iso(0), format))) throw new Error('example for ' + format + ': ' + example);
+    await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'history in ' + format);
+    const shown = await text(bea);
+    if (!shown.includes('Dates: ' + showDate(iso(0), format) + ' to ' + showDate(iso(2), format))) throw new Error('history dates in ' + format + ': ' + shown);
+  }
+  ok('each of the four date formats changes the dates on the page at once, is remembered, and has a live example');
+  await bea.evaluate('location.hash = "#/settings"'); await until(bea, has(bea, 'a page cannot change that'), 'the date box limit is said');
+  await checkAccessibility(bea, 'settings with the date format');
+  await bea.evaluate('location.hash = "#/borrow/history"'); await until(bea, has(bea, 'Ask to borrow again'), 'history again');
   await click(bea, 'borrow-item'); await until(bea, 'document.getElementById("loan-request-form") !== null', 'borrow again opens the request form'); ok('"Ask to borrow again" opens the request form for the ladder');
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items again');
   { const label = await alice.evaluate('document.querySelector("[data-action=retire-item]").textContent'); const pageText = await alice.evaluate('document.querySelector("main").textContent'); if (label !== 'Archive this item' || /Remove/.test(pageText)) throw new Error('item archive wording: ' + label + ' / ' + pageText); ok('the item is archived with Archive wording and no Remove wording on the Items page'); }
