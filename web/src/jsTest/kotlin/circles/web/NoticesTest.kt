@@ -22,7 +22,12 @@ class NoticesTest {
             assertTrue("Bea Jones" in text, text)
             assertFalse(Regex("""^(They|Them|It)\b""").containsMatchIn(text), text)
         }
-        assertEquals("Bea Jones has been let in. The circle opens for their device once it syncs.", Notices.letIn("Bea Jones"))
+        assertEquals("Bea Jones's access has now been approved. The circle opens for their device once it syncs.", Notices.letIn("Bea Jones"))
+        assertEquals("Chris's access has now been approved. The circle opens for their device once it syncs.", Notices.letIn("Chris"), "'s after every name")
+        assertEquals("James's access has now been approved. The circle opens for their device once it syncs.", Notices.letIn("James"), "even a name that ends in s")
+        assertEquals("The new member's access has now been approved. The circle opens for their device once it syncs.", Notices.letIn(Notices.NEW_MEMBER))
+        assertEquals("Could not approve Bea Jones's access just now. Try again after the next sync.", Notices.letInFailed("Bea Jones"))
+        assertEquals("Could not approve the new member's access just now. Try again after the next sync.", Notices.letInFailed(Notices.NEW_MEMBER))
     }
 
     @Test fun theNameComesFromTheDisplayNamesAndFallsBackToAPlainPhrase() {

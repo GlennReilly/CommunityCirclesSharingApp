@@ -87,7 +87,7 @@ try {
   await checkAccessibility(alice, 'check identity, letting in');
   await alice.evaluate(`(() => { const b = document.getElementById("${letIn}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   if (await buttonHidden(alice, letIn)) throw new Error('Let them in stays hidden after the tick'); ok('"Let them in" appears only after ticking that she checked bea in person');
-  await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'has been let in. The circle opens for their device') + ' && location.hash === "#/members"', 'let in, back on members');
+  await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'access has now been approved. The circle opens for their device') + ' && location.hash === "#/members"', 'let in, back on members');
   await sleep(1500); await click(alice, 'sync'); await until(alice, '!' + has(alice, 'Waiting to be let in'), 'waiting list cleared'); ok('alice let bea in');
   await click(bea, 'sync'); await until(bea, 'document.getElementById("name-form") !== null', 'bea is asked for her name'); ok('bea can now read the circle and is asked for her name first');
   // ADR 0069: a name another member holds is taken, whatever the case, and the person is told so on the same page.

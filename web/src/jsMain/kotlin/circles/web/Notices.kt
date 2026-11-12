@@ -15,9 +15,11 @@ object Notices {
     fun nameFor(home: HomeData?, member: MemberId?, fallback: String): String =
         member?.let { home?.names?.get(it)?.name }?.takeIf { it.isNotBlank() } ?: fallback
 
-    fun letIn(name: String): String = "$name has been let in. The circle opens for their device once it syncs."
+    /** "'s" always follows the name, including names that end in s (ADR 0078). The fallback phrase starts the sentence, so it gets a capital. */
+    fun letIn(name: String): String =
+        (if (name == NEW_MEMBER) name.replaceFirstChar { it.uppercase() } else name) + "'s access has now been approved. The circle opens for their device once it syncs."
 
-    fun letInFailed(name: String): String = "Could not let $name in just now. Try again after the next sync."
+    fun letInFailed(name: String): String = "Could not approve $name's access just now. Try again after the next sync."
 
     fun vouched(name: String): String = "You vouched for $name."
 
