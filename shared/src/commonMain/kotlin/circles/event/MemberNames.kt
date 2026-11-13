@@ -80,14 +80,14 @@ object DisplayNames {
 
     /** Why [name] is not acceptable as stored, or null if it is. Platform-independent: it looks only at code points. */
     fun problem(name: String): String? {
-        val points = codePoints(name) ?: return "a name must be valid text"
+        val points = codePoints(name) ?: return "A name must be valid text."
         return when {
-            points.isEmpty() -> "a name cannot be empty"
-            points.size > MAX_DISPLAY_NAME_CODE_POINTS -> "a name is at most $MAX_DISPLAY_NAME_CODE_POINTS characters"
-            points.any { isControl(it) || it in FORBIDDEN_IN_NAME } -> "a name cannot hold control characters, invisible marks or unusual spaces"
-            points.first() == SPACE.code || points.last() == SPACE.code -> "a name cannot start or end with a space"
-            name.contains("$SPACE$SPACE") -> "a name cannot hold two spaces in a row"
-            looksLikeAnId(name) -> "a name cannot be just a number or look like a member code"
+            points.isEmpty() -> "A name cannot be empty."
+            points.size > MAX_DISPLAY_NAME_CODE_POINTS -> "A name can have at most $MAX_DISPLAY_NAME_CODE_POINTS characters."
+            points.any { isControl(it) || it in FORBIDDEN_IN_NAME } -> "A name cannot hold control characters, invisible marks or unusual spaces."
+            points.first() == SPACE.code || points.last() == SPACE.code -> "A name cannot start or end with a space."
+            name.contains("$SPACE$SPACE") -> "A name cannot hold two spaces in a row."
+            looksLikeAnId(name) -> "A name cannot be just a number or look like a member code."
             else -> null
         }
     }
@@ -125,7 +125,7 @@ object DisplayNames {
 }
 
 /** Why the fold refuses a `member.profile` whose name another current member already holds (ADR 0069). */
-const val NAME_TAKEN_REASON = "that name is already used by another member of the circle"
+const val NAME_TAKEN_REASON = "That name is already used by another member of the circle."
 
 /**
  * The key two names are compared by to decide whether a name is taken (ADR 0069). The text is already NFKC (done when it

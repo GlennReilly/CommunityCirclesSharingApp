@@ -262,11 +262,11 @@ internal class MarketFold(
     private fun upsert(author: MemberId, v: ItemUpsert): String? {
         // Wraps go to the owner's devices and, when the key is changed after a removal (ADR 0049), to members whose loan is still open.
         val mayHold = loans.values.filter { it.item == v.item && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) }.map { it.borrower }.toSet() + author
-        if (v.keyWraps.any { devices[it.device]?.registration?.member !in mayHold }) return "keyWraps must go to the owner's own devices or to borrowers with an open loan"
+        if (v.keyWraps.any { devices[it.device]?.registration?.member !in mayHold }) return "An item's key can only be sent to the owner's own devices or to borrowers with an open loan."
         val existing = items[v.item]
         if (existing != null) {
-            if (existing.owner != author) return "only the owner may change an item"
-            if (existing.retired) return "item is retired"
+            if (existing.owner != author) return "Only the owner of an item can change it."
+            if (existing.retired) return "The item has been archived, so it cannot be changed or asked for."
         }
         val wraps = (existing?.keyWraps.orEmpty()) + (v.detailKeyId to (existing?.keyWraps?.get(v.detailKeyId).orEmpty() + v.keyWraps.associate { it.device to it.wrapped }))
         items[v.item] = ItemState(v.item, author, v.name, v.itemClass, v.minTier, v.detailKeyId, false, wraps, existing?.sealedDetails.orEmpty(), v.photos)
@@ -274,27 +274,27 @@ internal class MarketFold(
     }
 
     private fun retire(author: MemberId, v: ItemRetire): String? {
-        val item = items[v.item] ?: return "unknown item"
-        if (item.owner != author) return "only the owner may retire an item"
-        if (item.retired) return "item is already retired"
+        val item = items[v.item] ?: return "That item is not in the circle."
+        if (item.owner != author) return "Only the owner of an item can archive it."
+        if (item.retired) return "The item is already archived."
         items[v.item] = item.copy(retired = true)
         return null
     }
 
     /** Only the owner, only an archived item. Everything else about the item (id, key, details, photos, loans) is as it was (ADR 0075). */
     private fun restore(author: MemberId, v: ItemRestore): String? {
-        val item = items[v.item] ?: return "unknown item"
-        if (item.owner != author) return "only the owner may restore an item"
-        if (!item.retired) return "item is not archived"
+        val item = items[v.item] ?: return "That item is not in the circle."
+        if (item.owner != author) return "Only the owner of an item can restore it."
+        if (!item.retired) return "The item is not archived, so there is nothing to restore."
         items[v.item] = item.copy(retired = false)
         return null
     }
 
     private fun detail(author: MemberId, v: ItemDetail): String? {
-        val item = items[v.item] ?: return "unknown item"
-        if (item.owner != author) return "only the owner may attach detail"
-        if (item.retired) return "item is retired"
-        if (v.detailKeyId != item.detailKeyId) return "detail is sealed under a key that is not the item's current one"
+        val item = items[v.item] ?: return "That item is not in the circle."
+        if (item.owner != author) return "Only the owner of an item can add details to it."
+        if (item.retired) return "The item has been archived, so it cannot be changed or asked for."
+        if (v.detailKeyId != item.detailKeyId) return "The item's details were sealed with a key that is no longer the item's current key."
         items[v.item] = item.copy(sealedDetails = item.sealedDetails + (v.detailKeyId to v.sealed))
         return null
     }
@@ -343,22 +343,22 @@ internal class MarketFold(
     // ---- skill offers (ADR 0055) ----
 
     private fun offerSkill(author: MemberId, v: SkillOffer): String? {
-        if (author !in members()) return "only a member may offer a skill"
+        if (author !in members()) return "Only a member of the circle can offer a skill."
         val existing = skills[v.skill]
         if (existing != null) {
-            if (existing.owner != author) return "only the author may change an offer"
-            if (existing.retired) return "the offer has been retired"
+            if (existing.owner != author) return "Only the member who made a skill offer can change it."
+            if (existing.retired) return "The skill offer has been removed, so it cannot be changed."
         } else if (skills.values.count { it.owner == author && !it.retired } >= MAX_LIVE_SKILLS_PER_MEMBER) {
-            return "at most $MAX_LIVE_SKILLS_PER_MEMBER live skill offers"
+            return "A member can have at most $MAX_LIVE_SKILLS_PER_MEMBER skill offers at a time."
         }
         skills[v.skill] = SkillState(v.skill, author, v.name, v.details, v.openTo)
         return null
     }
 
     private fun retireSkill(author: MemberId, v: SkillRetire): String? {
-        val skill = skills[v.skill] ?: return "unknown skill"
-        if (skill.owner != author) return "only the author may retire an offer"
-        if (skill.retired) return "the offer is already retired"
+        val skill = skills[v.skill] ?: return "That skill offer is not in the circle."
+        if (skill.owner != author) return "Only the member who made a skill offer can remove it."
+        if (skill.retired) return "The skill offer is already removed."
         skills[v.skill] = skill.copy(retired = true)
         return null
     }
@@ -367,7 +367,7 @@ internal class MarketFold(
 
     /** A member names themselves; a new name starts with no confirmations. */
     private fun setName(author: MemberId, v: MemberProfile, day: Int, id: EventId): String? {
-        if (names[author]?.name == v.name) return "that is already the member's name"
+        if (names[author]?.name == v.name) return "That is already the member's name."
         // ADR 0069: log order decides; a name is taken while another member who has not left holds the same key.
         val key = NameKey.of(v.name)
         if (names.any { (member, state) -> member != author && NameKey.of(state.name) == key && removedOn(member) == null }) return NAME_TAKEN_REASON
@@ -382,12 +382,12 @@ internal class MarketFold(
      * names the profile event, so one made for an earlier name, or for the same text set again, is stale and refused.
      */
     private fun confirmName(author: MemberId, v: NameConfirmation, day: Int, id: EventId): String? {
-        if (v.member == author) return "a member cannot confirm their own identity"
-        val current = names[v.member] ?: return "that member has not set a name"
-        if (v.profile != current.profile || v.name != current.name) return "the name has changed since"
-        if (author in current.confirmations) return "already confirmed"
+        if (v.member == author) return "A member cannot confirm their own identity."
+        val current = names[v.member] ?: return "That member has not chosen a name yet, so there is no identity to confirm."
+        if (v.profile != current.profile || v.name != current.name) return "The member's name has changed since, so this confirmation no longer applies."
+        if (author in current.confirmations) return "This has already been confirmed."
         val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
-        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, may confirm someone's identity"
+        if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "Only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm someone's identity."
         val confirmations = current.confirmations + (author to day)
         names[v.member] = current.copy(
             confirmations = confirmations,
@@ -400,22 +400,22 @@ internal class MarketFold(
     // ---- contribution notes (ADR 0053) ----
 
     private fun noteContribution(author: MemberId, v: StandingNote, day: Int, id: EventId): String? {
-        if (notes.containsKey(v.note)) return "note id already used"
-        if (v.with == author) return "a note must name someone else"
-        if (author !in members() || v.with !in members()) return "both people must be in the circle"
-        if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days"
+        if (notes.containsKey(v.note)) return "That contribution note has already been recorded."
+        if (v.with == author) return "A contribution note must name someone other than its author."
+        if (author !in members() || v.with !in members()) return "Both people in a contribution note must be members of the circle."
+        if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "A member can make at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days."
         if (v.kind == ContributionKind.MENTORED_NEW_MEMBER &&
             StandingRules.standingOf(v.with, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier != circles.policy.Tier.NEW
-        ) return "only a new member can be mentored"
+        ) return "Only a new member can be named as mentored."
         notes[v.note] = ContributionState(v.note, author, v.with, v.kind, v.text, day)
         return null
     }
 
     private fun confirmNote(author: MemberId, v: NoteConfirmation, day: Int): String? {
-        val note = notes[v.note] ?: return "unknown note"
-        if (note.with != author) return "only the person named can confirm"
-        if (note.confirmedDay != null) return "already confirmed"
-        if (day > note.day + NOTE_WINDOW_DAYS) return "the note has lapsed"
+        val note = notes[v.note] ?: return "That contribution note is not in the circle."
+        if (note.with != author) return "Only the person named in a contribution note can confirm it."
+        if (note.confirmedDay != null) return "This has already been confirmed."
+        if (day > note.day + NOTE_WINDOW_DAYS) return "This contribution note has lapsed, so it can no longer be confirmed."
         notes[v.note] = note.copy(confirmedDay = maxOf(day, note.day))
         return null
     }
@@ -424,11 +424,11 @@ internal class MarketFold(
 
     private fun configUpdate(author: MemberId, v: ConfigSettings, day: Int, id: EventId): String? {
         val facts = stewardFactsAt(id)
-        if (author !in facts.stewards) return "only a steward may change the circle's rules"
+        if (author !in facts.stewards) return "Only a steward can change the circle's rules."
         val since = facts.since[author]
         if (facts.quorum > 1 && since != null && since != FOUNDING_STEWARD_DAY && day < since + DEFAULT_STEWARD_COOL_OFF_DAYS) return "A new steward cannot vote until ${circles.app.ReasonDates.token(since + DEFAULT_STEWARD_COOL_OFF_DAYS)}."
         v.problem(baseConfig)?.let { return it }
-        if (v == ConfigSettings.of(config(day))) return "those are already the circle's rules"
+        if (v == ConfigSettings.of(config(day))) return "Those are already the circle's rules."
         val open = configProposals[v]?.takeIf { day <= it.firstDay + DEFAULT_STEWARD_PROPOSAL_DAYS }
         val proposal = (open ?: PendingConfig(v, emptySet(), day)).let { it.copy(voters = it.voters + author) }
         // Only votes from people who are stewards at this moment count: a steward who has since left does not make up a quorum.
@@ -443,30 +443,30 @@ internal class MarketFold(
     }
 
     private fun proposePause(author: MemberId, v: PauseProposal, day: Int, id: EventId): String? {
-        if (pauses.containsKey(v.pause)) return "pause id already used"
+        if (pauses.containsKey(v.pause)) return "That pause has already been recorded."
         val eligible = reviewers(day, id)
-        if (author !in eligible) return "only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} may propose a pause"
-        if (v.subject == author) return "a member cannot propose pausing themselves"
-        if (v.subject !in members()) return "the subject is not in the circle"
-        if (v.subject in stewardsAt(id)) return "a steward is not paused: the steward rules apply"
-        if (pauses.values.any { it.subject == v.subject && it.statusOn(day).let { s -> s == PauseStatus.PROPOSED || s == PauseStatus.LIVE } }) return "that member already has a pause or a proposal"
+        if (author !in eligible) return "Only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} can propose a pause."
+        if (v.subject == author) return "A member cannot propose pausing themselves."
+        if (v.subject !in members()) return "The member the pause is about is not in the circle."
+        if (v.subject in stewardsAt(id)) return "A steward cannot be paused; the rules for stewards apply instead."
+        if (pauses.values.any { it.subject == v.subject && it.statusOn(day).let { s -> s == PauseStatus.PROPOSED || s == PauseStatus.LIVE } }) return "That member already has a pause or a pause proposal."
         val needed = reviewersNeeded(v.subject, day, eligible)
-        if (needed < MIN_PAUSE_REVIEWERS) return "the circle has too few members at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} to review a pause"
+        if (needed < MIN_PAUSE_REVIEWERS) return "The circle has too few members at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} to review a pause."
         pauses[v.pause] = PauseState(v.pause, v.subject, author, v.reason, v.days, day, mapOf(author to true), needed)
         return null
     }
 
     private fun reviewPause(author: MemberId, v: PauseReview, day: Int, id: EventId): String? {
-        val pause = pauses[v.pause] ?: return "unknown pause"
-        if (author == pause.subject) return "the subject cannot review their own pause"
-        if (pause.liftedDay != null) return "the pause has been lifted"
+        val pause = pauses[v.pause] ?: return "That pause is not in the circle."
+        if (author == pause.subject) return "A member cannot review a pause about themselves."
+        if (pause.liftedDay != null) return "The pause has been lifted."
         val status = pause.statusOn(day)
-        if (status == PauseStatus.LAPSED || status == PauseStatus.ENDED) return "the pause is over"
+        if (status == PauseStatus.LAPSED || status == PauseStatus.ENDED) return "The pause is over."
         val eligible = reviewers(day, id)
-        if (author !in eligible) return "only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} may review"
+        if (author !in eligible) return "Only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} can review a pause."
         if (pause.liveFrom != null) {
             // Once in force, only a reviewer who agreed may step back; stepping back below the number needed ends the pause.
-            if (v.agree || author !in pause.agreeing) return "the pause is already in force"
+            if (v.agree || author !in pause.agreeing) return "The pause is already in force."
             val remaining = pause.reviews + (author to false)
             val lifted = remaining.count { it.value } < pause.needed
             pauses[v.pause] = pause.copy(reviews = remaining, liftedDay = if (lifted) day else null)
@@ -480,66 +480,66 @@ internal class MarketFold(
     }
 
     private fun appealPause(author: MemberId, v: PauseAppeal, day: Int): String? {
-        val pause = pauses[v.pause] ?: return "unknown pause"
-        if (author != pause.subject) return "only the subject may appeal"
-        if (pause.appealNote != null) return "the subject has already appealed"
+        val pause = pauses[v.pause] ?: return "That pause is not in the circle."
+        if (author != pause.subject) return "Only the member the pause is about can appeal it."
+        if (pause.appealNote != null) return "The member the pause is about has already appealed."
         val status = pause.statusOn(day)
-        if (status != PauseStatus.PROPOSED && status != PauseStatus.LIVE) return "the pause is over"
+        if (status != PauseStatus.PROPOSED && status != PauseStatus.LIVE) return "The pause is over."
         pauses[v.pause] = pause.copy(appealNote = v.note, appealDay = day)
         return null
     }
 
     private fun liftPause(author: MemberId, v: PauseLift, day: Int, id: EventId): String? {
-        val pause = pauses[v.pause] ?: return "unknown pause"
+        val pause = pauses[v.pause] ?: return "That pause is not in the circle."
         val status = pause.statusOn(day)
-        if (status != PauseStatus.PROPOSED && status != PauseStatus.LIVE) return "the pause is already over"
+        if (status != PauseStatus.PROPOSED && status != PauseStatus.LIVE) return "The pause is already over."
         val byReviewerAfterAppeal = author in pause.agreeing && pause.appealNote != null
         val bySteward = author in stewardsAt(id) && author != pause.proposer
         val byProposerBeforeEffect = author == pause.proposer && pause.liveFrom == null
-        if (!byReviewerAfterAppeal && !bySteward && !byProposerBeforeEffect) return "only a reviewer after an appeal, another steward, or the proposer before it takes effect may lift a pause"
+        if (!byReviewerAfterAppeal && !bySteward && !byProposerBeforeEffect) return "A pause can only be lifted by a reviewer after an appeal, by another steward, or by the proposer before it takes effect."
         pauses[v.pause] = pause.copy(liftedDay = day)
         return null
     }
 
     private fun vouch(author: MemberId, v: VouchTerms, day: Int, id: EventId): String? {
-        if (v.vouchee == author) return "a member cannot vouch for themselves"
-        if (devices.values.none { it.registration.member == v.vouchee }) return "the vouchee is not in the circle"
-        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "only a member at ${circles.policy.TierText.orAbove(config(day).voucherMinTier)} may vouch"
+        if (v.vouchee == author) return "A member cannot vouch for themselves."
+        if (devices.values.none { it.registration.member == v.vouchee }) return "The member to vouch for is not in the circle."
+        if (!StandingRules.mayVouch(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes())) return "Only a member at ${circles.policy.TierText.orAbove(config(day).voucherMinTier)} can vouch for someone."
         vouches += circles.policy.Vouch(author, v.vouchee, circle, day, v.expiresDay)
         return null
     }
 
     private fun request(author: MemberId, v: LoanRequest, day: Int, id: EventId): String? {
-        val item = items[v.item] ?: return "unknown item"
-        if (item.retired) return "item is retired"
-        if (item.owner == author) return "a member cannot borrow their own item"
-        if (loans.containsKey(v.loan)) return "loan id already used"
-        if (!mayBorrow(author, v.item)) return "member may not borrow this item yet"
-        if (bookedOver(v.item, v.fromDay, v.toDay, except = null)) return "the item is already promised for some of those days"
+        val item = items[v.item] ?: return "That item is not in the circle."
+        if (item.retired) return "The item has been archived, so it cannot be changed or asked for."
+        if (item.owner == author) return "A member cannot borrow their own item."
+        if (loans.containsKey(v.loan)) return "That loan request has already been recorded."
+        if (!mayBorrow(author, v.item)) return "This member may not borrow this item yet."
+        if (bookedOver(v.item, v.fromDay, v.toDay, except = null)) return "The item is already promised to someone for some of those days."
         val decision = StandingRules.decide(author, item, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, livePauses(day), confirmedNotes())
-        if (decision !is circles.policy.AccessDecision.Eligible) return "access check: " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
+        if (decision !is circles.policy.AccessDecision.Eligible) return "This request does not meet the circle's access rules. " + (decision.reasons + ((decision as? circles.policy.AccessDecision.NotYet)?.howToUnlock.orEmpty())).joinToString(" ")
         loans[v.loan] = LoanState(v.loan, v.item, author, item.owner, v.fromDay, v.toDay, LoanStatus.REQUESTED, null, emptyMap(), false, false, null, requestNote = v.note)
         return null
     }
 
     private fun respond(author: MemberId, v: LoanRespond): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.owner != author) return "only the item's owner may respond"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.owner != author) return "Only the owner of the item can answer a loan request."
         val item = items.getValue(loan.item)
         when (loan.status) {
             LoanStatus.REQUESTED -> Unit
             LoanStatus.APPROVED, LoanStatus.ACTIVE -> {
                 // A second approval only adds wraps for the borrower's newer devices.
-                if (!v.approve || v.fromDay != loan.fromDay || v.toDay != loan.toDay) return "the loan is already answered"
+                if (!v.approve || v.fromDay != loan.fromDay || v.toDay != loan.toDay) return "The loan request has already been answered."
             }
-            else -> return "the loan is already answered"
+            else -> return "The loan request has already been answered."
         }
         if (!v.approve) {
             loans[v.loan] = loan.copy(status = LoanStatus.DECLINED)
             return null
         }
-        if (loan.status == LoanStatus.REQUESTED && bookedOver(loan.item, v.fromDay, v.toDay, except = loan.loan)) return "the item is already promised for some of those days"
-        if (v.keyWraps.any { devices[it.device]?.registration?.member != loan.borrower }) return "keyWraps must go to the borrower's devices"
+        if (loan.status == LoanStatus.REQUESTED && bookedOver(loan.item, v.fromDay, v.toDay, except = loan.loan)) return "The item is already promised to someone for some of those days."
+        if (v.keyWraps.any { devices[it.device]?.registration?.member != loan.borrower }) return "The item's key can only be sent to the borrower's devices."
         val keyId = loan.detailKeyId ?: item.detailKeyId
         loans[v.loan] = loan.copy(
             status = if (loan.status == LoanStatus.REQUESTED) LoanStatus.APPROVED else loan.status,
@@ -558,62 +558,62 @@ internal class MarketFold(
         }
 
     private fun cancel(author: MemberId, v: LoanCancel): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.borrower != author) return "only the borrower may cancel"
-        if (loan.status != LoanStatus.REQUESTED && loan.status != LoanStatus.APPROVED) return "only a request or an approval before the hand-over can be cancelled"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.borrower != author) return "Only the borrower can cancel a loan."
+        if (loan.status != LoanStatus.REQUESTED && loan.status != LoanStatus.APPROVED) return "A loan can only be cancelled while it is a request or approved and not yet handed over."
         loans[v.loan] = loan.copy(status = LoanStatus.CANCELLED)
         return null
     }
 
     private fun handover(author: MemberId, v: LoanHandover): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.status != LoanStatus.APPROVED) return "hand-over needs an approved loan that is not yet active"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.status != LoanStatus.APPROVED) return "A hand-over needs an approved loan that is not yet out."
         val updated = when (author) {
-            loan.owner -> if (loan.ownerConfirmedHandover) return "already confirmed" else loan.copy(ownerConfirmedHandover = true)
-            loan.borrower -> if (loan.borrowerConfirmedHandover) return "already confirmed" else loan.copy(borrowerConfirmedHandover = true)
-            else -> return "only the owner or the borrower may confirm a hand-over"
+            loan.owner -> if (loan.ownerConfirmedHandover) return "This has already been confirmed." else loan.copy(ownerConfirmedHandover = true)
+            loan.borrower -> if (loan.borrowerConfirmedHandover) return "This has already been confirmed." else loan.copy(borrowerConfirmedHandover = true)
+            else -> return "Only the owner or the borrower can confirm a hand-over."
         }
         loans[v.loan] = if (updated.ownerConfirmedHandover && updated.borrowerConfirmedHandover) updated.copy(status = LoanStatus.ACTIVE) else updated
         return null
     }
 
     private fun confirm(author: MemberId, v: ReturnConfirmation, day: Int): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.owner != author) return "only the item's owner confirms a return"
-        if (loan.status != LoanStatus.RETURNED) return "only a returned loan can be confirmed"
-        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "a reported problem needs no confirmation"
-        if (loan.confirmedDay != null) return "already confirmed"
-        if (loan.dispute != null) return "the return is in dispute"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.owner != author) return "Only the owner of the item can confirm a return."
+        if (loan.status != LoanStatus.RETURNED) return "Only a loan that has been returned can be confirmed."
+        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "A return with a reported problem needs no confirmation."
+        if (loan.confirmedDay != null) return "This has already been confirmed."
+        if (loan.dispute != null) return "The return is in dispute, so it cannot be confirmed."
         loans[v.loan] = loan.copy(confirmedDay = maxOf(day, loan.returnedDay ?: day))
         return null
     }
 
     private fun dispute(author: MemberId, v: LoanDispute, day: Int): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.owner != author) return "only the item's owner may dispute a return"
-        if (loan.status != LoanStatus.RETURNED) return "only a returned loan can be disputed"
-        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "the borrower already reported a problem"
-        if (loan.dispute != null) return "the return is already disputed"
-        val returned = loan.returnedDay ?: return "the return has no day"
-        if (day < returned || day - returned > DAMAGE_CLAIM_DAYS) return "a dispute must come within $DAMAGE_CLAIM_DAYS days of the return"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.owner != author) return "Only the owner of the item can dispute a return."
+        if (loan.status != LoanStatus.RETURNED) return "Only a loan that has been returned can be disputed."
+        if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "The borrower already reported a problem with this return."
+        if (loan.dispute != null) return "This return is already disputed."
+        val returned = loan.returnedDay ?: return "This return has no return day recorded."
+        if (day < returned || day - returned > DAMAGE_CLAIM_DAYS) return "A dispute must be made within $DAMAGE_CLAIM_DAYS days of the return."
         loans[v.loan] = loan.copy(dispute = DisputeState(v.claim, v.note, day))
         return null
     }
 
     private fun resolve(author: MemberId, v: LoanResolution, day: Int, id: EventId): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        val dispute = loan.dispute ?: return "the return is not in dispute"
-        if (dispute.outcome != null) return "the dispute is already resolved"
-        if (author !in stewardsAt(id)) return "only a steward may resolve a dispute"
-        if (author == loan.owner || author == loan.borrower) return "a party to the loan cannot resolve its dispute"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        val dispute = loan.dispute ?: return "This return is not in dispute."
+        if (dispute.outcome != null) return "This dispute has already been resolved."
+        if (author !in stewardsAt(id)) return "Only a steward can resolve a dispute."
+        if (author == loan.owner || author == loan.borrower) return "A member who is part of the loan cannot resolve its dispute."
         loans[v.loan] = loan.copy(dispute = dispute.copy(outcome = v.outcome, resolvedDay = maxOf(day, dispute.day)))
         return null
     }
 
     private fun giveBack(author: MemberId, v: LoanReturn, day: Int): String? {
-        val loan = loans[v.loan] ?: return "unknown loan"
-        if (loan.borrower != author) return "only the borrower reports a return"
-        if (loan.status != LoanStatus.ACTIVE) return "only an active loan can be returned"
+        val loan = loans[v.loan] ?: return "That loan is not in the circle."
+        if (loan.borrower != author) return "Only the borrower can report a loan as returned."
+        if (loan.status != LoanStatus.ACTIVE) return "Only a loan that is out can be returned."
         loans[v.loan] = loan.copy(status = LoanStatus.RETURNED, outcome = v.outcome, returnedDay = day)
         return null
     }

@@ -24,25 +24,25 @@ class DisplayNamesTest {
     @Test
     fun lengthCountsCodePointsNotUtf16Units() {
         assertNull(DisplayNames.problem("🙂".repeat(MAX_DISPLAY_NAME_CODE_POINTS)), "40 emoji are 80 UTF-16 units but 40 characters")
-        assertEquals("a name is at most 40 characters", DisplayNames.problem("🙂".repeat(MAX_DISPLAY_NAME_CODE_POINTS + 1)))
-        assertEquals("a name must be valid text", DisplayNames.problem("Bea\uD83D"))
+        assertEquals("A name can have at most 40 characters.", DisplayNames.problem("🙂".repeat(MAX_DISPLAY_NAME_CODE_POINTS + 1)))
+        assertEquals("A name must be valid text.", DisplayNames.problem("Bea\uD83D"))
     }
 
     @Test
     fun controlCharactersInvisibleMarksOddSpacesAndIdLikeNamesAreRefused() {
         val refused = mapOf(
-            "" to "a name cannot be empty",
-            "Bea\n" to "a name cannot hold control characters, invisible marks or unusual spaces",
-            "Bea\u0085" to "a name cannot hold control characters, invisible marks or unusual spaces",
-            "Bea‍" to "a name cannot hold control characters, invisible marks or unusual spaces",
-            "‮aeB" to "a name cannot hold control characters, invisible marks or unusual spaces",
-            "Bea Lee" to "a name cannot hold control characters, invisible marks or unusual spaces",
-            " Bea" to "a name cannot start or end with a space",
-            "Bea " to "a name cannot start or end with a space",
-            "Bea  Lee" to "a name cannot hold two spaces in a row",
-            "42" to "a name cannot be just a number or look like a member code",
-            "2b69a182" to "a name cannot be just a number or look like a member code",
-            "2b69 a182 F00D" to "a name cannot be just a number or look like a member code",
+            "" to "A name cannot be empty.",
+            "Bea\n" to "A name cannot hold control characters, invisible marks or unusual spaces.",
+            "Bea\u0085" to "A name cannot hold control characters, invisible marks or unusual spaces.",
+            "Bea‍" to "A name cannot hold control characters, invisible marks or unusual spaces.",
+            "‮aeB" to "A name cannot hold control characters, invisible marks or unusual spaces.",
+            "Bea Lee" to "A name cannot hold control characters, invisible marks or unusual spaces.",
+            " Bea" to "A name cannot start or end with a space.",
+            "Bea " to "A name cannot start or end with a space.",
+            "Bea  Lee" to "A name cannot hold two spaces in a row.",
+            "42" to "A name cannot be just a number or look like a member code.",
+            "2b69a182" to "A name cannot be just a number or look like a member code.",
+            "2b69 a182 F00D" to "A name cannot be just a number or look like a member code.",
         )
         for ((name, reason) in refused) assertEquals(reason, DisplayNames.problem(name), name)
         assertNull(DisplayNames.problem("Bedazzled"), "hex letters mixed with others make a word")

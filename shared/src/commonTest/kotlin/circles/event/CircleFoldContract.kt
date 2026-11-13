@@ -177,7 +177,7 @@ abstract class CircleFoldContract {
         val removeLast = w.founder.stewardRemove(w.circle, w.founder.identity.member, day)
         val notYet = w.bea.stewardAdd(w.circle, w.carol.identity.member, day) // bea is not a steward
         val bad = w.fold(w.founder, w.log + listOf(unknown, removeLast, notYet))
-        assertEquals(setOf("member is not in the circle", "a circle keeps at least one steward", "only a steward may change stewards"), bad.rejected.map { it.reason }.toSet())
+        assertEquals(setOf("member is not in the circle", "A circle must keep at least one steward.", "Only a steward can change who the stewards are."), bad.rejected.map { it.reason }.toSet())
 
         // A lone steward adds bea alone; the next addition needs both, and bea waits out the cool-off.
         val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)

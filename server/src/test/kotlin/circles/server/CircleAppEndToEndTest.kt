@@ -656,8 +656,8 @@ class CircleAppEndToEndTest {
         val rules = home(bea.app).proposals.single()
         assertEquals(StewardChange.POLICY, rules.change)
         assertEquals(1, rules.settings!!.quorum)
-        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14)).reason.contains("already the circle's settings"))
-        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(0, 60, 14)).reason.contains("quorum"))
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14)).reason.contains("already the circle's steward settings"))
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(0, 60, 14)).reason.contains("stewards who must agree"))
         assertEquals(StewardResult.Sent(takesEffect = true), bea.app.proposeStewardSettings(1, 60, 14))
         sync()
         assertEquals(1, home(carol.app).stewardSettings.quorum)
@@ -670,8 +670,8 @@ class CircleAppEndToEndTest {
         assertEquals(StewardResult.Sent(takesEffect = true), bea.app.removeSteward(id(bea)))
         sync()
         assertEquals(1, home(alice.app).stewardList.size)
-        assertEquals("a circle keeps at least one steward", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(alice))).reason)
-        assertEquals("member is not a steward", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(carol))).reason)
+        assertEquals("A circle must keep at least one steward.", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(alice))).reason)
+        assertEquals("That member is not a steward.", assertIs<StewardResult.Refused>(alice.app.removeSteward(id(carol))).reason)
         assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeSteward(MemberId("9".repeat(32)))).reason.contains("not in the circle"))
         listOf(alice, bea, carol).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
@@ -1033,7 +1033,7 @@ class CircleAppEndToEndTest {
 
         // 1. Alone, alice turns the rule on (2 stewards to rebuild) and makes bea a steward; no one pressed "make shares".
         assertEquals(0, home(alice.app).stewardSettings.recoveryThreshold)
-        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14, 1)).reason.contains("recoveryThreshold"))
+        assertTrue(assertIs<StewardResult.Refused>(alice.app.proposeStewardSettings(2, 60, 14, 1)).reason.contains("needed to rebuild the key"))
         assertEquals(StewardResult.Sent(takesEffect = true), alice.app.proposeStewardSettings(2, 60, 14, 2))
         sync()
         assertEquals(2, home(bea.app).stewardSettings.recoveryThreshold)
@@ -1216,8 +1216,8 @@ class CircleAppEndToEndTest {
         assertTrue(assertIs<PauseResult.Refused>(dave.app.proposePause(home(bea.app).me, "no", 5)).reason.contains("Level 3 or above"))
         assertEquals(listOf(daveId), home(alice.app).pauseCandidates)
         assertTrue(assertIs<PauseResult.Refused>(alice.app.proposePause(home(bea.app).me, "x", 5)).reason.contains("steward"))
-        assertEquals(PauseResult.Refused("give a reason of 1 to 280 characters"), alice.app.proposePause(daveId, " ", 5))
-        assertEquals(PauseResult.Refused("choose from 1 to 90 days"), alice.app.proposePause(daveId, "x", 91))
+        assertEquals(PauseResult.Refused("Give a reason of 1 to 280 characters."), alice.app.proposePause(daveId, " ", 5))
+        assertEquals(PauseResult.Refused("Choose a pause length from 1 to 90 days."), alice.app.proposePause(daveId, "x", 91))
 
         // Alice proposes; she is the first reviewer, so a second is needed. The subject and the other trusted members see it; nobody else does.
         assertEquals(PauseResult.Sent, alice.app.proposePause(daveId, "keeps returning things damaged", 30))
@@ -1229,7 +1229,7 @@ class CircleAppEndToEndTest {
         assertEquals(listOf(aliceId), forDave.reviewers, "the subject sees who agreed")
         val forBea = home(bea.app).pauses.single()
         assertTrue(forBea.canReview && forBea.reviewers.isEmpty() && forBea.agreeing == 1 && forBea.needed == 2)
-        assertEquals(PauseResult.Refused("that member already has a pause or a proposal"), carol.app.proposePause(daveId, "again", 5))
+        assertEquals(PauseResult.Refused("That member already has a pause or a pause proposal."), carol.app.proposePause(daveId, "again", 5))
 
         // Not in force yet: dave can still ask. Bea agrees and it takes effect.
         assertIs<LoanResult.NotYet>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
@@ -1240,7 +1240,7 @@ class CircleAppEndToEndTest {
         assertIs<LoanResult.Paused>(dave.app.requestLoan(ladder, TODAY, TODAY + 1, ""))
         assertTrue(home(dave.app).items.single { it.item == ladder }.access!!.reasons.any { it.contains("paused") })
         assertIs<LoanResult.Done>(dave.app.requestLoan(torch, TODAY, TODAY + 1, ""), "essentials stay open")
-        assertEquals(PauseResult.Refused("the pause is already in force"), carol.app.reviewPause(forBea.pause, true))
+        assertEquals(PauseResult.Refused("The pause is already in force."), carol.app.reviewPause(forBea.pause, true))
 
         // The subject appeals once; carol may then lift it (a steward who did not propose it).
         assertEquals(PauseResult.Sent, dave.app.appealPause(forDave.pause, "I was away and a friend returned it"))
@@ -1282,9 +1282,9 @@ class CircleAppEndToEndTest {
         assertEquals(30, defaults.regularTenths); assertEquals(180, defaults.halfLifeDays)
         // Only a steward proposes; bad numbers are explained; the lone steward's vote is enough.
         assertEquals(RulesResult.NotAllowed, bea.app.proposeRules(defaults.copy(halfLifeDays = 90)))
-        assertEquals(RulesResult.Refused("those are already the circle's rules"), alice.app.proposeRules(defaults))
-        assertEquals(RulesResult.Refused("the days for points to fade by half must be from 30 to 730"), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
-        assertEquals(RulesResult.Refused("the points must rise from each level to the next"), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
+        assertEquals(RulesResult.Refused("Those are already the circle's rules."), alice.app.proposeRules(defaults))
+        assertEquals(RulesResult.Refused("The days for points to fade by half must be from 30 to 730."), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
+        assertEquals(RulesResult.Refused("The points must rise from each level to the next."), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
         val changed = defaults.copy(halfLifeDays = 90, vouchesForRegular = 1)
         assertEquals(RulesResult.Sent(takesEffect = true), alice.app.proposeRules(changed))
         alice.app.syncOnce(); bea.app.syncOnce()
@@ -1367,15 +1367,15 @@ class CircleAppEndToEndTest {
 
         // Bea says she helped Alice with a skill. It is waiting; nothing counts yet. A steward cannot be "mentored".
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "fixed the gate"))
-        assertEquals(NoteResult.Refused("only a new member can be mentored"), bea.app.addContribution(ContributionKind.MENTORED_NEW_MEMBER, aliceId, ""))
-        assertEquals(NoteResult.Refused("keep it to 140 characters"), bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "x".repeat(141)))
+        assertEquals(NoteResult.Refused("Only a new member can be named as mentored."), bea.app.addContribution(ContributionKind.MENTORED_NEW_MEMBER, aliceId, ""))
+        assertEquals(NoteResult.Refused("Keep the note to 140 characters or fewer."), bea.app.addContribution(ContributionKind.SKILL_SHARE_HELPED, aliceId, "x".repeat(141)))
         sync()
         assertEquals("0.0", home(bea.app).standing!!.points)
         val mine = home(bea.app).contributions.mine.single()
         assertEquals(NoteStatus.WAITING, mine.status)
         val waiting = home(alice.app).contributions.toConfirm.single()
         assertEquals("fixed the gate", waiting.text); assertEquals(beaId, waiting.other)
-        assertEquals(NoteResult.Refused("only the person named can confirm"), bea.app.confirmContribution(mine.note), "the author cannot confirm their own note")
+        assertEquals(NoteResult.Refused("Only the person named in a contribution note can confirm it."), bea.app.confirmContribution(mine.note), "the author cannot confirm their own note")
 
         // Alice confirms; the points arrive for Bea, not for Alice.
         assertEquals(NoteResult.Sent, alice.app.confirmContribution(waiting.note))
@@ -1384,12 +1384,12 @@ class CircleAppEndToEndTest {
         assertEquals("0.0", home(alice.app).standing!!.points, "the person who confirms earns nothing")
         assertEquals(NoteStatus.COUNTED, home(bea.app).contributions.mine.single().status)
         assertEquals(emptyList(), home(alice.app).contributions.toConfirm)
-        assertEquals(NoteResult.Refused("already confirmed"), alice.app.confirmContribution(waiting.note))
+        assertEquals(NoteResult.Refused("This has already been confirmed."), alice.app.confirmContribution(waiting.note))
 
         // Three in 30 days, then the cap.
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
-        assertEquals(NoteResult.Refused("at most 3 contribution notes in 30 days"), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
+        assertEquals(NoteResult.Refused("A member can make at most 3 contribution notes in 30 days."), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(0, home(bea.app).contributions.notesLeft)
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
@@ -1408,8 +1408,8 @@ class CircleAppEndToEndTest {
         alice.app.admit(home(alice.app).waiting.single().device); alice.app.syncOnce(); bea.app.syncOnce()
         fun sync() = runBlocking { repeat(2) { listOf(alice, bea).forEach { it.app.syncOnce() } } }
 
-        assertEquals(SkillResult.Refused("give it a name of 1 to 60 characters"), bea.app.addSkill("  ", "", emptySet()))
-        assertEquals(SkillResult.Refused("keep the details to 500 characters"), bea.app.addSkill("Bikes", "d".repeat(501), emptySet()))
+        assertEquals(SkillResult.Refused("Give the skill offer a name of 1 to 60 characters."), bea.app.addSkill("  ", "", emptySet()))
+        assertEquals(SkillResult.Refused("Keep the details of the skill offer to 500 characters or fewer."), bea.app.addSkill("Bikes", "d".repeat(501), emptySet()))
         val saved = assertIs<SkillResult.Saved>(bea.app.addSkill("Bike repair", "Punctures and brakes", setOf(OpenTo.GIFT, OpenTo.THANKS)))
         sync()
         // Everyone in the circle sees it, with who offered it; only the author can change or remove it.
@@ -1417,8 +1417,8 @@ class CircleAppEndToEndTest {
         assertEquals("Bike repair", seen.name); assertEquals(setOf(OpenTo.GIFT, OpenTo.THANKS), seen.openTo)
         assertEquals(home(bea.app).me, seen.owner); assertFalse(seen.ownedByMe)
         assertTrue(home(bea.app).skills.single().ownedByMe)
-        assertTrue(assertIs<SkillResult.Refused>(alice.app.editSkill(saved.skill, "Mine now", "", emptySet())).reason.contains("only the author"))
-        assertTrue(assertIs<SkillResult.Refused>(alice.app.retireSkill(saved.skill)).reason.contains("only the author"))
+        assertTrue(assertIs<SkillResult.Refused>(alice.app.editSkill(saved.skill, "Mine now", "", emptySet())).reason.contains("Only the member who made"))
+        assertTrue(assertIs<SkillResult.Refused>(alice.app.retireSkill(saved.skill)).reason.contains("Only the member who made"))
         assertIs<SkillResult.Saved>(bea.app.editSkill(saved.skill, "Bike and trailer repair", "", setOf(OpenTo.SWAP)))
         sync()
         assertEquals("Bike and trailer repair", home(alice.app).skills.single().name)
@@ -1637,14 +1637,14 @@ class CircleAppEndToEndTest {
         sync()
         val beaId = home(bea.app).me
         assertEquals("Carol", home(alice.app).names[home(carol.app).me]?.name, "NFKC turned full-width letters into plain ones")
-        assertEquals(NameResult.Refused("a name cannot be just a number or look like a member code"), carol.app.setMyName("2b69 a182"))
+        assertEquals(NameResult.Refused("A name cannot be just a number or look like a member code."), carol.app.setMyName("2b69 a182"))
 
         // Bea's name, as everyone sees it: not confirmed. Carol is a new member and may not confirm; Bea may not confirm herself.
         val seenByCarol = home(carol.app).people.single { it.member == beaId }
         assertEquals("Bea Lee", seenByCarol.displayName)
         assertFalse(seenByCarol.canConfirmName)
-        assertEquals(NameResult.Refused("only a member at Level 2 or above, or a steward, may confirm someone's identity"), carol.app.confirmName(beaId))
-        assertEquals(NameResult.Refused("a member cannot confirm their own identity"), bea.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("Only a member at Level 2 or above, or a steward, can confirm someone's identity."), carol.app.confirmName(beaId))
+        assertEquals(NameResult.Refused("A member cannot confirm their own identity."), bea.app.confirmName(beaId))
         // Alice is a steward: she checks Bea's fingerprint in person and confirms.
         assertTrue(home(alice.app).people.single { it.member == beaId }.canConfirmName)
         assertEquals(NameResult.Saved, alice.app.confirmName(beaId))

@@ -880,7 +880,7 @@ class CircleApp(
                 circles.sync.BlobPut.Stored -> Unit
                 circles.sync.BlobPut.Offline -> return PhotoResult.Offline
                 circles.sync.BlobPut.Full -> return PhotoResult.Full
-                is circles.sync.BlobPut.Refused -> return PhotoResult.Refused("the server refused the photo (${put.status})")
+                is circles.sync.BlobPut.Refused -> return PhotoResult.Refused("The server refused the photo (status ${put.status}).")
             }
         }
         val description = alt.trim().ifEmpty { state.name }.take(circles.event.MAX_PHOTO_ALT_CHARS)
@@ -930,8 +930,8 @@ class CircleApp(
     }
 
     private fun skillProblem(name: String, details: String): String? = when {
-        name.isBlank() || name.trim().length > circles.event.MAX_SKILL_NAME_CHARS -> "give it a name of 1 to ${circles.event.MAX_SKILL_NAME_CHARS} characters"
-        details.trim().length > circles.event.MAX_SKILL_DETAILS_CHARS -> "keep the details to ${circles.event.MAX_SKILL_DETAILS_CHARS} characters"
+        name.isBlank() || name.trim().length > circles.event.MAX_SKILL_NAME_CHARS -> "Give the skill offer a name of 1 to ${circles.event.MAX_SKILL_NAME_CHARS} characters."
+        details.trim().length > circles.event.MAX_SKILL_DETAILS_CHARS -> "Keep the details of the skill offer to ${circles.event.MAX_SKILL_DETAILS_CHARS} characters or fewer."
         else -> null
     }
 
@@ -1012,7 +1012,7 @@ class CircleApp(
     /** Notes that I did [kind] for or with [with]; it counts once they confirm (ADR 0053). */
     suspend fun addContribution(kind: circles.event.ContributionKind, with: MemberId, text: String): NoteResult {
         val (s, _) = pauseSession() ?: return NoteResult.NotAllowed
-        if (text.trim().length > circles.event.MAX_NOTE_TEXT_CHARS) return NoteResult.Refused("keep it to ${circles.event.MAX_NOTE_TEXT_CHARS} characters")
+        if (text.trim().length > circles.event.MAX_NOTE_TEXT_CHARS) return NoteResult.Refused("Keep the note to ${circles.event.MAX_NOTE_TEXT_CHARS} characters or fewer.")
         return sendNote(s.author.standingNote(s.circle, today(), circles.event.newNoteId(crypto), kind, with, text.trim()))
     }
 
@@ -1127,8 +1127,8 @@ class CircleApp(
     /** Proposes pausing [subject]'s access to anything but essentials for [days] days (ADR 0050). The proposer counts as the first reviewer. */
     suspend fun proposePause(subject: MemberId, reason: String, days: Int): PauseResult {
         val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
-        if (reason.isBlank() || reason.trim().length > circles.event.MAX_PAUSE_REASON_CHARS) return PauseResult.Refused("give a reason of 1 to ${circles.event.MAX_PAUSE_REASON_CHARS} characters")
-        if (days !in circles.event.MIN_PAUSE_DAYS..circles.event.MAX_PAUSE_DAYS) return PauseResult.Refused("choose from ${circles.event.MIN_PAUSE_DAYS} to ${circles.event.MAX_PAUSE_DAYS} days")
+        if (reason.isBlank() || reason.trim().length > circles.event.MAX_PAUSE_REASON_CHARS) return PauseResult.Refused("Give a reason of 1 to ${circles.event.MAX_PAUSE_REASON_CHARS} characters.")
+        if (days !in circles.event.MIN_PAUSE_DAYS..circles.event.MAX_PAUSE_DAYS) return PauseResult.Refused("Choose a pause length from ${circles.event.MIN_PAUSE_DAYS} to ${circles.event.MAX_PAUSE_DAYS} days.")
         return sendPause(s, s.author.pausePropose(s.circle, today(), circles.event.newPauseId(crypto), subject, reason.trim(), days))
     }
 
@@ -1141,7 +1141,7 @@ class CircleApp(
     /** The subject's one note to the reviewers. */
     suspend fun appealPause(pause: circles.event.PauseId, note: String): PauseResult {
         val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
-        if (note.isBlank() || note.trim().length > circles.event.MAX_PAUSE_APPEAL_CHARS) return PauseResult.Refused("write a note of 1 to ${circles.event.MAX_PAUSE_APPEAL_CHARS} characters")
+        if (note.isBlank() || note.trim().length > circles.event.MAX_PAUSE_APPEAL_CHARS) return PauseResult.Refused("Write a note of 1 to ${circles.event.MAX_PAUSE_APPEAL_CHARS} characters.")
         return sendPause(s, s.author.pauseAppeal(s.circle, today(), pause, note.trim()))
     }
 

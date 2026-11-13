@@ -55,7 +55,7 @@ class HeldShare(val epoch: Int, val share: ByteString, val from: MemberId)
 data class PendingStewardVote(val change: StewardChange, val subject: String, val vote: StewardVote)
 
 /** Why a steward.add is refused for a member nobody has confirmed (ADR 0079). The app words it with the member's name. */
-const val IDENTITY_NOT_CONFIRMED_REASON = "the member's identity has not been confirmed yet, so they cannot become a steward"
+const val IDENTITY_NOT_CONFIRMED_REASON = "The member's identity has not been confirmed yet, so they cannot become a steward."
 
 /** How many times the fold repeats to settle who counts as a confirmer and who as a steward (ADR 0079). */
 private const val MAX_IDENTITY_ROUNDS = 6

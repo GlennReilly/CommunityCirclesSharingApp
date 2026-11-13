@@ -34,13 +34,13 @@ data class StewardSettings(
 ) {
     /** Why these values are not allowed, or null if they are. */
     fun problem(): String? = when {
-        quorum !in MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM -> "quorum must be from $MIN_STEWARD_QUORUM to $MAX_STEWARD_QUORUM"
+        quorum !in MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM -> "The number of stewards who must agree must be from $MIN_STEWARD_QUORUM to $MAX_STEWARD_QUORUM."
         inactiveDays !in MIN_STEWARD_INACTIVE_DAYS..MAX_STEWARD_INACTIVE_DAYS ->
-            "inactiveDays must be from $MIN_STEWARD_INACTIVE_DAYS to $MAX_STEWARD_INACTIVE_DAYS"
+            "The days a steward must be quiet must be from $MIN_STEWARD_INACTIVE_DAYS to $MAX_STEWARD_INACTIVE_DAYS."
         fallbackDelayDays !in MIN_STEWARD_FALLBACK_DELAY_DAYS..MAX_STEWARD_FALLBACK_DELAY_DAYS ->
-            "fallbackDelayDays must be from $MIN_STEWARD_FALLBACK_DELAY_DAYS to $MAX_STEWARD_FALLBACK_DELAY_DAYS"
+            "The days the others must wait must be from $MIN_STEWARD_FALLBACK_DELAY_DAYS to $MAX_STEWARD_FALLBACK_DELAY_DAYS."
         recoveryThreshold != NO_RECOVERY_SHARES && recoveryThreshold !in MIN_STEWARD_RECOVERY_THRESHOLD..MAX_STEWARD_RECOVERY_THRESHOLD ->
-            "recoveryThreshold must be $NO_RECOVERY_SHARES or from $MIN_STEWARD_RECOVERY_THRESHOLD to $MAX_STEWARD_RECOVERY_THRESHOLD"
+            "The number of stewards needed to rebuild the key must be $NO_RECOVERY_SHARES or from $MIN_STEWARD_RECOVERY_THRESHOLD to $MAX_STEWARD_RECOVERY_THRESHOLD."
         else -> null
     }
 
@@ -132,12 +132,12 @@ object StewardRules {
         refusalForVoter(policy, voter, day, stewards, leaving)?.let { return it }
         val required = when (change) {
             StewardChange.ADD -> {
-                if (target in stewards) return StewardOutcome.Refused("member is already a steward")
+                if (target in stewards) return StewardOutcome.Refused("That member is already a steward.")
                 minOf(policy.quorum, stewards.size)
             }
             else -> {
-                if (target !in stewards) return StewardOutcome.Refused("member is not a steward")
-                if (stewards.size == 1) return StewardOutcome.Refused("a circle keeps at least one steward")
+                if (target !in stewards) return StewardOutcome.Refused("That member is not a steward.")
+                if (stewards.size == 1) return StewardOutcome.Refused("A circle must keep at least one steward.")
                 if (leaving) return StewardOutcome.Effective // a steward may always leave while another remains
                 policy.quorum
             }
@@ -156,12 +156,12 @@ object StewardRules {
     ): StewardOutcome {
         proposed.problem()?.let { return StewardOutcome.Refused(it) }
         refusalForVoter(policy, voter, day, stewards, leaving = false)?.let { return it }
-        if (proposed == policy.settings) return StewardOutcome.Refused("those are already the circle's settings")
+        if (proposed == policy.settings) return StewardOutcome.Refused("Those are already the circle's steward settings.")
         return count(policy, voter, day, stewards, priorVotes, minOf(policy.quorum, stewards.size), excluded = null, activity = null)
     }
 
     private fun refusalForVoter(policy: StewardPolicy, voter: MemberId, day: Int, stewards: Map<MemberId, Int>, leaving: Boolean): StewardOutcome? {
-        val since = stewards[voter] ?: return StewardOutcome.Refused("only a steward may change stewards")
+        val since = stewards[voter] ?: return StewardOutcome.Refused("Only a steward can change who the stewards are.")
         // Leaving is a right, not a vote, and a quorum of one has no one to wait for, so cool-off never delays either.
         val coolOff = if (policy.quorum == 1 || leaving) 0 else policy.coolOffDays
         return if (day < since + coolOff) StewardOutcome.Refused("A new steward cannot vote until ${circles.app.ReasonDates.token(since + coolOff)}.") else null

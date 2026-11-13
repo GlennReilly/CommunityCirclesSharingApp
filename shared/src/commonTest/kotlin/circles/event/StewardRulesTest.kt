@@ -38,12 +38,12 @@ class StewardRulesTest {
         StewardPolicy(quorum = MAX_STEWARD_QUORUM, inactiveDays = MAX_STEWARD_INACTIVE_DAYS, fallbackDelayDays = MAX_STEWARD_FALLBACK_DELAY_DAYS)
         assertEquals(7, MIN_STEWARD_INACTIVE_DAYS, "ADR 0029")
         assertEquals(null, StewardSettings(inactiveDays = 7).problem())
-        assertTrue(StewardSettings(inactiveDays = 6).problem()!!.contains("inactiveDays"))
+        assertTrue(StewardSettings(inactiveDays = 6).problem()!!.contains("be quiet"))
         assertEquals(StewardSettings(2, 60, 14), StewardSettings())
         assertEquals(null, StewardSettings().problem())
-        assertTrue(StewardSettings(quorum = 0).problem()!!.contains("quorum"))
-        assertTrue(StewardSettings(inactiveDays = 5).problem()!!.contains("inactiveDays"))
-        assertTrue(StewardSettings(fallbackDelayDays = 1).problem()!!.contains("fallbackDelayDays"))
+        assertTrue(StewardSettings(quorum = 0).problem()!!.contains("stewards who must agree"))
+        assertTrue(StewardSettings(inactiveDays = 5).problem()!!.contains("be quiet"))
+        assertTrue(StewardSettings(fallbackDelayDays = 1).problem()!!.contains("others must wait"))
     }
 
     @Test
@@ -94,15 +94,15 @@ class StewardRulesTest {
     @Test
     fun onlyStewardsVoteAndTargetsMustQualify() {
         val stewards = mapOf(a to founding, b to founding)
-        assertEquals("only a steward may change stewards", refused(add(c, outsider, 100, stewards)))
-        assertEquals("member is already a steward", refused(add(b, a, 100, stewards)))
-        assertEquals("member is not a steward", refused(remove(c, a, 100, stewards)))
+        assertEquals("Only a steward can change who the stewards are.", refused(add(c, outsider, 100, stewards)))
+        assertEquals("That member is already a steward.", refused(add(b, a, 100, stewards)))
+        assertEquals("That member is not a steward.", refused(remove(c, a, 100, stewards)))
     }
 
     @Test
     fun aStewardMayAlwaysLeaveWhileAnotherRemainsAndTheLastCannot() {
         assertEquals(StewardOutcome.Effective, remove(a, a, 100, mapOf(a to founding, b to founding)))
-        assertEquals("a circle keeps at least one steward", refused(remove(a, a, 100, mapOf(a to founding))))
+        assertEquals("A circle must keep at least one steward.", refused(remove(a, a, 100, mapOf(a to founding))))
     }
 
     @Test
@@ -145,8 +145,8 @@ class StewardRulesTest {
         assertEquals(StewardOutcome.Effective, addSolo(d, b, 100, stewards), "a steward added today acts today")
         assertEquals(StewardOutcome.Effective, removeSolo(c, b, 100, stewards), "and may remove another steward alone")
         assertEquals(StewardOutcome.Effective, removeSolo(a, c, 100, stewards))
-        assertEquals("a circle keeps at least one steward", refused(removeSolo(a, a, 100, mapOf(a to founding))))
-        assertEquals("only a steward may change stewards", refused(addSolo(d, outsider, 100, stewards)))
+        assertEquals("A circle must keep at least one steward.", refused(removeSolo(a, a, 100, mapOf(a to founding))))
+        assertEquals("Only a steward can change who the stewards are.", refused(addSolo(d, outsider, 100, stewards)))
     }
 
     @Test
@@ -164,11 +164,11 @@ class StewardRulesTest {
     fun aPolicyChangeMustBeValidDifferentAndFromASteward() {
         val stewards = mapOf(a to founding, b to founding)
         fun decide(settings: StewardSettings, voter: MemberId = a) = StewardRules.decidePolicy(policy, settings, voter, 100, stewards, emptyList())
-        assertTrue(refused(decide(StewardSettings(quorum = 0))).contains("quorum"))
-        assertTrue(refused(decide(StewardSettings(inactiveDays = MIN_STEWARD_INACTIVE_DAYS - 1))).contains("inactiveDays"))
-        assertTrue(refused(decide(StewardSettings(fallbackDelayDays = MIN_STEWARD_FALLBACK_DELAY_DAYS - 1))).contains("fallbackDelayDays"))
+        assertTrue(refused(decide(StewardSettings(quorum = 0))).contains("stewards who must agree"))
+        assertTrue(refused(decide(StewardSettings(inactiveDays = MIN_STEWARD_INACTIVE_DAYS - 1))).contains("be quiet"))
+        assertTrue(refused(decide(StewardSettings(fallbackDelayDays = MIN_STEWARD_FALLBACK_DELAY_DAYS - 1))).contains("others must wait"))
         assertTrue(refused(decide(StewardSettings())).contains("already"))
-        assertEquals("only a steward may change stewards", refused(decide(StewardSettings(quorum = 3), outsider)))
+        assertEquals("Only a steward can change who the stewards are.", refused(decide(StewardSettings(quorum = 3), outsider)))
     }
 
     /** Facts the fallback reads: each member's last event day, and who has spoken since the proposal. */
@@ -241,7 +241,7 @@ class StewardRulesTest {
     @Test
     fun theFallbackStillRespectsTheLastStewardAndTheNewStewardWait() {
         val quiet = Activity(lastDay = mapOf(b to 1))
-        assertEquals("a circle keeps at least one steward", refused(StewardRules.decide(policy, StewardChange.REMOVE, a, a, 300, mapOf(a to founding), proposalAt100, quiet)))
+        assertEquals("A circle must keep at least one steward.", refused(StewardRules.decide(policy, StewardChange.REMOVE, a, a, 300, mapOf(a to founding), proposalAt100, quiet)))
         val fresh = mapOf(a to 290, b to founding)
         assertTrue(refused(StewardRules.decide(policy, StewardChange.ADD, c, a, 291, fresh, proposalAt100, quiet)).contains("cannot vote until {date:"))
     }
@@ -274,7 +274,7 @@ class StewardRulesTest {
         assertEquals(StewardOutcome.Effective, StewardRules.decidePolicy(policy, on, a, 100, stewards, emptyList()))
         assertTrue(refused(StewardRules.decidePolicy(onPolicy, on, a, 100, stewards, emptyList())).contains("already"))
         assertEquals(StewardOutcome.Effective, StewardRules.decidePolicy(onPolicy, StewardSettings(), a, 100, stewards, emptyList()), "switching it off is a change, not 'already the settings'")
-        assertTrue(refused(StewardRules.decidePolicy(policy, StewardSettings(recoveryThreshold = 1), a, 100, stewards, emptyList())).contains("recoveryThreshold"))
+        assertTrue(refused(StewardRules.decidePolicy(policy, StewardSettings(recoveryThreshold = 1), a, 100, stewards, emptyList())).contains("needed to rebuild the key"))
         assertEquals(on, onPolicy.settings)
     }
 }

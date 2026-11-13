@@ -124,7 +124,7 @@ class MarketServerTest {
         val grab = bea.itemUpsert(circle, TODAY, item, "Bea's ladder", ItemClass.ESSENTIAL, newDetailKeyId(crypto), itemKey, listOf(bea.identity.registration))
         accept(grab)
         val view = CircleFold(crypto, testCipher, owner.identity).fold(circle, events())
-        assertEquals(listOf("only the owner may change an item"), view.rejected.map { it.reason })
+        assertEquals(listOf("Only the owner of an item can change it."), view.rejected.map { it.reason })
         assertEquals("Extension ladder", view.market.items.getValue(item).name)
     }
 

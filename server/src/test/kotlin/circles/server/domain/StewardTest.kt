@@ -250,7 +250,7 @@ class StewardTest {
     fun aSettingsChangeMustBeValidDifferentAndFromASteward() {
         twoStewards()
         val day = TODAY + COOL_OFF
-        reject(RejectionCode.INVALID_PUBLIC, founder.stewardPolicy(circle, StewardSettings(inactiveDays = 5), day), "inactiveDays")
+        reject(RejectionCode.INVALID_PUBLIC, founder.stewardPolicy(circle, StewardSettings(inactiveDays = 5), day), "be quiet")
         reject(RejectionCode.INVALID_PUBLIC, founder.stewardPolicy(circle, StewardSettings(), day), "already")
         reject(RejectionCode.NOT_STEWARD, carol.stewardPolicy(circle, StewardSettings(quorum = 3), day))
     }

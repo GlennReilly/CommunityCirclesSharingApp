@@ -54,7 +54,7 @@ class NoticesTest {
     }
 
     @Test fun aReasonWithoutAFullStopGetsOneAndAStartsWithACapital() {
-        assertEquals("Unknown item.", Notices.sentenceOf("unknown item"))
+        assertEquals("Some reason.", Notices.sentenceOf("some reason"))
         assertEquals("Already full.", Notices.sentenceOf(" already full."))
     }
 }

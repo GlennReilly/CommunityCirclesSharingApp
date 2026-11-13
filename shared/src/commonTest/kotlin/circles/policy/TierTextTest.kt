@@ -93,7 +93,7 @@ class TierTextTest {
             rules.copy(stewardTenths = 0).problem(CFG),
         )
         assertEquals(3, problems.size)
-        assertTrue(problems[0].startsWith("the vouches needed for Level 2 must be from"), problems[0])
+        assertTrue(problems[0].startsWith("The vouches needed for Level 2 must be from"), problems[0])
         assertPlain(problems)
         assertTrue(problems.none { Regex("[a-z][A-Z]").containsMatchIn(it) }, "a camelCase identifier in $problems")
     }
