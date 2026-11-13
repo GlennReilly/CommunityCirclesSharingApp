@@ -996,7 +996,7 @@ class ShellViewTest {
 
     @Test fun theRecoveryPageWithoutADraftSendsYouToSettings() {
         val html = render(open().copy(screen = Screen.RecoveryCode))
-        assertTrue("There is no recovery code being made." in html)
+        assertTrue("There is no recovery code being created." in html)
         assertFalse(FORM_RECOVERY_CHECK in html)
     }
 
@@ -1014,13 +1014,13 @@ class ShellViewTest {
 
     @Test fun settingsOffersToMakeOrReplaceARecoveryCodeAndHomeSuggestsItUntilThen() {
         val without = render(open(home()).copy(screen = Screen.Settings))
-        assertTrue("Make a recovery code" in without && """$ATTR_ACTION="$ACTION_RECOVERY_START"""" in without)
+        assertTrue("Create a recovery code" in without && """$ATTR_ACTION="$ACTION_RECOVERY_START"""" in without)
         assertTrue("No recovery code yet" in without)
         val withCode = render(open(home().copy(hasRecoveryCode = true)).copy(screen = Screen.Settings))
-        assertTrue("Make a new recovery code" in withCode && "A new code replaces the old one" in withCode)
-        assertTrue("Make a recovery code, in case you lose every device" in render(open(home())))
+        assertTrue("Create a new recovery code" in withCode && "A new code replaces the old one" in withCode)
+        assertTrue("Create a recovery code, in case you lose every device" in render(open(home())))
         assertFalse("recovery code" in render(open(home().copy(hasRecoveryCode = true))).substringAfter("<main"))
-        assertFalse("Make a recovery code, in case" in render(open(home(canRead = false))), "nothing to protect before being let in")
+        assertFalse("Create a recovery code, in case" in render(open(home(canRead = false))), "nothing to protect before being let in")
     }
 
     @Test fun statusLineIsALiveRegion() {

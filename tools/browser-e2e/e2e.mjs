@@ -525,7 +525,7 @@ try {
   await sleep(1500); await click(alice, 'sync'); await click(phone, 'sync');
   await until(phone, has(phone, 'Cannot sign in to the circle'), 'phone cut off'); ok('the removed phone is told it cannot sign in');
   // Recovery code: alice writes down 12 words, proves she copied three, then a clean browser restores her from them.
-  await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, 'Make a recovery code, in case you lose every device'), 'home suggests a recovery code'); ok('home suggests making a recovery code');
+  await alice.evaluate('location.hash = "#/home"'); await until(alice, has(alice, 'Create a recovery code, in case you lose every device'), 'home suggests a recovery code'); ok('home suggests creating a recovery code');
   await alice.evaluate('location.hash = "#/settings"'); await until(alice, 'document.querySelector("[data-action=recovery-start]") !== null', 'settings recovery button');
   await click(alice, 'recovery-start'); await until(alice, 'document.getElementById("recovery-check-form") !== null', 'recovery page');
   await checkAccessibility(alice, 'your recovery code');

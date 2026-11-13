@@ -1321,7 +1321,7 @@ class CircleApp(
 
     // ---- recovery code (ADR 0047) ----
 
-    /** Step one of making a recovery code: new words to write down and the places to type back. Nothing is sent yet. */
+    /** Step one of creating a recovery code: new words to write down and the places to type back. Nothing is sent yet. */
     suspend fun prepareRecoveryCode(origin: String): RecoveryDraft? {
         val s = session ?: return null
         val list = wordlist().takeIf { it.size == circles.keys.RECOVERY_WORDLIST_SIZE } ?: return null

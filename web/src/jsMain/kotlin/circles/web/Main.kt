@@ -607,7 +607,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ) }
                 FORM_RECOVERY_CHECK -> {
                     val draft = state.recoveryDraft
-                    if (draft == null) dispatch(AppAction.Notice("There is no recovery code being made."))
+                    if (draft == null) dispatch(AppAction.Notice("There is no recovery code being created."))
                     else when (circleApp.confirmRecoveryCode(state.origin, draft.askFor.map { field("word-$it") })) {
                         is RecoveryCodeResult.Created -> {
                             dispatch(AppAction.RecoveryDraftReady(null))
@@ -615,7 +615,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             window.location.hash = Screen.Settings.fragment
                         }
                         RecoveryCodeResult.WrongWords -> dispatch(AppAction.Notice("The words you typed do not match the recovery code shown. Check your paper and try again."))
-                        RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to approve your access before you can make a recovery code."))
+                        RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to approve your access before you can create a recovery code."))
                         else -> dispatch(AppAction.Notice("The recovery code could not be saved right now. Try syncing, then try again."))
                     }
                 }

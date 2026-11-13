@@ -692,7 +692,7 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
         }
         if (home.canRead && !home.hasRecoveryCode) {
             li {
-                a(href = Screen.Settings.fragment) { +"Make a recovery code, in case you lose every device" }
+                a(href = Screen.Settings.fragment) { +"Create a recovery code, in case you lose every device" }
             }
         }
     }
@@ -2035,7 +2035,7 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
         }
         button(type = ButtonType.button) {
             attributes[ATTR_ACTION] = ACTION_RECOVERY_START
-            +(if (home.hasRecoveryCode) "Make a new recovery code" else "Make a recovery code")
+            +(if (home.hasRecoveryCode) "Create a new recovery code" else "Create a recovery code")
         }
         if (home.hasRecoveryCode) p { +"A new code replaces the old one, which stops working." }
     }
@@ -2443,7 +2443,7 @@ private fun FlowContent.recoveryCodePage(state: AppState) {
     val draft = state.recoveryDraft
     h1 { +Screen.RecoveryCode.title }
     if (draft == null) {
-        p { +"There is no recovery code being made. Start from Settings." }
+        p { +"There is no recovery code being created. Start from Settings." }
         return
     }
     p { +"Write these 12 words on paper, in this order. Keep the paper somewhere safe, like a house key. Anyone who has them can act as you, and nobody can look them up for you." }
@@ -2488,7 +2488,7 @@ private fun FlowContent.recoveryCodePage(state: AppState) {
     }
     button(type = ButtonType.button) {
         attributes[ATTR_ACTION] = ACTION_RECOVERY_CANCEL
-        +"Cancel, do not make a code"
+        +"Cancel, do not create a code"
     }
 }
 

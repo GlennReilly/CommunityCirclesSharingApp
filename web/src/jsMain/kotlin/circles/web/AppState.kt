@@ -48,7 +48,7 @@ data class AppState(
     val origin: String = "",
     /** A link to restore from a recovery code, found in the address (ADR 0047). */
     val pendingRestore: RestoreLink? = null,
-    /** The recovery code being made: shown once, kept only in memory. */
+    /** The recovery code being created: shown once, kept only in memory. */
     val recoveryDraft: RecoveryDraft? = null,
     /** Share codes this steward chose to show, by epoch: secrets, kept only in memory and only while signed in (ADR 0048). */
     val shareCodes: Map<Int, String> = emptyMap(),
