@@ -1992,8 +1992,10 @@ class NamesViewTest {
         assertTrue(">Your account</button>" in headerOf(noName) || ">Your account<" in headerOf(noName))
         val yourName = render(open(home(myName = null)).copy(screen = Screen.YourName))
         assertFalse(ID_ACCOUNT_BUTTON in yourName, "the name page has no navigation and no menu to wander off with")
+        assertTrue("""aria-label="Alice Smith, $ACCOUNT_MENU_LABEL"""" in headerOf(render(open(home()))), "the name says what the button is")
         assertFalse("<nav" in yourName)
         assertFalse(ID_ACCOUNT_BUTTON in render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity)), "no menu before sign-in")
+        assertFalse("aria-label=\"Your account" in headerOf(noName), "the fallback already says what it is")
     }
 
     @Test fun theMenuOpensAndClosesAndClosesOnNavigatingOrWhenTheAppLocks() {

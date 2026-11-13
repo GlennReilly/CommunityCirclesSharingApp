@@ -170,6 +170,9 @@ const val ID_ACCOUNT_BUTTON = "account-menu-button"
 const val ID_ACCOUNT_MENU = "account-menu"
 /** What the account button says before the member has chosen a display name. */
 const val ACCOUNT_FALLBACK = "Your account"
+
+/** Said after the member's name by a screen reader: the button opens a short menu of account pages. */
+const val ACCOUNT_MENU_LABEL = "account menu"
 /** A menu of members (ADR 0078): the select carries [ATTR_MEMBER_MENU]; next to it a "View <name>" link per member, only the chosen one showing. */
 const val ATTR_MEMBER_MENU = "data-member-menu"
 const val ATTR_VIEW_OF = "data-view-of"
@@ -967,7 +970,10 @@ private fun FlowContent.accountMenu(state: AppState) {
             attributes["aria-expanded"] = open.toString()
             attributes["aria-controls"] = ID_ACCOUNT_MENU
             if (current) attributes["aria-current"] = "page"
-            +((state.model as? AppModel.Open)?.home?.myName ?: ACCOUNT_FALLBACK) // plain-name: the button text of the account menu is a label for the menu, not a link
+            val shownName = (state.model as? AppModel.Open)?.home?.myName // plain-name: the button text of the account menu is a label for the menu, not a link
+            // A screen reader hears the name and what the button is; the visible text stays the start of the accessible name (WCAG 2.5.3).
+            if (shownName != null) attributes["aria-label"] = "$shownName, $ACCOUNT_MENU_LABEL"
+            +(shownName ?: ACCOUNT_FALLBACK) // plain-name: the button text of the account menu is a label for the menu, not a link
         }
         ul {
             id = ID_ACCOUNT_MENU

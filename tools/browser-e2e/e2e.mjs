@@ -17,6 +17,20 @@ const has = (c, s) => `document.getElementById("app").innerText.includes(${JSON.
 // Clicks "Sync now" every couple of seconds until the page shows what is expected (the other browser may not have pushed yet).
 async function syncUntil(c, expr, what, ms = 25000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await c.evaluate(expr) === true) return; await click(c, 'sync'); await sleep(1500); } throw new Error('timeout: ' + what + '\n' + await text(c)); }
 const search = (c, v) => c.evaluate(`(() => { const e = document.getElementById('history-search'); e.value = ${JSON.stringify(v)}; e.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+// The accessibility tree Chrome builds for the page (what a screen reader is given): roles, names and states of the nodes that are not ignored.
+// It is NOT a screen-reader test: it shows what is exposed, not how a reader speaks it.
+// Accessibility-tree checks (Chrome's computed tree, the data a screen reader is given). NOT a screen-reader test.
+const axFind = (nodes, role, name) => nodes.filter(n => n.role === role && (name === undefined || (name instanceof RegExp ? name.test(n.name) : n.name === name)));
+function axExpect(nodes, role, name, count, what) { const got = axFind(nodes, role, name).length; if (got !== count) throw new Error('AX tree: ' + what + ' (' + role + ' ' + name + ': expected ' + count + ', got ' + got + ')'); }
+async function axNodes(c, label = '') {
+  await c.send('Accessibility.enable');
+  const { result } = await c.send('Accessibility.getFullAXTree');
+  const nodes = result.nodes.filter(n => !n.ignored).map(n => ({
+    id: n.nodeId, parent: n.parentId, role: n.role && n.role.value, name: n.name && n.name.value, props: Object.fromEntries((n.properties || []).map(p => [p.name, p.value && p.value.value])),
+  }));
+  if (process.env.AXDUMP) console.log('AXTREE ' + label, JSON.stringify(nodes.filter(n => ['banner', 'navigation', 'main', 'heading', 'button', 'link', 'status', 'alert', 'list', 'listitem'].includes(n.role)).slice(0, 60)));
+  return nodes;
+}
 let step = 0; const ok = m => console.log(`ok ${++step}: ${m}`);
 try {
   await alice.goto(server.url + '/'); await until(alice, has(alice, 'Welcome to Lendger'), 'welcome page');
@@ -82,9 +96,22 @@ try {
     if (info.expanded !== 'false' || info.controls !== 'account-menu' || info.linksVisible || info.role) throw new Error('closed menu: ' + JSON.stringify(info));
     if (JSON.stringify(info.items) !== JSON.stringify(['My level', 'Settings'])) throw new Error('menu items: ' + JSON.stringify(info.items)); }
   ok('the nav bar has six pages; the account menu button shows the member\'s name, is closed, and its links are out of the tab order');
+  { const ax = await axNodes(alice, 'closed'); const who = /^(.+), account menu$|^Your account$/;
+    axExpect(ax, 'banner', undefined, 1, 'one banner landmark'); axExpect(ax, 'navigation', 'Main', 1, 'one named navigation landmark'); axExpect(ax, 'main', undefined, 1, 'one main landmark');
+    axExpect(ax, 'button', who, 1, 'the account button names the member and says it is an account menu');
+    const b = axFind(ax, 'button', who)[0]; if (b.props.expanded !== false) throw new Error('AX tree: closed menu button is not expanded=false: ' + JSON.stringify(b.props));
+    axExpect(ax, 'link', 'My level', 0, 'closed menu: My level link is not exposed'); axExpect(ax, 'link', 'Settings', 0, 'closed menu: Settings link is not exposed');
+    axExpect(ax, 'heading', undefined, 1, 'one heading on home'); if (axFind(ax, 'heading')[0].props.level !== 1) throw new Error('AX tree: home heading is not level 1');
+    axExpect(ax, 'status', undefined, 1, 'one polite live region for notices'); if (axFind(ax, 'status')[0].props.live !== 'polite') throw new Error('AX tree: notices are not polite');
+    for (const name of ['Sync now', 'Lock now']) axExpect(ax, 'button', name, 1, 'icon button has a name'); }
+  ok('accessibility tree, menu closed: banner, named navigation, main; the account button is named "<name>, account menu" and expanded=false; the menu links are not exposed; one h1; one polite status region');
   const menuState = () => alice.evaluate('JSON.stringify({ expanded: document.getElementById("account-menu-button").getAttribute("aria-expanded"), visible: [...document.querySelectorAll("#account-menu a")].every(a => a.checkVisibility()), focus: document.activeElement && document.activeElement.id })');
   await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "true"', 'menu opens');
   if (!JSON.parse(await menuState()).visible) throw new Error('the open menu shows no links');
+  { const ax = await axNodes(alice, 'open'); const b = axFind(ax, 'button', /^(.+), account menu$|^Your account$/)[0];
+    if (!b || b.props.expanded !== true || b.props.controls !== 'account-menu') throw new Error('AX tree: open button state ' + JSON.stringify(b));
+    axExpect(ax, 'link', 'My level', 1, 'open menu: My level link is exposed once'); axExpect(ax, 'link', 'Settings', 1, 'open menu: Settings link is exposed once'); }
+  ok('accessibility tree, menu open: the button says expanded=true and controls account-menu; My level and Settings links are exposed, once each');
   await checkAccessibility(alice, 'home with the account menu open');
   for (const type of ['keyDown', 'keyUp']) await alice.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
   await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "false" && document.activeElement.id === "account-menu-button"', 'Escape closes the menu and focus returns to its button');
@@ -99,6 +126,9 @@ try {
     if (!(await alice.evaluate(`[...document.querySelectorAll('#account-menu a')].find(a => a.textContent === ${JSON.stringify(title)}).getAttribute('aria-current') === 'page'`))) throw new Error(title + ' link is not marked current');
   }
   ok('choosing My level and Settings from the menu goes there, closes it, and marks the button and the link current');
+  await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your level:'), 'level page'); { const ax = await axNodes(alice, 'my level'); axExpect(ax, 'heading', 'My level', 1, 'the page heading'); if (axFind(ax, 'heading', 'My level')[0].props.level !== 1) throw new Error('AX tree: My level is not an h1');
+    const levels = axFind(ax, 'heading').map(n => n.props.level); if (levels.some((l, i) => i > 0 && l > levels[i - 1] + 1)) throw new Error('AX tree: heading levels skip: ' + levels);
+    axExpect(ax, 'link', 'My level', 0, 'closed menu on My level exposes no link'); ok('accessibility tree, My level page: h1 "My level", no skipped heading level (' + levels + ')'); }
   await alice.evaluate('location.hash = "#/home"'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-current") === null', 'back home, button not current');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting for approval'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
   const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Check and approve access")) || ""');
