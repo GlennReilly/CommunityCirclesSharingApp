@@ -71,7 +71,7 @@ try {
   await until(bea, has(bea, 'Show a steward who you are') + ' && document.querySelector("svg.qr") !== null && document.querySelector("p.fingerprint") !== null', 'bea shows her code');
   const beaChars = await bea.evaluate('document.querySelector("p.fingerprint").textContent'); if (!/^[0-9a-f]{4}( [0-9a-f]{4}){4}$/.test(beaChars)) throw new Error('bea characters: ' + beaChars);
   ok('bea\'s home shows a QR code and, for no camera, her characters: ' + beaChars);
-  await checkAccessibility(bea, 'home before being let in');
+  await checkAccessibility(bea, 'home before access is approved');
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
   await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting for approval'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting for approval'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
@@ -84,7 +84,7 @@ try {
   if (shownChars !== beaChars) throw new Error('the check page shows ' + shownChars + ', bea shows ' + beaChars); ok('the check page shows the same characters as bea\'s screen, for reading out');
   const letIn = await alice.evaluate('document.querySelector("form[id^=let-in-]").id');
   if (!(await buttonHidden(alice, letIn))) throw new Error('Approve access shows before the tick');
-  await checkAccessibility(alice, 'check identity, letting in');
+  await checkAccessibility(alice, 'check identity, approving access');
   await alice.evaluate(`(() => { const b = document.getElementById("${letIn}").querySelector("input[type=checkbox]"); b.checked = true; b.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   if (await buttonHidden(alice, letIn)) throw new Error('Approve access stays hidden after the tick'); ok('"Approve access" appears only after ticking that she checked bea in person');
   await alice.evaluate(`document.getElementById("${letIn}").requestSubmit()`); await until(alice, has(alice, 'access has now been approved. The circle opens for their device') + ' && location.hash === "#/members"', 'let in, back on members');
