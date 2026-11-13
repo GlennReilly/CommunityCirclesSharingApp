@@ -344,6 +344,15 @@ class ShellViewTest {
         assertTrue(Regex("""<a href="#/members">1 person waiting for approval</a>""").containsMatchIn(html))
     }
 
+    @Test fun homeCountsPeopleWaitingForApprovalInTheSingularAndThePlural() {
+        val one = listOf(WaitingDevice(beaDevice, bea, "5555 6666"))
+        val two = one + WaitingDevice(DeviceId("e".repeat(32)), MemberId("c".repeat(32)), "7777 8888")
+        assertTrue(Regex("""<a href="#/members">1 person waiting for approval</a>""").containsMatchIn(render(open(home(waiting = one)))))
+        assertTrue(Regex("""<a href="#/members">2 people waiting for approval</a>""").containsMatchIn(render(open(home(waiting = two)))))
+        assertFalse("waiting for approval" in render(open(home())), "nothing waiting, no link")
+        assertFalse("waiting for approval" in render(open(home(steward = false, waiting = one))), "only a steward is told")
+    }
+
     @Test fun homeCountsOneMemberInTheSingular() {
         assertTrue(">1 member</a>" in render(open(home(members = 1))))
     }

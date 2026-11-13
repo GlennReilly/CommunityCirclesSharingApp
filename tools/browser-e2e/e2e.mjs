@@ -73,7 +73,8 @@ try {
   ok('bea\'s home shows a QR code and, for no camera, her characters: ' + beaChars);
   await checkAccessibility(bea, 'home before access is approved');
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
-  await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting for approval'), 'home mentions bea waiting'); ok('alice\'s home links to the person waiting');
+  await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting for approval'), 'home mentions bea waiting'); { const link = await alice.evaluate('[...document.querySelectorAll("main a")].map(x => x.textContent).find(t => t.includes("waiting for approval")) || ""'); if (link !== '1 person waiting for approval') throw new Error('the Home link for one person waiting reads: ' + link); }
+  await checkAccessibility(alice, 'home with someone waiting for approval'); ok('alice\'s home links to the person waiting: "1 person waiting for approval" (screenshot taken)');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting for approval'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
   const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Check and approve access")) || ""');
   if (!waitingLine.includes('New member (waiting for a name)') || /[0-9a-f]{4} [0-9a-f]{4}/.test(waitingLine)) throw new Error('waiting line: ' + waitingLine);
