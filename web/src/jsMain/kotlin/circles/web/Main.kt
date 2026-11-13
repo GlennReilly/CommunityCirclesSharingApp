@@ -592,7 +592,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             AddDeviceResult.BadCode -> "That does not look like a device code. Copy the whole code shown on the new device."
                             AddDeviceResult.AlreadyKnown -> "The device you entered is already part of the circle."
                             AddDeviceResult.NameTooLong -> "Keep the name to $MAX_DEVICE_NAME_CHARS characters or fewer."
-                            AddDeviceResult.NotLetInYet -> "A steward needs to let you in before you can add a device."
+                            AddDeviceResult.NotLetInYet -> "A steward needs to approve your access before you can add a device."
                             AddDeviceResult.NotAllowed -> "The device could not be added right now. Try syncing, then try again."
                         },
                     ),
@@ -607,7 +607,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             window.location.hash = Screen.Settings.fragment
                         }
                         RecoveryCodeResult.WrongWords -> dispatch(AppAction.Notice("The words you typed do not match the recovery code shown. Check your paper and try again."))
-                        RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can make a recovery code."))
+                        RecoveryCodeResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to approve your access before you can make a recovery code."))
                         else -> dispatch(AppAction.Notice("The recovery code could not be saved right now. Try syncing, then try again."))
                     }
                 }
@@ -649,7 +649,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     NameResult.Saved -> done
                     is NameResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
                     is NameResult.NameTaken -> result.message
-                    NameResult.NotLetInYet -> "A steward needs to let you in before you can set your name."
+                    NameResult.NotLetInYet -> "A steward needs to approve your access before you can set your name."
                     NameResult.NotAllowed -> "Your name could not be saved right now. Try syncing, then try again."
                 },
             ),
@@ -664,7 +664,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             }
             ItemResult.BadName -> dispatch(AppAction.Notice("Give the item a name of 1 to 80 characters."))
             is ItemResult.DescriptionTooLong -> dispatch(AppAction.Notice("Keep the details to ${result.maximum} characters or fewer."))
-            ItemResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can add items."))
+            ItemResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to approve your access before you can add items."))
             ItemResult.NotAllowed -> dispatch(AppAction.Notice("Only the owner of an item can change it, and only while it is on the list."))
         }
     }
@@ -680,7 +680,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             is LoanResult.NotYet -> dispatch(AppAction.Notice("You cannot ask for this item yet. " + (result.howToUnlock.firstOrNull() ?: result.reasons.lastOrNull().orEmpty())))
             LoanResult.AlreadyBooked -> dispatch(AppAction.Notice("Someone else has been promised that item for some of those days. Try other dates."))
             is LoanResult.Paused -> dispatch(AppAction.Notice((result.reasons + "You can still borrow essentials. Open Pauses to appeal.").joinToString(" ")))
-            LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to let you in before you can borrow."))
+            LoanResult.NotLetInYet -> dispatch(AppAction.Notice("A steward needs to approve your access before you can borrow."))
             LoanResult.NotAllowed -> dispatch(AppAction.Notice("The loan step could not be done right now. Try syncing, then try again."))
         }
     }
@@ -877,7 +877,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         AppAction.Notice(
                             when (circleApp?.vouchFor(MemberId(id))) {
                                 is VouchResult.Done -> Notices.vouched(vouchName)
-                                VouchResult.NotLetInYet -> "A steward needs to let you in before you can vouch."
+                                VouchResult.NotLetInYet -> "A steward needs to approve your access before you can vouch."
                                 else -> Notices.vouchRefused(vouchName)
                             },
                         ),

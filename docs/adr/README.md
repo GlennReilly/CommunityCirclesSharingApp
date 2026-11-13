@@ -84,6 +84,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0078](0078-person-page-actions-member-menus-approval-wording.md) | Person page actions, links beside member menus, and the approval notice wording | Accepted |
 | [0079](0079-a-steward-needs-a-confirmed-identity.md) | A steward needs a confirmed identity | Accepted |
 | [0080](0080-date-format-setting.md) | Date format setting | Accepted |
+| [0081](0081-approve-access-wording.md) | The UI says "approve access", not "let in" | Accepted |
 
 ## Open decisions still to record
 

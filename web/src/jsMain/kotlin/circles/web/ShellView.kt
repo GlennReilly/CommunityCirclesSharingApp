@@ -638,7 +638,7 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
     if (!home.canRead) {
         p {
             role = "status"
-            +"You are in the circle. A steward needs to let you in before you can see anything."
+            +"You are in the circle. A steward needs to approve your access before you can see anything."
         }
         // The steward checks this device in person before letting it in (ADR 0071): show them the code.
         home.people.firstOrNull { it.isMe }?.let { me ->
@@ -676,7 +676,7 @@ private fun FlowContent.home(home: HomeData, state: AppState) {
         }
         if (home.isSteward && home.waiting.isNotEmpty()) {
             li {
-                a(href = Screen.Members.fragment) { +(if (home.waiting.size == 1) "1 person waiting to be let in" else "${home.waiting.size} people waiting to be let in") }
+                a(href = Screen.Members.fragment) { +(if (home.waiting.size == 1) "1 person waiting for approval" else "${home.waiting.size} people waiting for approval") }
             }
         }
         if (home.canRead && !home.hasRecoveryCode) {
@@ -775,9 +775,9 @@ private fun FlowContent.letInForm(waiting: WaitingDevice) {
     form {
         id = FORM_LET_IN_PREFIX + waiting.device.v
         attributes[ATTR_DEVICE] = waiting.device.v
-        p { +"Letting them in gives this device the circle's key. Do it only after checking them in person." }
+        p { +"Approving access gives this device the circle's key. Do it only after you have checked in person who the person is." }
         mustTick(FIELD_LET_IN_CHECKED, "$FIELD_LET_IN_CHECKED-${waiting.device.v}", CHECKED_IN_PERSON)
-        formSubmit("Let them in")
+        formSubmit("Approve access")
     }
 }
 
@@ -900,7 +900,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
     }
     if (home.isSteward && home.waiting.isNotEmpty()) {
         section {
-            h2 { +"Waiting to be let in" }
+            h2 { +"Waiting for approval" }
             ul {
                 for (waiting in home.waiting) {
                     li {
@@ -910,7 +910,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
                             attributes[ATTR_ACTION] = ACTION_CHECK_PERSON
                             attributes[ATTR_MEMBER] = waiting.member.v
                             attributes[ATTR_DEVICE] = waiting.device.v
-                            +"Check and let in"
+                            +"Check and approve access"
                         }
                     }
                 }
@@ -1075,11 +1075,11 @@ private fun FlowContent.checkIdentityPage(home: HomeData, state: AppState) {
     val waiting = check?.device?.let { device -> home.waiting.firstOrNull { it.device == device } }
     when {
         check == null || person == null -> p { +"This person is not in the circle any more." }
-        check.device != null && (waiting == null || !home.isSteward) -> p { +"Nobody is waiting with that device any more: the newcomer has been let in, or has left." }
+        check.device != null && (waiting == null || !home.isSteward) -> p { +"Nobody is waiting for approval with that device any more: the newcomer's access has been approved, or they have left." }
         person.isMe -> p { +"That is you. To be checked by someone else, show them your QR code on the Members page." }
         else -> {
             p {
-                +(if (waiting != null) "Letting in: " else "Checking: ")
+                +(if (waiting != null) "Approving access: " else "Checking: ")
                 personName(home, person.member)
             }
             section {
@@ -1106,7 +1106,7 @@ private fun FlowContent.checkIdentityPage(home: HomeData, state: AppState) {
 private fun FlowContent.identityActions(home: HomeData, person: MemberSummary, letIn: List<WaitingDevice>) {
     if (letIn.isNotEmpty()) {
         section {
-            h2 { +"Let them in" }
+            h2 { +"Approve access" }
             for (waiting in letIn) letInForm(waiting)
         }
         return
@@ -1145,7 +1145,7 @@ private fun FlowContent.items(home: HomeData, state: AppState) {
     if (!home.canRead) {
         p {
             role = "status"
-            +"A steward needs to let you in before you can see or add items."
+            +"A steward needs to approve your access before you can see or add items."
         }
         return
     }
@@ -1380,7 +1380,7 @@ private fun FlowContent.borrow(home: HomeData) {
     if (!home.canRead) {
         p {
             role = "status"
-            +"A steward needs to let you in before you can borrow or lend."
+            +"A steward needs to approve your access before you can borrow or lend."
         }
         return
     }
@@ -2061,11 +2061,11 @@ private fun policyProposalText(proposal: ProposalSummary): String = when (propos
 /** Who looks after the circle, what is waiting for their agreement, and the rules they follow (ADR 0027). */
 private fun FlowContent.stewards(home: HomeData) {
     h1 { +Screen.Stewards.title }
-    p { +"Stewards let people in, decide disputes, and decide who the stewards are." }
+    p { +"Stewards approve new members' access, decide disputes, and decide who the stewards are." }
     if (home.stewardCount == 1) {
         p {
             role = "status"
-            +"This circle has one steward. If they are away, nobody can let people in or decide disputes that involve them. Consider adding another."
+            +"This circle has one steward. If they are away, nobody can approve new members' access or decide disputes that involve them. Consider adding another."
         }
     }
     section {
@@ -2810,7 +2810,7 @@ private fun FlowContent.skills(home: HomeData) {
     if (!home.canRead) {
         p {
             role = "status"
-            +"A steward needs to let you in before you can see or offer skills."
+            +"A steward needs to approve your access before you can see or offer skills."
         }
         return
     }

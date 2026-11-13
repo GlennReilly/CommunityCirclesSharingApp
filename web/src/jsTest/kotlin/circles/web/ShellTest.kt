@@ -332,8 +332,8 @@ class ShellViewTest {
     }
 
     @Test fun homeSaysWhenYouAreNotLetInYet() {
-        assertTrue("A steward needs to let you in" in render(open(home(steward = false, canRead = false))))
-        assertFalse("A steward needs to let you in" in render(open(home(canRead = true))))
+        assertTrue("A steward needs to approve your access" in render(open(home(steward = false, canRead = false))))
+        assertFalse("A steward needs to approve your access" in render(open(home(canRead = true))))
     }
 
     @Test fun homeSummarisesAndLinksToThePagesThatDoTheWork() {
@@ -341,7 +341,7 @@ class ShellViewTest {
         assertTrue(Regex("""<a href="#/members">2 members</a>""").containsMatchIn(html))
         assertTrue(Regex("""<a href="#/items">2 items shared</a>""").containsMatchIn(html))
         assertTrue(Regex("""<a href="#/borrow">1 request waiting for your answer</a>""").containsMatchIn(html))
-        assertTrue(Regex("""<a href="#/members">1 person waiting to be let in</a>""").containsMatchIn(html))
+        assertTrue(Regex("""<a href="#/members">1 person waiting for approval</a>""").containsMatchIn(html))
     }
 
     @Test fun homeCountsOneMemberInTheSingular() {
@@ -355,7 +355,7 @@ class ShellViewTest {
 
     @Test fun homeHidesTheWaitingLineFromPeopleWhoAreNotStewardsAndTheItemsLineBeforeTheyCanRead() {
         val html = render(open(home(steward = false, canRead = false, waiting = listOf(WaitingDevice(beaDevice, bea, "5555 6666 7777 8888 9999")))))
-        assertFalse("waiting to be let in" in html)
+        assertFalse("waiting for approval" in html)
         assertFalse("items shared" in html)
     }
 
@@ -390,13 +390,13 @@ class ShellViewTest {
     @Test fun onlyStewardsSeeWhoIsWaitingAndGoToTheCheckToLetThemIn() {
         val waiting = listOf(WaitingDevice(beaDevice, bea, "5555 6666 7777 8888 9999"))
         val steward = members(home(steward = true, waiting = waiting))
-        val line = steward.substringAfter("Waiting to be let in")
-        assertTrue(""">Check and let in<""" in line && """$ATTR_DEVICE="${beaDevice.v}"""" in line && """$ATTR_MEMBER="${bea.v}"""" in line)
+        val line = steward.substringAfter("Waiting for approval")
+        assertTrue(""">Check and approve access<""" in line && """$ATTR_DEVICE="${beaDevice.v}"""" in line && """$ATTR_MEMBER="${bea.v}"""" in line)
         assertTrue(">Bea<" in line)
         assertFalse("5555 6666" in steward, "no characters on the waiting line")
         assertFalse(FORM_LET_IN_PREFIX in steward, "letting in happens on the check page, not here")
-        assertFalse("Check and let in" in members(home(steward = false, waiting = waiting)))
-        assertFalse("Waiting to be let in" in members(home(steward = true)))
+        assertFalse("Check and approve access" in members(home(steward = false, waiting = waiting)))
+        assertFalse("Waiting for approval" in members(home(steward = true)))
     }
 
     @Test fun refusedChangesAreReported() {
@@ -498,7 +498,7 @@ class ShellViewTest {
 
     @Test fun theItemsPageSaysWhenYouCannotSeeItemsYet() {
         val html = items(home(canRead = false))
-        assertTrue("A steward needs to let you in" in html)
+        assertTrue("A steward needs to approve your access" in html)
         assertFalse(Screen.AddItem.fragment in html)
     }
 
@@ -583,7 +583,7 @@ class ShellViewTest {
     }
 
     @Test fun theBorrowPageSaysWhenYouAreNotLetInYetAndWhenThereAreNoLoans() {
-        assertTrue("A steward needs to let you in" in render(open(home(canRead = false)).copy(screen = Screen.Borrow)))
+        assertTrue("A steward needs to approve your access" in render(open(home(canRead = false)).copy(screen = Screen.Borrow)))
         val empty = render(open(home()).copy(screen = Screen.Borrow))
         assertTrue("No loans yet." in empty)
         assertTrue("""href="${Screen.Items.fragment}"""" in empty)
@@ -1255,7 +1255,7 @@ class ShellViewTest {
     @Test fun theSkillsPageHasEmptyAndNotYetLetInStates() {
         assertTrue("Nobody has offered a skill yet." in skillsPage())
         assertFalse(ID_SKILL_SEARCH in skillsPage())
-        assertTrue("A steward needs to let you in" in skillsPage(canRead = false))
+        assertTrue("A steward needs to approve your access" in skillsPage(canRead = false))
         assertTrue(Screen.AddSkill.fragment in skillsPage())
         assertFalse(Screen.AddSkill in Screen.navigation || Screen.EditSkill in Screen.navigation)
         assertTrue(Screen.Skills in Screen.navigation)
@@ -1462,7 +1462,7 @@ class NamesViewTest {
         val named = reduce(unnamed.copy(screen = Screen.YourName), AppAction.ModelChanged(AppModel.Open(home())))
         assertEquals(Screen.Home, named.screen)
         assertEquals(Screen.Home, reduce(named, AppAction.Navigate(Screen.YourName)).screen)
-        // Someone still waiting to be let in cannot seal a name yet, so they are not asked.
+        // Someone still waiting for approval cannot seal a name yet, so they are not asked.
         assertEquals(Screen.Home, reduce(AppState(model = AppModel.Open(home(canRead = false, myName = null))), AppAction.Navigate(Screen.Home)).screen)
         assertFalse(Screen.YourName in Screen.navigation)
     }
@@ -1518,21 +1518,21 @@ class NamesViewTest {
         val waiting = listOf(WaitingDevice(device, stranger, "7777 7777 7777 7777 7777"))
         val people = listOf(alice, MemberSummary(stranger, isMe = false, isSteward = false, devices = 2, fingerprint = "9999 8888 7777 6666 5555"))
         val html = render(open(home(waiting = waiting, people = people)).copy(screen = Screen.Members))
-        assertTrue(html.substringAfter("Waiting to be let in").let { "$UNNAMED_MEMBER</a> <button" in it && ">Check and let in<" in it })
-        assertFalse(html.substringAfter("Waiting to be let in").contains(NAME_NOT_CONFIRMED), "no confirmation state without a name")
+        assertTrue(html.substringAfter("Waiting for approval").let { "$UNNAMED_MEMBER</a> <button" in it && ">Check and approve access<" in it })
+        assertFalse(html.substringAfter("Waiting for approval").contains(NAME_NOT_CONFIRMED), "no confirmation state without a name")
         val state = reduce(open(home(waiting = waiting, people = people)).copy(screen = Screen.Members), AppAction.CheckPerson(PersonCheck(stranger, device)))
         assertEquals(Screen.CheckIdentity, state.screen)
         val check = render(state)
-        assertTrue("Letting in: " in check && "Circle home page shows a QR code" in check)
+        assertTrue("Approving access: " in check && "Circle home page shows a QR code" in check)
         assertTrue("""<p class="fingerprint">7777 7777 7777 7777 7777</p>""" in check, "the waiting device's own characters, not the member's first device")
         assertFalse("9999 8888" in check)
         val form = check.substringAfter("""id="$FORM_LET_IN_PREFIX${device.v}"""").substringBefore("</form>")
         assertTrue("""$ATTR_DEVICE="${device.v}"""" in check && """$ATTR_MUST_CHECK="true"""" in form && CHECKED_IN_PERSON in form)
-        assertTrue(Regex("<button[^>]*hidden[^>]*>Let them in<").containsMatchIn(form), "the button waits for the tick")
+        assertTrue(Regex("<button[^>]*hidden[^>]*>Approve access<").containsMatchIn(form), "the button waits for the tick")
         assertFalse(FORM_CONFIRM_NAME_PREFIX in check || ACTION_VOUCH in check, "letting in is the only thing on this page")
         // Already let in (or gone): the page says so and offers nothing.
         val stale = render(state.copy(model = AppModel.Open(home(people = people))))
-        assertTrue("Nobody is waiting with that device any more" in stale && FORM_LET_IN_PREFIX !in stale)
+        assertTrue("Nobody is waiting for approval with that device any more" in stale && FORM_LET_IN_PREFIX !in stale)
         // A non-steward never gets the let-in form.
         assertFalse(FORM_LET_IN_PREFIX in render(state.copy(model = AppModel.Open(home(steward = false, waiting = waiting, people = people)))))
         // Leaving the page forgets who was being checked; without a check the page falls back to Members.

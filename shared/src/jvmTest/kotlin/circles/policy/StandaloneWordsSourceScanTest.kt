@@ -43,13 +43,30 @@ class StandaloneWordsSourceScanTest {
         assertTrue(found.isEmpty(), "Write messages that make sense on their own (ADR 0077):\n" + found.joinToString("\n"))
     }
 
+    /** ADR 0081: the UI says "approve access" and "waiting for approval", never "let in". Comments and identifiers are not scanned. */
+    private val letInWords = Regex("""(?i)\blet(s|ting)?\b( (you|them|him|her|people|someone|anyone|newcomers))? in\b|\b(been|be|being) let in\b""")
+
+    @Test
+    fun noMessageOrLabelSaysLetInAnyMore() {
+        val files = scanned.map { File(root, it) }.filter { it.isDirectory }
+            .flatMap { dir -> dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+        val found = files.flatMap { file ->
+            file.readLines().withIndex()
+                .filter { (_, line) -> line.trimStart().let { !it.startsWith("//") && !it.startsWith("*") && !it.startsWith("/**") } }
+                .flatMap { (index, line) -> literal.findAll(line).filter { letInWords.containsMatchIn(it.groupValues[1]) }.map { "${file.relativeTo(root)}:${index + 1}: ${it.value}" }.toList() }
+        }
+        assertTrue(found.isEmpty(), "Say approve access, not let in (ADR 0081):\n" + found.joinToString("\n"))
+        assertTrue(letInWords.containsMatchIn("A steward needs to let you in") && letInWords.containsMatchIn("Waiting to be let in") && letInWords.containsMatchIn("Check and let in") && letInWords.containsMatchIn("Letting them in gives"))
+        assertTrue(!letInWords.containsMatchIn("Approve access") && !letInWords.containsMatchIn("let-in-checked") && !letInWords.containsMatchIn("Waiting for approval"))
+    }
+
     @Test
     fun theScanCatchesWhatItIsFor() {
         assertTrue(problemsIn("""dispatch(AppAction.Notice("They can read the circle."))""").isNotEmpty())
         assertTrue(problemsIn("""x("It counts once they confirm it.")""").isNotEmpty())
         assertTrue(problemsIn("""x("That cannot be done right now.")""").isNotEmpty())
         assertTrue(problemsIn("""x("Saved.")""").isEmpty())
-        assertTrue(problemsIn("""x("Alice has been let in. They can read it.")""").isEmpty(), "a pronoun after its subject is allowed")
+        assertTrue(problemsIn("""x("Alice has been approved. They can read it.")""").isEmpty(), "a pronoun after its subject is allowed")
         assertTrue(problemsIn("""loanButton(ACTION_CONFIRM_RETURN, loan, "It came back fine")""").isEmpty())
     }
 }
