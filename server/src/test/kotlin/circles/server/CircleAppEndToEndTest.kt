@@ -1216,7 +1216,7 @@ class CircleAppEndToEndTest {
         assertTrue(assertIs<PauseResult.Refused>(dave.app.proposePause(home(bea.app).me, "no", 5)).reason.contains("Level 3 or above"))
         assertEquals(listOf(daveId), home(alice.app).pauseCandidates)
         assertTrue(assertIs<PauseResult.Refused>(alice.app.proposePause(home(bea.app).me, "x", 5)).reason.contains("steward"))
-        assertEquals(PauseResult.Refused("Give a reason of 1 to 280 characters."), alice.app.proposePause(daveId, " ", 5))
+        assertEquals(PauseResult.Refused("Give a reason for the pause, of 1 to 280 characters."), alice.app.proposePause(daveId, " ", 5))
         assertEquals(PauseResult.Refused("Choose a pause length from 1 to 90 days."), alice.app.proposePause(daveId, "x", 91))
 
         // Alice proposes; she is the first reviewer, so a second is needed. The subject and the other trusted members see it; nobody else does.
@@ -1283,7 +1283,7 @@ class CircleAppEndToEndTest {
         // Only a steward proposes; bad numbers are explained; the lone steward's vote is enough.
         assertEquals(RulesResult.NotAllowed, bea.app.proposeRules(defaults.copy(halfLifeDays = 90)))
         assertEquals(RulesResult.Refused("Those are already the circle's rules."), alice.app.proposeRules(defaults))
-        assertEquals(RulesResult.Refused("The days for points to fade by half must be from 30 to 730."), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
+        assertEquals(RulesResult.Refused("Points can fade by half over 30 to 730 days."), alice.app.proposeRules(defaults.copy(halfLifeDays = 5)))
         assertEquals(RulesResult.Refused("The points must rise from each level to the next."), alice.app.proposeRules(defaults.copy(trustedTenths = 20)))
         val changed = defaults.copy(halfLifeDays = 90, vouchesForRegular = 1)
         assertEquals(RulesResult.Sent(takesEffect = true), alice.app.proposeRules(changed))
@@ -1384,7 +1384,7 @@ class CircleAppEndToEndTest {
         assertEquals("0.0", home(alice.app).standing!!.points, "the person who confirms earns nothing")
         assertEquals(NoteStatus.COUNTED, home(bea.app).contributions.mine.single().status)
         assertEquals(emptyList(), home(alice.app).contributions.toConfirm)
-        assertEquals(NoteResult.Refused("This has already been confirmed."), alice.app.confirmContribution(waiting.note))
+        assertEquals(NoteResult.Refused("This contribution note has already been confirmed."), alice.app.confirmContribution(waiting.note))
 
         // Three in 30 days, then the cap.
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))

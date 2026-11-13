@@ -38,13 +38,13 @@ data class ConfigSettings(
 ) {
     /** The first thing wrong with these values, or null. Ranges first, then the library's own check on the resulting config. */
     fun problem(base: CircleConfig): String? = when {
-        listOf(regularTenths, trustedTenths, stewardTenths).any { it !in 1..MAX_THRESHOLD_TENTHS } -> "The points for each level must be from 0.1 to ${MAX_THRESHOLD_TENTHS / 10}."
-        halfLifeDays !in MIN_HALF_LIFE_DAYS..MAX_HALF_LIFE_DAYS -> "The days for points to fade by half must be from $MIN_HALF_LIFE_DAYS to $MAX_HALF_LIFE_DAYS."
+        listOf(regularTenths, trustedTenths, stewardTenths).any { it !in 1..MAX_THRESHOLD_TENTHS } -> "Each level's points can be from 0.1 to ${MAX_THRESHOLD_TENTHS / 10}."
+        halfLifeDays !in MIN_HALF_LIFE_DAYS..MAX_HALF_LIFE_DAYS -> "Points can fade by half over $MIN_HALF_LIFE_DAYS to $MAX_HALF_LIFE_DAYS days."
         vouchesForRegular !in MIN_VOUCHES_FOR_REGULAR..MAX_VOUCHES_FOR_REGULAR -> "The vouches needed for ${circles.policy.TierText.label(Tier.REGULAR)} must be from $MIN_VOUCHES_FOR_REGULAR to $MAX_VOUCHES_FOR_REGULAR."
-        vouchValidityDays !in MIN_VOUCH_VALIDITY_DAYS..MAX_VOUCH_VALIDITY_DAYS -> "The days a vouch lasts must be from $MIN_VOUCH_VALIDITY_DAYS to $MAX_VOUCH_VALIDITY_DAYS."
+        vouchValidityDays !in MIN_VOUCH_VALIDITY_DAYS..MAX_VOUCH_VALIDITY_DAYS -> "A vouch can last from $MIN_VOUCH_VALIDITY_DAYS to $MAX_VOUCH_VALIDITY_DAYS days."
         reviewersForPause !in MIN_REVIEWERS_FOR_PAUSE..MAX_REVIEWERS_FOR_PAUSE -> "The reviewers needed for a pause must be from $MIN_REVIEWERS_FOR_PAUSE to $MAX_REVIEWERS_FOR_PAUSE."
-        defaultPauseDays !in MIN_PAUSE_DAYS..MAX_PAUSE_DAYS -> "The days a pause lasts must be from $MIN_PAUSE_DAYS to $MAX_PAUSE_DAYS."
-        incidentCooldownDays !in 0..MAX_INCIDENT_COOLDOWN_DAYS -> "The days on hold after an incident must be from 0 to $MAX_INCIDENT_COOLDOWN_DAYS."
+        defaultPauseDays !in MIN_PAUSE_DAYS..MAX_PAUSE_DAYS -> "A pause can last from $MIN_PAUSE_DAYS to $MAX_PAUSE_DAYS days."
+        incidentCooldownDays !in 0..MAX_INCIDENT_COOLDOWN_DAYS -> "Higher-value items can be on hold for 0 to $MAX_INCIDENT_COOLDOWN_DAYS days after an unreported incident."
         // The library's own check speaks in identifiers; only the order of the thresholds can fail it here (ADR 0070).
         else -> applyTo(base).validate().firstOrNull()?.let { LEVEL_ORDER_PROBLEM }
     }

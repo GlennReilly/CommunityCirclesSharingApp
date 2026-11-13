@@ -34,11 +34,11 @@ data class StewardSettings(
 ) {
     /** Why these values are not allowed, or null if they are. */
     fun problem(): String? = when {
-        quorum !in MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM -> "The number of stewards who must agree must be from $MIN_STEWARD_QUORUM to $MAX_STEWARD_QUORUM."
+        quorum !in MIN_STEWARD_QUORUM..MAX_STEWARD_QUORUM -> "The number of stewards who must agree can be from $MIN_STEWARD_QUORUM to $MAX_STEWARD_QUORUM."
         inactiveDays !in MIN_STEWARD_INACTIVE_DAYS..MAX_STEWARD_INACTIVE_DAYS ->
-            "The days a steward must be quiet must be from $MIN_STEWARD_INACTIVE_DAYS to $MAX_STEWARD_INACTIVE_DAYS."
+            "A steward must be quiet for $MIN_STEWARD_INACTIVE_DAYS to $MAX_STEWARD_INACTIVE_DAYS days before the others may act without them."
         fallbackDelayDays !in MIN_STEWARD_FALLBACK_DELAY_DAYS..MAX_STEWARD_FALLBACK_DELAY_DAYS ->
-            "The days the others must wait must be from $MIN_STEWARD_FALLBACK_DELAY_DAYS to $MAX_STEWARD_FALLBACK_DELAY_DAYS."
+            "The others must wait $MIN_STEWARD_FALLBACK_DELAY_DAYS to $MAX_STEWARD_FALLBACK_DELAY_DAYS days."
         recoveryThreshold != NO_RECOVERY_SHARES && recoveryThreshold !in MIN_STEWARD_RECOVERY_THRESHOLD..MAX_STEWARD_RECOVERY_THRESHOLD ->
             "The number of stewards needed to rebuild the key must be $NO_RECOVERY_SHARES or from $MIN_STEWARD_RECOVERY_THRESHOLD to $MAX_STEWARD_RECOVERY_THRESHOLD."
         else -> null

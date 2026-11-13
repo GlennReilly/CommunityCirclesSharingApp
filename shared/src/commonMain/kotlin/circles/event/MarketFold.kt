@@ -262,7 +262,7 @@ internal class MarketFold(
     private fun upsert(author: MemberId, v: ItemUpsert): String? {
         // Wraps go to the owner's devices and, when the key is changed after a removal (ADR 0049), to members whose loan is still open.
         val mayHold = loans.values.filter { it.item == v.item && (it.status == LoanStatus.APPROVED || it.status == LoanStatus.ACTIVE) }.map { it.borrower }.toSet() + author
-        if (v.keyWraps.any { devices[it.device]?.registration?.member !in mayHold }) return "An item's key can only be sent to the owner's own devices or to borrowers with an open loan."
+        if (v.keyWraps.any { devices[it.device]?.registration?.member !in mayHold }) return "The item's key can only go to the owner's devices or to borrowers with an open loan."
         val existing = items[v.item]
         if (existing != null) {
             if (existing.owner != author) return "Only the owner of an item can change it."
@@ -294,7 +294,7 @@ internal class MarketFold(
         val item = items[v.item] ?: return "That item is not in the circle."
         if (item.owner != author) return "Only the owner of an item can add details to it."
         if (item.retired) return "The item has been archived, so it cannot be changed or asked for."
-        if (v.detailKeyId != item.detailKeyId) return "The item's details were sealed with a key that is no longer the item's current key."
+        if (v.detailKeyId != item.detailKeyId) return "The item's details were locked with an old key, so they cannot be added."
         items[v.item] = item.copy(sealedDetails = item.sealedDetails + (v.detailKeyId to v.sealed))
         return null
     }
@@ -385,7 +385,7 @@ internal class MarketFold(
         if (v.member == author) return "A member cannot confirm their own identity."
         val current = names[v.member] ?: return "That member has not chosen a name yet, so there is no identity to confirm."
         if (v.profile != current.profile || v.name != current.name) return "The member's name has changed since, so this confirmation no longer applies."
-        if (author in current.confirmations) return "This has already been confirmed."
+        if (author in current.confirmations) return "You have already confirmed this member's identity."
         val tier = StandingRules.standingOf(author, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier
         if (author !in stewardsAt(id) && tier.rank < Tier.REGULAR.rank) return "Only a member at ${circles.policy.TierText.orAbove(Tier.REGULAR)}, or a steward, can confirm someone's identity."
         val confirmations = current.confirmations + (author to day)
@@ -414,7 +414,7 @@ internal class MarketFold(
     private fun confirmNote(author: MemberId, v: NoteConfirmation, day: Int): String? {
         val note = notes[v.note] ?: return "That contribution note is not in the circle."
         if (note.with != author) return "Only the person named in a contribution note can confirm it."
-        if (note.confirmedDay != null) return "This has already been confirmed."
+        if (note.confirmedDay != null) return "This contribution note has already been confirmed."
         if (day > note.day + NOTE_WINDOW_DAYS) return "This contribution note has lapsed, so it can no longer be confirmed."
         notes[v.note] = note.copy(confirmedDay = maxOf(day, note.day))
         return null
@@ -447,7 +447,7 @@ internal class MarketFold(
         val eligible = reviewers(day, id)
         if (author !in eligible) return "Only a member at ${circles.policy.TierText.orAbove(config(day).pauseReviewerMinTier)} can propose a pause."
         if (v.subject == author) return "A member cannot propose pausing themselves."
-        if (v.subject !in members()) return "The member the pause is about is not in the circle."
+        if (v.subject !in members()) return "The member named in the pause is not in the circle."
         if (v.subject in stewardsAt(id)) return "A steward cannot be paused; the rules for stewards apply instead."
         if (pauses.values.any { it.subject == v.subject && it.statusOn(day).let { s -> s == PauseStatus.PROPOSED || s == PauseStatus.LIVE } }) return "That member already has a pause or a pause proposal."
         val needed = reviewersNeeded(v.subject, day, eligible)
@@ -567,10 +567,10 @@ internal class MarketFold(
 
     private fun handover(author: MemberId, v: LoanHandover): String? {
         val loan = loans[v.loan] ?: return "That loan is not in the circle."
-        if (loan.status != LoanStatus.APPROVED) return "A hand-over needs an approved loan that is not yet out."
+        if (loan.status != LoanStatus.APPROVED) return "A hand-over needs an approved loan that has not been handed over yet."
         val updated = when (author) {
-            loan.owner -> if (loan.ownerConfirmedHandover) return "This has already been confirmed." else loan.copy(ownerConfirmedHandover = true)
-            loan.borrower -> if (loan.borrowerConfirmedHandover) return "This has already been confirmed." else loan.copy(borrowerConfirmedHandover = true)
+            loan.owner -> if (loan.ownerConfirmedHandover) return "You have already confirmed this hand-over." else loan.copy(ownerConfirmedHandover = true)
+            loan.borrower -> if (loan.borrowerConfirmedHandover) return "You have already confirmed this hand-over." else loan.copy(borrowerConfirmedHandover = true)
             else -> return "Only the owner or the borrower can confirm a hand-over."
         }
         loans[v.loan] = if (updated.ownerConfirmedHandover && updated.borrowerConfirmedHandover) updated.copy(status = LoanStatus.ACTIVE) else updated
@@ -582,7 +582,7 @@ internal class MarketFold(
         if (loan.owner != author) return "Only the owner of the item can confirm a return."
         if (loan.status != LoanStatus.RETURNED) return "Only a loan that has been returned can be confirmed."
         if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "A return with a reported problem needs no confirmation."
-        if (loan.confirmedDay != null) return "This has already been confirmed."
+        if (loan.confirmedDay != null) return "This return has already been confirmed."
         if (loan.dispute != null) return "The return is in dispute, so it cannot be confirmed."
         loans[v.loan] = loan.copy(confirmedDay = maxOf(day, loan.returnedDay ?: day))
         return null
@@ -594,7 +594,7 @@ internal class MarketFold(
         if (loan.status != LoanStatus.RETURNED) return "Only a loan that has been returned can be disputed."
         if (loan.outcome != ReturnOutcome.OK && loan.outcome != ReturnOutcome.LATE) return "The borrower already reported a problem with this return."
         if (loan.dispute != null) return "This return is already disputed."
-        val returned = loan.returnedDay ?: return "This return has no return day recorded."
+        val returned = loan.returnedDay ?: return "This loan has no recorded return day."
         if (day < returned || day - returned > DAMAGE_CLAIM_DAYS) return "A dispute must be made within $DAMAGE_CLAIM_DAYS days of the return."
         loans[v.loan] = loan.copy(dispute = DisputeState(v.claim, v.note, day))
         return null
@@ -613,7 +613,7 @@ internal class MarketFold(
     private fun giveBack(author: MemberId, v: LoanReturn, day: Int): String? {
         val loan = loans[v.loan] ?: return "That loan is not in the circle."
         if (loan.borrower != author) return "Only the borrower can report a loan as returned."
-        if (loan.status != LoanStatus.ACTIVE) return "Only a loan that is out can be returned."
+        if (loan.status != LoanStatus.ACTIVE) return "Only a loan that has been handed over can be returned."
         loans[v.loan] = loan.copy(status = LoanStatus.RETURNED, outcome = v.outcome, returnedDay = day)
         return null
     }

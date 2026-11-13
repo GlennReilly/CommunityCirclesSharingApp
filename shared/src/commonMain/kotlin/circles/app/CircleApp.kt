@@ -1127,7 +1127,7 @@ class CircleApp(
     /** Proposes pausing [subject]'s access to anything but essentials for [days] days (ADR 0050). The proposer counts as the first reviewer. */
     suspend fun proposePause(subject: MemberId, reason: String, days: Int): PauseResult {
         val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
-        if (reason.isBlank() || reason.trim().length > circles.event.MAX_PAUSE_REASON_CHARS) return PauseResult.Refused("Give a reason of 1 to ${circles.event.MAX_PAUSE_REASON_CHARS} characters.")
+        if (reason.isBlank() || reason.trim().length > circles.event.MAX_PAUSE_REASON_CHARS) return PauseResult.Refused("Give a reason for the pause, of 1 to ${circles.event.MAX_PAUSE_REASON_CHARS} characters.")
         if (days !in circles.event.MIN_PAUSE_DAYS..circles.event.MAX_PAUSE_DAYS) return PauseResult.Refused("Choose a pause length from ${circles.event.MIN_PAUSE_DAYS} to ${circles.event.MAX_PAUSE_DAYS} days.")
         return sendPause(s, s.author.pausePropose(s.circle, today(), circles.event.newPauseId(crypto), subject, reason.trim(), days))
     }
@@ -1141,7 +1141,7 @@ class CircleApp(
     /** The subject's one note to the reviewers. */
     suspend fun appealPause(pause: circles.event.PauseId, note: String): PauseResult {
         val (s, _) = pauseSession() ?: return PauseResult.NotAllowed
-        if (note.isBlank() || note.trim().length > circles.event.MAX_PAUSE_APPEAL_CHARS) return PauseResult.Refused("Write a note of 1 to ${circles.event.MAX_PAUSE_APPEAL_CHARS} characters.")
+        if (note.isBlank() || note.trim().length > circles.event.MAX_PAUSE_APPEAL_CHARS) return PauseResult.Refused("Write an appeal note of 1 to ${circles.event.MAX_PAUSE_APPEAL_CHARS} characters.")
         return sendPause(s, s.author.pauseAppeal(s.circle, today(), pause, note.trim()))
     }
 

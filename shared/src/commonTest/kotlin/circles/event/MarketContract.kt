@@ -236,8 +236,8 @@ abstract class MarketContract {
                 "Only the owner of an item can change it.",
                 "Only the owner of an item can archive it.",
                 "Only the owner of an item can add details to it.",
-                "The item's details were sealed with a key that is no longer the item's current key.",
-                "An item's key can only be sent to the owner's own devices or to borrowers with an open loan.",
+                "The item's details were locked with an old key, so they cannot be added.",
+                "The item's key can only go to the owner's devices or to borrowers with an open loan.",
                 "That item is not in the circle.",
             ),
             reasons,
@@ -280,7 +280,7 @@ abstract class MarketContract {
             w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK),
         )
         assertEquals(
-            listOf("A hand-over needs an approved loan that is not yet out.", "Only a loan that is out can be returned."),
+            listOf("A hand-over needs an approved loan that has not been handed over yet.", "Only a loan that has been handed over can be returned."),
             w.reasons(early),
         )
         w.log += w.approve(loan)
@@ -295,7 +295,7 @@ abstract class MarketContract {
         )
         w.log += listOf(w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan))
         assertEquals(
-            listOf("Only the borrower can report a loan as returned.", "A hand-over needs an approved loan that is not yet out."),
+            listOf("Only the borrower can report a loan as returned.", "A hand-over needs an approved loan that has not been handed over yet."),
             w.reasons(
                 listOf(
                     w.founder.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK),
@@ -304,7 +304,7 @@ abstract class MarketContract {
             ),
         )
         w.log += w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.LATE)
-        assertEquals(listOf("Only a loan that is out can be returned."), w.reasons(listOf(w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK))))
+        assertEquals(listOf("Only a loan that has been handed over can be returned."), w.reasons(listOf(w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK))))
         assertEquals(ReturnOutcome.LATE, w.foldAs(w.founder).market.loans.getValue(loan).outcome)
     }
 
@@ -540,7 +540,7 @@ abstract class MarketContract {
         val reasons = w.rejectedWith(byBorrower, first, again)
         assertEquals(2, reasons.size)
         assertTrue(reasons[0].contains("Only the owner of the item"))
-        assertTrue(reasons[1].contains("This has already been confirmed."))
+        assertTrue(reasons[1].contains("This return has already been confirmed."))
         val damaged = w.loanBetweenBeaAndCarol(ReturnOutcome.DAMAGED_REPORTED, DAY + 2)
         assertTrue(w.rejectedWith(w.bea.confirmReturn(w.circle, DAY + 3, damaged)).single().contains("needs no confirmation"))
         val disputed = w.loanBetweenBeaAndCarol(ReturnOutcome.OK, DAY + 2)
@@ -729,7 +729,7 @@ abstract class MarketContract {
         val newId = newDetailKeyId(w.crypto)
         val toBorrower = w.founder.itemUpsert(w.circle, DAY, w.item, "Extension ladder", ItemClass.ESSENTIAL, newId, newKey, listOf(w.founder.identity.registration, w.bea.identity.registration))
         val toStranger = w.founder.itemUpsert(w.circle, DAY, w.item, "Extension ladder", ItemClass.ESSENTIAL, newId, newKey, listOf(w.founder.identity.registration, w.carol.identity.registration))
-        assertEquals(listOf("An item's key can only be sent to the owner's own devices or to borrowers with an open loan."), w.reasons(listOf(toStranger)))
+        assertEquals(listOf("The item's key can only go to the owner's devices or to borrowers with an open loan."), w.reasons(listOf(toStranger)))
         val detail = w.founder.itemDetail(w.circle, DAY, w.item, newId, newKey, CborMap.of("address" to CborText(ADDRESS)))
         val view = w.foldAs(w.bea, w.log + listOf(toBorrower, detail))
         assertEquals(emptyList(), view.rejected)
@@ -737,7 +737,7 @@ abstract class MarketContract {
         assertEquals(null, w.addressOf(w.foldAs(w.carol, w.log + listOf(toBorrower, detail))), "someone who was never sent it cannot")
         // Once the loan is returned the borrower is no longer one of the people who may be sent a key.
         val lender = w.foldAs(w.founder, w.log + listOf(w.founder.loanHandover(w.circle, DAY, loan), w.bea.loanHandover(w.circle, DAY, loan), w.bea.loanReturn(w.circle, DAY, loan, ReturnOutcome.OK), toBorrower))
-        assertEquals(listOf("An item's key can only be sent to the owner's own devices or to borrowers with an open loan."), lender.rejected.map { it.reason })
+        assertEquals(listOf("The item's key can only go to the owner's devices or to borrowers with an open loan."), lender.rejected.map { it.reason })
     }
 
     // ---- pauses (ADR 0050) ----
@@ -865,11 +865,11 @@ abstract class MarketContract {
         fun rejected(by: EventAuthor, settings: ConfigSettings) = w.reasons(listOf(by.configUpdate(w.circle, DAY, settings)))
         assertEquals(listOf("Only a steward can change the circle's rules."), rejected(w.bea, d.copy(halfLifeDays = 90)))
         assertEquals(listOf("Those are already the circle's rules."), rejected(w.founder, d))
-        assertEquals(listOf("The days for points to fade by half must be from 30 to 730."), rejected(w.founder, d.copy(halfLifeDays = 10)))
+        assertEquals(listOf("Points can fade by half over 30 to 730 days."), rejected(w.founder, d.copy(halfLifeDays = 10)))
         assertEquals(listOf("The reviewers needed for a pause must be from 2 to 9."), rejected(w.founder, d.copy(reviewersForPause = 1)))
         assertEquals(listOf("The points must rise from each level to the next."), rejected(w.founder, d.copy(regularTenths = d.trustedTenths)))
-        assertEquals(listOf("The points for each level must be from 0.1 to 10000."), rejected(w.founder, d.copy(stewardTenths = 0)))
-        assertEquals(listOf("The days on hold after an incident must be from 0 to 365."), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
+        assertEquals(listOf("Each level's points can be from 0.1 to 10000."), rejected(w.founder, d.copy(stewardTenths = 0)))
+        assertEquals(listOf("Higher-value items can be on hold for 0 to 365 days after an unreported incident."), rejected(w.founder, d.copy(incidentCooldownDays = 366)))
     }
 
     @Test
@@ -985,7 +985,7 @@ abstract class MarketContract {
         assertEquals(listOf("That contribution note is not in the circle."), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY, newNoteId(w.crypto)))))
         assertEquals(listOf("This contribution note has lapsed, so it can no longer be confirmed."), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 31, id))))
         w.log += w.carol.confirmNote(w.circle, DAY + 3, id)
-        assertEquals(listOf("This has already been confirmed."), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 4, id))))
+        assertEquals(listOf("This contribution note has already been confirmed."), w.reasons(listOf(w.carol.confirmNote(w.circle, DAY + 4, id))))
     }
 
     // ---- skill offers (ADR 0055) ----
@@ -1045,7 +1045,7 @@ abstract class MarketContract {
         assertEquals(emptyList(), view.rejected)
         assertEquals(setOf(w.founder.identity.member), view.market.nameConfirmers(carol))
         assertTrue(view.market.nameConfirmed(carol))
-        assertEquals(listOf("This has already been confirmed."), w.reasons(listOf(w.founder.confirmName(w.circle, DAY, carol, first.eventId(w.crypto), "Carol Ng"))))
+        assertEquals(listOf("You have already confirmed this member's identity."), w.reasons(listOf(w.founder.confirmName(w.circle, DAY, carol, first.eventId(w.crypto), "Carol Ng"))))
         assertEquals(listOf("That is already the member's name."), w.reasons(listOf(w.carol.memberProfile(w.circle, DAY, "Carol Ng"))))
 
         w.log += w.carol.memberProfile(w.circle, DAY + 1, "Carol N.")
