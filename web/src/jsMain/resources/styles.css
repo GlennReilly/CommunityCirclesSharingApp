@@ -85,6 +85,8 @@ fieldset div, .check-row { display: flex; align-items: center; }
 form input[type="checkbox"] + label, form input[type="radio"] + label { display: inline; margin: 0; font-weight: normal; }
 /* The tick box itself is 24 px; its sentence is the tap area, at least 44 px high, and tapping it ticks the box. */
 .check-row label, fieldset div label { display: flex; align-items: center; flex: 1; min-height: 2.75rem; }
+/* The rule above loses to "form input + label { display: inline }" in the cascade, so the same is said again with more weight (the sentence is centred beside its box). */
+form .check-row input[type="checkbox"] + label, form fieldset div input[type="checkbox"] + label, form fieldset div input[type="radio"] + label { display: flex; align-items: center; flex: 1; min-height: 2.75rem; }
 
 /* A password field: the show/hide eye sits inside the right end of the field (ADR 0057). */
 .secret-field { position: relative; width: 100%; }
