@@ -310,7 +310,7 @@ class CircleFold(
             val target = (PublicParts.steward(e.public) as? Parsed.Ok)?.value ?: return "bad steward change"
             if (change == StewardChange.ADD) {
                 if (devices.values.none { it.registration.member == target }) return "member is not in the circle"
-                if (!mayBecomeSteward(target)) return "member has not reached the steward standing tier"
+                if (!mayBecomeSteward(target)) return "The member has not reached the level needed to become a steward."
                 if (requireConfirmedStewards && target !in stewards && target != founder && !identityOk(target, position)) return IDENTITY_NOT_CONFIRMED_REASON
             }
             val prior = stewardVotes.filter { it.first == change && it.second == target.v }.map { it.third }

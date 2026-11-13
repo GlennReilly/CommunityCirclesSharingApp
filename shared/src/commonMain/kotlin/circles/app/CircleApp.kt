@@ -1988,7 +1988,7 @@ class CircleApp(
             return@buildList
         }
         val gap = ((cfg.thresholds[next] ?: 0.0) - standing.points).coerceAtLeast(0.0)
-        add("About ${circles.policy.format1(gap)} more standing points opens ${circles.policy.TierText.label(next)} access: lend items and get them back, or borrow and return them on time.")
+        add("About ${circles.policy.format1(gap)} more points opens ${circles.policy.TierText.label(next)} access: lend items and get them back, or borrow and return them on time.")
         if (next.rank <= Tier.REGULAR.rank) add("Or get ${cfg.vouchesForRegular} members at ${circles.policy.TierText.orAbove(cfg.voucherMinTier)} to vouch for you (on the Members page).")
     }
 

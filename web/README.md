@@ -1,10 +1,10 @@
 # web
 
-The browser client (ADR 0009): Kotlin/JS with `kotlinx-html`, no TypeScript. This module is only views and browser glue. All behaviour (sign-in, joining, items, borrowing, standing, stewards, recovery, export and the rest) lives in `circles.app.CircleApp` and the other packages of `shared`, where it is tested on JVM and JS.
+The browser client (ADR 0009): Kotlin/JS with `kotlinx-html`, no TypeScript. This module is only views and browser glue. All behaviour (sign-in, joining, items, borrowing, levels, stewards, recovery, export and the rest) lives in `circles.app.CircleApp` and the other packages of `shared`, where it is tested on JVM and JS.
 
 ## Screens
 
-Welcome, Start a circle, Join a circle, Sign in, Home, Members, Items (list, add, change), Borrow (list, request), Standing, Skills (list, offer, change), Pauses, Stewards (rules, recovery shares), Settings, Recovery code and Restore, pairing of a second device, and the Verify and Item tag pages with QR codes. Screens are organised by topic; each screen has one purpose (ADR 0057).
+Welcome, Start a circle, Join a circle, Sign in, Home, Members, Items (list, add, change), Borrow (list, request), My level, Skills (list, offer, change), Pauses, Stewards (rules, recovery shares), Settings, Recovery code and Restore, pairing of a second device, and the Verify and Item tag pages with QR codes. Screens are organised by topic; each screen has one purpose (ADR 0057).
 
 ## Files
 

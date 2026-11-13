@@ -664,14 +664,14 @@ class ShellViewTest {
         assertTrue("Why, and how to unlock" in html)
     }
 
-    private val myStanding = StandingSummary(Tier.REGULAR, "3.5", listOf("Activity in this circle gives 3.5 standing points."), listOf("About 6.5 more standing points opens Level 3 access."))
+    private val myStanding = StandingSummary(Tier.REGULAR, "3.5", listOf("Your activity in this circle gives you 3.5 points."), listOf("About 6.5 more points opens Level 3 access."))
 
     @Test fun theStandingPageShowsOnlyYourOwnTierPointsReasonsAndNextSteps() {
         val html = render(open(home().copy(standing = myStanding)).copy(screen = Screen.Standing))
         assertTrue("Your level: 2" in html && "Your points: 3.5" in html && "Your points and the vouches you have decide what you can borrow." in html)
         assertTrue("It never drops below Level 1," in html)
-        assertTrue("Activity in this circle gives 3.5 standing points." in html)
-        assertTrue("About 6.5 more standing points opens Level 3 access." in html)
+        assertTrue("Your activity in this circle gives you 3.5 points." in html)
+        assertTrue("About 6.5 more points opens Level 3 access." in html)
         assertTrue("nobody is ever banned for a low level" in html)
         assertFalse("This screen is not built yet." in html)
     }

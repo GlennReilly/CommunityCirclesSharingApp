@@ -215,7 +215,7 @@ abstract class CircleFoldContract {
         val addBea = w.founder.stewardAdd(w.circle, w.bea.identity.member, day)
         val gated = CircleFold(w.crypto, w.cipher, w.founder.identity, mayBecomeSteward = { false }).fold(w.circle, w.log + addBea)
         assertEquals(setOf(w.founder.identity.member), gated.stewards)
-        assertEquals(listOf("member has not reached the steward standing tier"), gated.rejected.map { it.reason })
+        assertEquals(listOf("The member has not reached the level needed to become a steward."), gated.rejected.map { it.reason })
     }
 
     @Test

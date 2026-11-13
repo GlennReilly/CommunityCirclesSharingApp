@@ -4,7 +4,7 @@ What is left between today's build and a pilot with one real group of 10 to 20 p
 
 ## Works today (tested)
 
-Sign-in and passphrase keys, circles, invites, second devices, recovery code, items with private details, borrowing (request, approve, hand over, return, confirm, dispute, resolve), standing, vouching, stewards and their rules, member removal with key and item-key changes, pauses, recovery shares, export and import, backup and restore, the install guides, a 300-member load test, 83 browser checks with axe, and a 229 to 236 KB bundle against 250 KB.
+Sign-in and passphrase keys, circles, invites, second devices, recovery code, items with private details, borrowing (request, approve, hand over, return, confirm, dispute, resolve), levels and points, vouching, stewards and their rules, member removal with key and item-key changes, pauses, recovery shares, export and import, backup and restore, the install guides, a 300-member load test, 83 browser checks with axe, and a 229 to 236 KB bundle against 250 KB.
 
 ## Must do before the pilot
 

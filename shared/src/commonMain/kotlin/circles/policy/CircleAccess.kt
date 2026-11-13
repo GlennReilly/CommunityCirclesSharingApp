@@ -240,7 +240,7 @@ object StandingCalculator {
         // Sum decayed events; clamp at zero so the score never goes below neutral.
         val raw = credited(mine, cfg).sumOf { decay(cfg.weightOf(it.kind), today - it.day, cfg.halfLifeDays) }
         val points = round2(raw.coerceAtLeast(0.0))
-        reasons += "Activity in this circle gives ${format1(points)} standing points (older activity counts less)."
+        reasons += "Your activity in this circle gives you ${format1(points)} points (older activity counts less)."
 
         // Tier from points. Thresholds are strictly increasing once validated.
         var tier = Tier.entries
