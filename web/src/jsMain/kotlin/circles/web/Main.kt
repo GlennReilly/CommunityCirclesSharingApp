@@ -259,7 +259,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         val replica = when (val opened = IndexedDbReplica.open({ it.eventId(crypto) })) {
             is IdbOpenResult.Opened -> opened.replica
             is IdbOpenResult.Unavailable -> {
-                dispatch(AppAction.Notice("This browser cannot keep your data (${opened.reason}), so Lendger cannot run here."))
+                dispatch(AppAction.Notice("This browser cannot keep your data, so Lendger cannot run here. ${Notices.sentenceOf(opened.reason)}"))
                 return
             }
         }
@@ -498,7 +498,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         PrepareResult.NotAnImage -> dispatch(AppAction.Notice("The file you chose could not be read as a picture."))
                         PrepareResult.TooLarge -> dispatch(AppAction.Notice("The picture you chose is too large to use. Try a smaller one."))
                         PrepareResult.CannotShrink -> dispatch(AppAction.Notice("The picture you chose cannot be made small enough. Try another one."))
-                        is PrepareResult.NotClean -> dispatch(AppAction.Notice("The picture you chose could not be cleaned of its location details, so it was not used. (${prepared.why})"))
+                        is PrepareResult.NotClean -> dispatch(AppAction.Notice("The picture you chose could not be cleaned of its location details, so it was not used. Try a different picture."))
                     }
                 }
                 FORM_SKILL_ADD, FORM_SKILL_EDIT -> {
@@ -634,7 +634,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
                     UnlockResult.WrongPassphrase -> dispatch(AppAction.Notice("That passphrase did not work. Try again."))
                     UnlockResult.NoIdentity -> dispatch(AppAction.Notice("There is nothing saved on this device."))
-                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Lendger (${result.reason})."))
+                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("The saved keys could not be used. ${Notices.sentenceOf(result.reason)}"))
                 }
             }
         }
@@ -756,7 +756,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                 ACTION_LOCK -> circleApp?.lock()
                 ACTION_UNLOCK_PASSKEY -> when (val result = circleApp?.unlockWithPasskey()) {
                     UnlockResult.Unlocked -> dispatch(AppAction.Notice(null))
-                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("This device's saved keys need a newer version of Lendger (${result.reason})."))
+                    is UnlockResult.Unsupported -> dispatch(AppAction.Notice("The saved keys could not be used. ${Notices.sentenceOf(result.reason)}"))
                     else -> dispatch(AppAction.Notice("Unlocking with this device did not work. Try again, or type your passphrase."))
                 }
                 ACTION_PASSKEY_ON -> dispatch(

@@ -171,9 +171,9 @@ class KeyVault(
     /** Unlocks with the passkey: the authenticator is asked for its secret, which opens the seed. */
     suspend fun unlockWithPasskey(passkeys: PasskeyProvider): UnlockResult {
         val stored = store.load() ?: return UnlockResult.NoIdentity
-        val wrap = stored.passkey ?: return UnlockResult.Unsupported("this browser has no passkey for this identity")
-        val credential = circles.encoding.ByteString.fromBase64Url(wrap.credential) ?: return UnlockResult.Unsupported("the passkey record is damaged")
-        val salt = circles.encoding.ByteString.fromBase64Url(wrap.salt) ?: return UnlockResult.Unsupported("the passkey record is damaged")
+        val wrap = stored.passkey ?: return UnlockResult.Unsupported("This browser has no passkey for this identity.")
+        val credential = circles.encoding.ByteString.fromBase64Url(wrap.credential) ?: return UnlockResult.Unsupported("The saved passkey record is damaged.")
+        val salt = circles.encoding.ByteString.fromBase64Url(wrap.salt) ?: return UnlockResult.Unsupported("The saved passkey record is damaged.")
         val secret = passkeys.secret(credential, salt) ?: return UnlockResult.WrongPassphrase
         val seed = PasskeyWrapping.open(crypto, cipher, secret, wrap, stored.deviceId) ?: return UnlockResult.WrongPassphrase
         unlocked(DeviceIdentity.fromSeed(crypto, cipher, seed, stored.memberId, stored.deviceId))

@@ -246,18 +246,18 @@ class IndexedDbReplica private constructor(
     companion object {
         /** Opens (and on first use creates) the database called [name]. */
         suspend fun open(idOf: (Envelope) -> EventId, name: String = "circles", factory: dynamic = js("globalThis.indexedDB")): IdbOpenResult {
-            if (factory == null || factory == undefined) return IdbOpenResult.Unavailable("this browser has no IndexedDB")
+            if (factory == null || factory == undefined) return IdbOpenResult.Unavailable("This browser has no IndexedDB, which Lendger needs to keep your data.")
             return suspendCancellableCoroutine { cont ->
                 val request = try {
                     (factory as IdbFactory).open(name, DB_VERSION)
                 } catch (e: Throwable) {
-                    cont.resume(IdbOpenResult.Unavailable("IndexedDB refused to open: ${e.message}"))
+                    cont.resume(IdbOpenResult.Unavailable("IndexedDB refused to open (${e.message})."))
                     return@suspendCancellableCoroutine
                 }
                 request.onupgradeneeded = { upgrade(request.result as IdbDatabase) }
                 request.onsuccess = { cont.resume(IdbOpenResult.Opened(IndexedDbReplica(request.result as IdbDatabase, idOf))) }
-                request.onerror = { cont.resume(IdbOpenResult.Unavailable("IndexedDB could not open: ${describe(request.error)}")) }
-                request.onblocked = { cont.resume(IdbOpenResult.Unavailable("another tab is holding an older version of the database open")) }
+                request.onerror = { cont.resume(IdbOpenResult.Unavailable("IndexedDB could not open (${describe(request.error)}).")) }
+                request.onblocked = { cont.resume(IdbOpenResult.Unavailable("Another tab is holding an older version of the database open. Close the other tabs and reload this page.")) }
             }
         }
 

@@ -88,13 +88,13 @@ object RecoveryShares {
      * wrong set can never give a key that is used. Returns the key or a plain-words reason.
      */
     fun rebuild(crypto: Crypto, circle: CircleId, epoch: Int, commitment: ByteString, codes: List<ByteString>): Parsed<ByteString> {
-        if (codes.isEmpty()) return Parsed.Invalid("no shares were given")
+        if (codes.isEmpty()) return Parsed.Invalid("No shares were given.")
         val distinct = codes.distinct()
         return when (val result = Shamir.combine(distinct)) {
-            is CombineResult.Failure -> Parsed.Invalid("cannot rebuild the key: ${result.reason}")
+            is CombineResult.Failure -> Parsed.Invalid("The key cannot be rebuilt. ${failureText(result.reason)}")
             is CombineResult.Success ->
                 if (CircleKeys.commitment(crypto, circle, epoch, result.secret) == commitment) Parsed.Ok(result.secret)
-                else Parsed.Invalid("these shares do not make this circle's key for epoch $epoch: too few, or from another set")
+                else Parsed.Invalid("These shares do not make this circle's key for epoch $epoch: there are too few of them, or they come from another set.")
         }
     }
 
@@ -110,13 +110,23 @@ object RecoveryShares {
         return Parsed.Ok(RecoveryShare(share, check))
     }
 
+    /** A failure of combining shares, in plain words. */
+    private fun failureText(failure: circles.recovery.ShamirFailure): String = when (failure) {
+        circles.recovery.ShamirFailure.TooFewShares -> "There are too few shares."
+        circles.recovery.ShamirFailure.MalformedShare -> "One of the shares is not a valid share."
+        circles.recovery.ShamirFailure.MixedShares -> "The shares come from different sets."
+        circles.recovery.ShamirFailure.DuplicateShare -> "The same share was given twice."
+        circles.recovery.ShamirFailure.WrongSecret -> "These shares do not rebuild the key."
+        circles.recovery.ShamirFailure.EmptySecret, circles.recovery.ShamirFailure.InvalidParameters -> "The shares could not be combined."
+    }
+
     /** Rebuilds the circle key from stewards' opened shares; invalid unless enough right shares of one key are given. */
     fun recover(crypto: Crypto, shares: List<RecoveryShare>): Parsed<ByteString> {
-        val check = shares.firstOrNull()?.check ?: return Parsed.Invalid("no shares")
-        if (shares.any { it.check != check }) return Parsed.Invalid("shares belong to different keys")
+        val check = shares.firstOrNull()?.check ?: return Parsed.Invalid("No shares were given.")
+        if (shares.any { it.check != check }) return Parsed.Invalid("These shares belong to different keys.")
         return when (val result = Shamir.combineVerified(shares.map { it.share }, check, crypto)) {
             is CombineResult.Success -> Parsed.Ok(result.secret)
-            is CombineResult.Failure -> Parsed.Invalid("cannot recover the key: ${result.reason}")
+            is CombineResult.Failure -> Parsed.Invalid("The key cannot be recovered. ${failureText(result.reason)}")
         }
     }
 }

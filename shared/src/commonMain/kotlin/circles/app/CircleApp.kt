@@ -1492,7 +1492,7 @@ class CircleApp(
 
     /** Unlocks with this browser's passkey (fingerprint, face or PIN) instead of the passphrase (ADR 0063). */
     suspend fun unlockWithPasskey(): UnlockResult {
-        val provider = passkeys ?: return UnlockResult.Unsupported("this browser has no passkeys")
+        val provider = passkeys ?: return UnlockResult.Unsupported("This browser cannot use passkeys.")
         val result = vault.unlockWithPasskey(provider)
         if (result is UnlockResult.Unlocked) {
             val identity = (vault.state.value as VaultState.Unlocked).identity

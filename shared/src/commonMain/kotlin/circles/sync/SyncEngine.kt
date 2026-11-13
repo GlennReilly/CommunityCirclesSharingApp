@@ -157,7 +157,7 @@ class SyncEngine(
         ApiOutcome.Offline -> SyncState.Offline(waiting)
         ApiOutcome.Unauthorized -> SyncState.SignedOut
         is ApiOutcome.Busy -> SyncState.Busy(waiting, outcome.retryAfterSeconds)
-        is ApiOutcome.Refused -> SyncState.Problem("The server refused the request (${outcome.status}): ${outcome.title}", waiting)
+        is ApiOutcome.Refused -> SyncState.Problem("The server refused the request (error ${outcome.status}). ${outcome.title}", waiting)
         is ApiOutcome.Ok -> error("not a failure")
     }
 }

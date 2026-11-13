@@ -133,8 +133,8 @@ class HttpSyncApi(
         val challenge = transport.send("POST", "$API_PREFIX/auth/challenge", Wire.encode(ChallengeRequest(identity.device.v)), null)
             ?: return ApiOutcome.Offline
         if (challenge.status != HTTP_OK) return challenge.failure(loginFailure = true)
-        val nonce = (decode(challenge) { Wire.decodeChallenge(it) } as? ApiOutcome.Ok)?.value?.nonce ?: return ApiOutcome.Refused(challenge.status, "bad challenge answer")
-        val nonceBytes = ByteString.fromBase64Url(nonce) ?: return ApiOutcome.Refused(challenge.status, "bad challenge nonce")
+        val nonce = (decode(challenge) { Wire.decodeChallenge(it) } as? ApiOutcome.Ok)?.value?.nonce ?: return ApiOutcome.Refused(challenge.status, "The server's sign-in answer was not understood.")
+        val nonceBytes = ByteString.fromBase64Url(nonce) ?: return ApiOutcome.Refused(challenge.status, "The server's sign-in answer was not understood.")
         val signature = crypto.sign(identity.signing.secretSeed, authMessage(identity.device, nonceBytes))
         val request = SessionRequest(identity.device.v, nonce, signature.toBase64Url())
         val session = transport.send("POST", "$API_PREFIX/auth/session", Wire.encode(request), null)
@@ -145,12 +145,12 @@ class HttpSyncApi(
 
     /** Reads the body with [parse]; a body that does not fit is a refusal, never a crash. */
     private fun <T : Any> decode(reply: HttpReply, parse: (String) -> T?): ApiOutcome<T> =
-        parse(reply.body)?.let { ApiOutcome.Ok(it) } ?: ApiOutcome.Refused(reply.status, "the server's answer was not understood")
+        parse(reply.body)?.let { ApiOutcome.Ok(it) } ?: ApiOutcome.Refused(reply.status, "The server's answer was not understood.")
 
     private fun HttpReply.failure(loginFailure: Boolean = false): ApiOutcome<Nothing> = when {
         status == HTTP_UNAUTHORIZED || (loginFailure && status == HTTP_FORBIDDEN) -> ApiOutcome.Unauthorized
         status == HTTP_TOO_MANY_REQUESTS || status >= HTTP_SERVER_ERROR -> ApiOutcome.Busy(retryAfter?.trim()?.toLongOrNull())
-        else -> ApiOutcome.Refused(status, "HTTP $status")
+        else -> ApiOutcome.Refused(status, "The server did not say why.")
     }
 
     private fun <T> ApiOutcome<T>.failure(): ApiOutcome<Nothing> = when (this) {

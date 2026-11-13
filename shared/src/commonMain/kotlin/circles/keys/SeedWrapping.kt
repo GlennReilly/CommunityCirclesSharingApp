@@ -71,10 +71,10 @@ object SeedWrapping {
     }
 
     suspend fun unwrapWithPassphrase(cipher: Cipher, hasher: PasswordHasher, wrapped: WrappedSeed, device: DeviceId, passphrase: String): UnwrapResult {
-        if (wrapped.v != SEED_WRAP_VERSION) return UnwrapResult.Unsupported("version ${wrapped.v}")
-        if (wrapped.method != SEED_WRAP_METHOD_PASSPHRASE) return UnwrapResult.Unsupported("method ${wrapped.method}")
+        if (wrapped.v != SEED_WRAP_VERSION) return UnwrapResult.Unsupported("The saved keys use format version ${wrapped.v}, which this version of Lendger does not read.")
+        if (wrapped.method != SEED_WRAP_METHOD_PASSPHRASE) return UnwrapResult.Unsupported("The saved keys use the unlock method ${wrapped.method}, which this version of Lendger does not read.")
         val params = Argon2Params(wrapped.memoryKib, wrapped.iterations, wrapped.parallelism)
-        if (!params.withinLimits()) return UnwrapResult.Unsupported("Argon2 settings outside the allowed limits")
+        if (!params.withinLimits()) return UnwrapResult.Unsupported("The saved keys ask for more memory or time than Lendger allows.")
         val salt = ByteString.fromBase64Url(wrapped.salt)?.takeIf { it.size == SEED_WRAP_SALT_BYTES } ?: return UnwrapResult.WrongPassphraseOrDamaged
         val sealed = ByteString.fromBase64Url(wrapped.sealed) ?: return UnwrapResult.WrongPassphraseOrDamaged
         val key = hasher.argon2id(passphrase, salt, params, AEAD_KEY_BYTES)

@@ -203,7 +203,7 @@ class ReduceTest {
         assertEquals("Offline, 3 changes waiting", describe(SyncState.Offline(3)))
         assertEquals("The server is busy, trying again soon, 2 changes waiting", describe(SyncState.Busy(2, 30)))
         assertEquals("Cannot sign in to the circle. If you were removed, ask a steward", describe(SyncState.SignedOut))
-        assertEquals("The server refused the request (403): HTTP 403, 1 change waiting", describe(SyncState.Problem("The server refused the request (403): HTTP 403", 1)))
+        assertEquals("The server refused the request (error 403). The server did not say why, 1 change waiting", describe(SyncState.Problem("The server refused the request (error 403). The server did not say why.", 1)))
     }
 }
 

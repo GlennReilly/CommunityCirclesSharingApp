@@ -197,7 +197,7 @@ fun describe(state: SyncState): String = when (state) {
     is SyncState.Offline -> "Offline" + waiting(state.changesWaiting)
     is SyncState.Busy -> "The server is busy, trying again soon" + waiting(state.changesWaiting)
     SyncState.SignedOut -> "Cannot sign in to the circle. If you were removed, ask a steward"
-    is SyncState.Problem -> state.message + waiting(state.changesWaiting)
+    is SyncState.Problem -> state.message.trimEnd('.') + waiting(state.changesWaiting) // the status line adds ", N changes waiting", so a message's own full stop goes
 }
 
 private fun waiting(count: Int): String = when (count) {

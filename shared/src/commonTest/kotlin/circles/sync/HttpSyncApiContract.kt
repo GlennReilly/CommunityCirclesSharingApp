@@ -116,7 +116,7 @@ abstract class HttpSyncApiContract {
     @Test fun otherRefusalsAreFinal() = runTest {
         val w = world()
         w.script.answers += HttpReply(403, "{}")
-        assertEquals(ApiOutcome.Refused(403, "HTTP 403"), w.api.pull(w.circle, 0, 10))
+        assertEquals(ApiOutcome.Refused(403, "The server did not say why."), w.api.pull(w.circle, 0, 10))
     }
 
     @Test fun anAnswerThatIsNotJsonIsRefusedNotACrash() = runTest {
