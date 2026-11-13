@@ -26,7 +26,7 @@ enum class Screen(val path: String, val title: String) {
     EditSkill("skills/edit", "Change a skill offer"),
     Borrow("borrow", "Borrow"),
     RequestLoan("borrow/request", "Ask to borrow"),
-    Standing("standing", "My standing"),
+    Standing("standing", "My level"),
     Pauses("pauses", "Pauses"),
     Members("members", "Members"),
     Stewards("stewards", "Stewards"),
@@ -49,8 +49,11 @@ enum class Screen(val path: String, val title: String) {
         /** Pages reached from another page, not from the navigation bar. */
         val subPages: Set<Screen> = setOf(AddItem, EditItem, RequestLoan, RecoveryCode, RecoveryShares, Pauses, AddSkill, EditSkill, Verify, CheckIdentity, CheckDevice, ItemTag, ItemHistory, BorrowHistory, Person, YourName)
 
+        /** The pages in the account menu in the header, which holds the member's own pages (ADR 0083). */
+        val accountMenu: List<Screen> = listOf(Standing, Settings)
+
         /** Screens shown in the navigation bar once signed in. */
-        val navigation: List<Screen> = entries.filter { it !in beforeSignIn && it !in subPages }
+        val navigation: List<Screen> = entries.filter { it !in beforeSignIn && it !in subPages && it !in accountMenu }
     }
 
     val fragment: String get() = FRAGMENT_PREFIX + path

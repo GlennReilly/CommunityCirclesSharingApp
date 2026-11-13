@@ -100,7 +100,7 @@ class ScreenTest {
     @Test fun navigationOmitsEveryPageThatComesBeforeSignIn() {
         for (screen in Screen.beforeSignIn) assertFalse(screen in Screen.navigation, screen.name)
         for (screen in Screen.subPages) assertFalse(screen in Screen.navigation, screen.name)
-        assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size, Screen.navigation.size)
+        assertEquals(Screen.entries.size - Screen.beforeSignIn.size - Screen.subPages.size - Screen.accountMenu.size, Screen.navigation.size)
         assertEquals(setOf(Screen.Welcome, Screen.StartCircle, Screen.JoinCircle, Screen.PairDevice, Screen.Restore), Screen.signedOut)
     }
 }
@@ -668,11 +668,11 @@ class ShellViewTest {
 
     @Test fun theStandingPageShowsOnlyYourOwnTierPointsReasonsAndNextSteps() {
         val html = render(open(home().copy(standing = myStanding)).copy(screen = Screen.Standing))
-        assertTrue("Your level: 2" in html && "Standing points: 3.5" in html)
+        assertTrue("Your level: 2" in html && "Your points: 3.5" in html && "Your points and the vouches you have decide what you can borrow." in html)
         assertTrue("It never drops below Level 1," in html)
         assertTrue("Activity in this circle gives 3.5 standing points." in html)
         assertTrue("About 6.5 more standing points opens Level 3 access." in html)
-        assertTrue("nobody is ever banned for low standing" in html)
+        assertTrue("nobody is ever banned for a low level" in html)
         assertFalse("This screen is not built yet." in html)
     }
 
@@ -1937,5 +1937,73 @@ class NamesViewTest {
         assertEquals(circles.app.DateFormat.DEFAULT, Appearance.fromKeys("large", "dark", "nonsense").dateFormat)
         assertEquals(circles.app.DateFormat.LONG, Appearance().dateFormat)
         assertEquals(TextSize.LARGE, Appearance.fromKeys("large", null, "iso").textSize)
+    }
+
+    // ---- account menu (ADR 0083) ----
+
+    private fun headerOf(html: String) = html.substringAfter("<header").substringBefore("</header>")
+    private fun navOf(html: String) = html.substringAfter("<nav").substringBefore("</nav>")
+
+    @Test fun theNavigationBarKeepsSixPagesAndMyStandingAndSettingsMoveToTheAccountMenu() {
+        val html = render(open(home()).copy(screen = Screen.Home))
+        val nav = navOf(html)
+        for (title in listOf("Circle home", "Items", "Skills", "Borrow", "Members", "Stewards")) assertTrue(">$title<" in nav, title)
+        assertEquals(6, Regex("<li>").findAll(nav).count())
+        assertFalse("My level" in nav || "Settings" in nav)
+        assertEquals(listOf(Screen.Standing, Screen.Settings), Screen.accountMenu)
+        assertTrue(Screen.Standing !in Screen.navigation && Screen.Settings !in Screen.navigation)
+        assertEquals("standing", Screen.Standing.path, "routes are unchanged")
+        assertEquals("settings", Screen.Settings.path)
+    }
+
+    @Test fun theAccountButtonShowsTheNameAndClosedMenuLinksAreHidden() {
+        val header = headerOf(render(open(home(myName = "Alice Smith")).copy(screen = Screen.Home)))
+        assertTrue(Regex("""<button[^>]*id="$ID_ACCOUNT_BUTTON"[^>]*aria-expanded="false"[^>]*aria-controls="$ID_ACCOUNT_MENU"[^>]*>Alice Smith</button>""").containsMatchIn(header) ||
+            Regex("""<button[^>]*aria-expanded="false"[^>]*>Alice Smith</button>""").containsMatchIn(header), header)
+        assertTrue("aria-controls=\"$ID_ACCOUNT_MENU\"" in header)
+        val menu = header.substringAfter("""id="$ID_ACCOUNT_MENU"""").substringBefore("</ul>")
+        assertTrue(Regex("""^[^>]*hidden""").containsMatchIn(menu), "a closed menu is hidden, so its links are not in the tab order")
+        assertEquals(2, Regex("<a ").findAll(menu).count(), "exactly two links")
+        assertTrue("""href="#/standing"""" in menu && ">My level<" in menu && """href="#/settings"""" in menu && ">Settings<" in menu)
+        assertFalse(Regex("""role="menu"""").containsMatchIn(header), "a plain disclosure, not an ARIA menu")
+        assertTrue(ACTION_SYNC in header && ACTION_LOCK in header, "Sync now and Lock now stay in the header")
+    }
+
+    @Test fun anOpenMenuSaysSoAndShowsItsLinks() {
+        val header = headerOf(render(open(home()).copy(screen = Screen.Home, accountMenuOpen = true)))
+        assertTrue("""aria-expanded="true"""" in header)
+        val menu = header.substringAfter("""id="$ID_ACCOUNT_MENU"""").substringBefore("</ul>")
+        assertFalse(Regex("""^[^>]*hidden""").containsMatchIn(menu))
+    }
+
+    @Test fun theAccountButtonAndItsLinkAreMarkedCurrentOnMyStandingAndSettings() {
+        for ((screen, title) in listOf(Screen.Standing to "My level", Screen.Settings to "Settings")) {
+            val header = headerOf(render(open(home()).copy(screen = screen)))
+            assertTrue(Regex("""<button[^>]*aria-current="page"""").containsMatchIn(header), "the button is current on $title")
+            assertTrue(Regex("""<a[^>]*aria-current="page"[^>]*>$title</a>""").containsMatchIn(header), title)
+            assertFalse("aria-current" in navOf(render(open(home()).copy(screen = screen))), "nothing in the nav bar is current")
+        }
+        assertFalse("aria-current" in headerOf(render(open(home()).copy(screen = Screen.Items))))
+    }
+
+    @Test fun withoutADisplayNameTheButtonSaysYourAccountAndTheFirstNamePageHasNoMenu() {
+        assertEquals("Your account", ACCOUNT_FALLBACK)
+        val noName = render(open(home(myName = null)).copy(screen = Screen.Home))
+        assertTrue(">Your account</button>" in headerOf(noName) || ">Your account<" in headerOf(noName))
+        val yourName = render(open(home(myName = null)).copy(screen = Screen.YourName))
+        assertFalse(ID_ACCOUNT_BUTTON in yourName, "the name page has no navigation and no menu to wander off with")
+        assertFalse("<nav" in yourName)
+        assertFalse(ID_ACCOUNT_BUTTON in render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity)), "no menu before sign-in")
+    }
+
+    @Test fun theMenuOpensAndClosesAndClosesOnNavigatingOrWhenTheAppLocks() {
+        val opened = reduce(open(), AppAction.ToggleAccountMenu)
+        assertTrue(opened.accountMenuOpen)
+        assertFalse(reduce(opened, AppAction.ToggleAccountMenu).accountMenuOpen)
+        assertFalse(reduce(opened, AppAction.CloseAccountMenu).accountMenuOpen)
+        assertFalse(reduce(opened, AppAction.Navigate(Screen.Standing)).accountMenuOpen, "choosing a page closes it")
+        assertFalse(reduce(opened, AppAction.ModelChanged(AppModel.NoIdentity)).accountMenuOpen, "locking closes it")
+        assertEquals(AppState().accountMenuOpen, reduce(AppState(), AppAction.ToggleAccountMenu).accountMenuOpen, "not before sign-in")
+        assertTrue(reduce(opened, AppAction.ModelChanged(AppModel.Open(home()))).accountMenuOpen, "a sync redraw keeps it open")
     }
 }

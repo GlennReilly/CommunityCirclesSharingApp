@@ -164,6 +164,12 @@ const val ACTION_PASSKEY_OFF = "passkey-off"
 const val ACTION_TAG_ITEM = "tag-item"
 const val ACTION_ITEM_HISTORY = "item-history"
 const val ACTION_RESTORE_ITEM = "restore-item"
+/** The account menu in the header (ADR 0083): a button that opens a short list of links to the member's own pages. */
+const val ACTION_ACCOUNT_MENU = "account-menu"
+const val ID_ACCOUNT_BUTTON = "account-menu-button"
+const val ID_ACCOUNT_MENU = "account-menu"
+/** What the account button says before the member has chosen a display name. */
+const val ACCOUNT_FALLBACK = "Your account"
 /** A menu of members (ADR 0078): the select carries [ATTR_MEMBER_MENU]; next to it a "View <name>" link per member, only the chosen one showing. */
 const val ATTR_MEMBER_MENU = "data-member-menu"
 const val ATTR_VIEW_OF = "data-view-of"
@@ -340,6 +346,8 @@ fun FlowContent.shell(state: AppState) {
         if (state.signedIn) {
             toolButton(ACTION_SYNC, "Sync now", "icon-sync")
             toolButton(ACTION_LOCK, "Lock now", "icon-lock")
+            // last in the header, so its list opens on a row of its own under the buttons (ADR 0083)
+            if (state.screen != Screen.YourName) accountMenu(state)
         }
         if (state.updateAvailable) {
             div {
@@ -937,6 +945,40 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
             button(type = ButtonType.button) {
                 attributes[ATTR_ACTION] = ACTION_COPY
                 +"Copy"
+            }
+        }
+    }
+}
+
+/**
+ * The account menu (ADR 0083): a button with the member's display name that discloses a list of real links, My standing
+ * and Settings. A plain disclosure, not an ARIA menu: the button says whether the list is open (aria-expanded) and which
+ * list it controls (aria-controls); a closed list is hidden, so its links are not in the tab order. Escape, a click
+ * outside, or choosing a link closes it (the page script does that). The button shows as current on either page.
+ */
+private fun FlowContent.accountMenu(state: AppState) {
+    val open = state.accountMenuOpen
+    val current = state.screen in Screen.accountMenu
+    div {
+        classes = setOf("account-menu")
+        button(type = ButtonType.button) {
+            id = ID_ACCOUNT_BUTTON
+            attributes[ATTR_ACTION] = ACTION_ACCOUNT_MENU
+            attributes["aria-expanded"] = open.toString()
+            attributes["aria-controls"] = ID_ACCOUNT_MENU
+            if (current) attributes["aria-current"] = "page"
+            +((state.model as? AppModel.Open)?.home?.myName ?: ACCOUNT_FALLBACK) // plain-name: the button text of the account menu is a label for the menu, not a link
+        }
+        ul {
+            id = ID_ACCOUNT_MENU
+            if (!open) attributes["hidden"] = "true"
+            for (screen in Screen.accountMenu) {
+                li {
+                    a(href = screen.fragment) {
+                        if (screen == state.screen) attributes["aria-current"] = "page"
+                        +screen.title
+                    }
+                }
             }
         }
     }
@@ -2008,12 +2050,13 @@ private fun FlowContent.settings(home: HomeData, state: AppState) {
 private fun FlowContent.standing(standing: StandingSummary?, home: HomeData? = null) {
     h1 { +Screen.Standing.title }
     if (standing == null) {
-        p { +"Your standing appears once the circle has been read." }
+        p { +"Your level appears once the circle has been read." }
         return
     }
+    p { +"Your points and the vouches you have decide what you can borrow. This page shows your level and how to reach the next one." }
     p { +"Your level: ${TierText.number(standing.tier)}" }
-    p { +"Standing points: ${standing.points}" }
-    p { +"Standing is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below ${TierText.label(Tier.NEW)}, and nobody is ever banned for low standing." }
+    p { +"Your points: ${standing.points}" }
+    p { +"Your level is local to this circle. It rises as you lend and borrow well, and fades slowly if you are quiet. It never drops below ${TierText.label(Tier.NEW)}, and nobody is ever banned for a low level." }
     section {
         h2 { +"Why" }
         ul { for (reason in standing.reasons) li { +reason } }
@@ -2741,7 +2784,7 @@ private fun FlowContent.contributions(home: HomeData) {
     if (home.canRead && c.candidates.isNotEmpty()) {
         section {
             h2 { +"Log a contribution" }
-            p { +"Helped someone? It counts towards your standing once they confirm it. You can make ${c.notesLeft} more in the next 30 days." }
+            p { +"Helped someone? It counts towards your level once they confirm it. You can make ${c.notesLeft} more in the next 30 days." }
             if (c.notesLeft > 0) {
                 form {
                     id = FORM_NOTE_ADD

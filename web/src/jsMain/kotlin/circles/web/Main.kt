@@ -68,6 +68,7 @@ import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.Event
+import org.w3c.dom.events.KeyboardEvent
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
 import org.w3c.files.Blob
@@ -250,6 +251,13 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         window.setInterval({ app?.syncNow(SyncTrigger.HINT) }, POLL_MILLIS)
         window.addEventListener("online", { app?.syncNow(SyncTrigger.ONLINE) })
         for (type in listOf("keydown", "pointerdown")) document.addEventListener(type, { app?.touch() })
+        // Escape closes the account menu and puts focus back on its button (ADR 0083).
+        document.addEventListener("keydown", { event ->
+            if ((event as? KeyboardEvent)?.key == "Escape" && state.accountMenuOpen) {
+                dispatch(AppAction.CloseAccountMenu)
+                (document.getElementById(ID_ACCOUNT_BUTTON) as? HTMLElement)?.focus()
+            }
+        })
         root.addEventListener("submit", { event -> onSubmit(event) })
         root.addEventListener("input", { event -> onInput(event) })
         root.addEventListener("click", { event -> onClick(event) })
@@ -747,6 +755,14 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
     }
 
     private fun onClick(event: Event) {
+        // The account menu (ADR 0083): a click outside it, or on one of its links, closes it; its button opens and closes it.
+        val clicked = event.target as? Element
+        if (state.accountMenuOpen && clicked?.closest(".account-menu") == null) dispatch(AppAction.CloseAccountMenu)
+        if (clicked?.closest("#$ID_ACCOUNT_MENU a") != null) dispatch(AppAction.CloseAccountMenu)
+        if (clicked?.closest("#$ID_ACCOUNT_BUTTON") != null) {
+            dispatch(AppAction.ToggleAccountMenu)
+            return
+        }
         val target = (event.target as? Element)?.closest("[$ATTR_ACTION]") ?: return
         val circleApp = app
         busyLaunch(target) {

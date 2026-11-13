@@ -38,6 +38,8 @@ data class AppState(
     val historyOf: ItemId? = null,
     /** The member whose page is on show (ADR 0076); forgotten when the page is left or the app locks. */
     val viewing: circles.policy.MemberId? = null,
+    /** Whether the account menu in the header is open (ADR 0083). */
+    val accountMenuOpen: Boolean = false,
     /** The item being asked for on the Ask to borrow page. */
     val borrowing: ItemId? = null,
     /** A link to add this browser as another device of a member, found in the address (ADR 0046). */
@@ -86,6 +88,8 @@ sealed interface AppAction {
     data class BorrowItem(val item: ItemId) : AppAction
     data class ShowItemHistory(val item: ItemId) : AppAction
     data class ShowPerson(val member: circles.policy.MemberId) : AppAction
+    data object ToggleAccountMenu : AppAction
+    data object CloseAccountMenu : AppAction
     data object UpdateReady : AppAction
     data object UpdateAccepted : AppAction
 }
@@ -97,6 +101,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
         verifying = if (!state.signedIn || action.screen == Screen.Verify) state.verifying else null,
         checking = if (action.screen == Screen.CheckIdentity) state.checking else null,
         viewing = if (action.screen == Screen.Person) state.viewing else null,
+        accountMenuOpen = false,
         addingDevice = if (action.screen == Screen.CheckDevice) state.addingDevice else null,
         focusItem = if (!state.signedIn || action.screen == Screen.Items) state.focusItem else null,
         screen = allowed(state.model, action.screen).let {
@@ -117,6 +122,8 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
     )
     is AppAction.CheckPerson -> if (state.signedIn) state.copy(checking = action.check, screen = Screen.CheckIdentity) else state
     is AppAction.CheckNewDevice -> if (state.signedIn) state.copy(addingDevice = action.device, screen = if (action.device != null) Screen.CheckDevice else Screen.Settings) else state
+    is AppAction.ToggleAccountMenu -> if (state.signedIn) state.copy(accountMenuOpen = !state.accountMenuOpen) else state
+    is AppAction.CloseAccountMenu -> state.copy(accountMenuOpen = false)
     is AppAction.ShowPerson -> if (state.signedIn) state.copy(viewing = action.member, screen = Screen.Person) else state
     is AppAction.ShowItemHistory -> if (state.signedIn) state.copy(historyOf = action.item, screen = Screen.ItemHistory) else state
     is AppAction.BorrowItem -> if (state.signedIn) state.copy(borrowing = action.item, screen = Screen.RequestLoan) else state
@@ -144,6 +151,7 @@ fun reduce(state: AppState, action: AppAction): AppState = when (action) {
             recoveryDraft = if (open) state.recoveryDraft else null,
             checking = if (open) state.checking else null,
             viewing = if (open) state.viewing else null,
+            accountMenuOpen = open && state.accountMenuOpen,
             addingDevice = if (open) state.addingDevice else null,
             shareCodes = if (open) state.shareCodes else emptyMap(),
         )

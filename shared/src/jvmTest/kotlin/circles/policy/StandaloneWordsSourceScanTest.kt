@@ -60,6 +60,22 @@ class StandaloneWordsSourceScanTest {
         assertTrue(!letInWords.containsMatchIn("Approve access") && !letInWords.containsMatchIn("let-in-checked") && !letInWords.containsMatchIn("Waiting for approval"))
     }
 
+    /** ADR 0083: the page is "My level"; no string a person reads says "My standing" or "your standing". */
+    private val oldPageName = Regex("""(?i)\bmy standing\b|\byour standing\b""")
+
+    @Test
+    fun noStringCallsTheLevelPageMyStanding() {
+        val files = scanned.map { File(root, it) }.filter { it.isDirectory }
+            .flatMap { dir -> dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+        val found = files.flatMap { file ->
+            file.readLines().withIndex()
+                .filter { (_, line) -> line.trimStart().let { !it.startsWith("//") && !it.startsWith("*") && !it.startsWith("/**") } }
+                .flatMap { (index, line) -> literal.findAll(line).filter { oldPageName.containsMatchIn(it.groupValues[1]) }.map { "${file.relativeTo(root)}:${index + 1}: ${it.value}" }.toList() }
+        }
+        assertTrue(found.isEmpty(), "The page is called My level (ADR 0083):\n" + found.joinToString("\n"))
+        assertTrue(oldPageName.containsMatchIn("My standing") && oldPageName.containsMatchIn("It counts towards your standing") && !oldPageName.containsMatchIn("My level"))
+    }
+
     @Test
     fun theScanCatchesWhatItIsFor() {
         assertTrue(problemsIn("""dispatch(AppAction.Notice("They can read the circle."))""").isNotEmpty())

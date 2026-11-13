@@ -75,6 +75,31 @@ try {
   await until(bea, has(bea, 'Up to date') + ' && ' + has(bea, '2 members'), 'bea synced'); ok('bea synced, 2 members');
   await alice.evaluate('location.hash = "#/home"'); await syncUntil(alice, has(alice, 'person waiting for approval'), 'home mentions bea waiting'); { const link = await alice.evaluate('[...document.querySelectorAll("main a")].map(x => x.textContent).find(t => t.includes("waiting for approval")) || ""'); if (link !== '1 person waiting for approval') throw new Error('the Home link for one person waiting reads: ' + link); }
   await checkAccessibility(alice, 'home with someone waiting for approval'); ok('alice\'s home links to the person waiting: "1 person waiting for approval" (screenshot taken)');
+  // The account menu (ADR 0083): My level and Settings live under the member's name in the header.
+  { const info = JSON.parse(await alice.evaluate(`JSON.stringify({ nav: [...document.querySelectorAll('nav a')].map(a => a.textContent), label: document.getElementById('account-menu-button').textContent, expanded: document.getElementById('account-menu-button').getAttribute('aria-expanded'), controls: document.getElementById('account-menu-button').getAttribute('aria-controls'), linksVisible: [...document.querySelectorAll('#account-menu a')].some(a => a.checkVisibility()), items: [...document.querySelectorAll('#account-menu a')].map(a => a.textContent), role: document.querySelector('[role=menu]') !== null })`));
+    if (JSON.stringify(info.nav) !== JSON.stringify(['Circle home', 'Items', 'Skills', 'Borrow', 'Members', 'Stewards'])) throw new Error('nav links: ' + JSON.stringify(info.nav));
+    if (info.label !== 'Alice Smith' && info.label !== 'Your account') throw new Error('account button text: ' + info.label);
+    if (info.expanded !== 'false' || info.controls !== 'account-menu' || info.linksVisible || info.role) throw new Error('closed menu: ' + JSON.stringify(info));
+    if (JSON.stringify(info.items) !== JSON.stringify(['My level', 'Settings'])) throw new Error('menu items: ' + JSON.stringify(info.items)); }
+  ok('the nav bar has six pages; the account menu button shows the member\'s name, is closed, and its links are out of the tab order');
+  const menuState = () => alice.evaluate('JSON.stringify({ expanded: document.getElementById("account-menu-button").getAttribute("aria-expanded"), visible: [...document.querySelectorAll("#account-menu a")].every(a => a.checkVisibility()), focus: document.activeElement && document.activeElement.id })');
+  await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "true"', 'menu opens');
+  if (!JSON.parse(await menuState()).visible) throw new Error('the open menu shows no links');
+  await checkAccessibility(alice, 'home with the account menu open');
+  for (const type of ['keyDown', 'keyUp']) await alice.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "false" && document.activeElement.id === "account-menu-button"', 'Escape closes the menu and focus returns to its button');
+  ok('Escape closes the account menu and puts focus back on its button');
+  await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "true"', 'menu reopens');
+  await alice.evaluate('document.querySelector("main h1").click()'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "false"', 'a click outside closes the menu');
+  ok('a click outside closes the account menu');
+  for (const [title, hash] of [['My level', '#/standing'], ['Settings', '#/settings']]) {
+    await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "true"', 'menu opens for ' + title);
+    await alice.evaluate(`[...document.querySelectorAll('#account-menu a')].find(a => a.textContent === ${JSON.stringify(title)}).click()`);
+    await until(alice, `location.hash === ${JSON.stringify(hash)} && document.getElementById('account-menu-button').getAttribute('aria-expanded') === 'false' && document.getElementById('account-menu-button').getAttribute('aria-current') === 'page'`, 'choosing ' + title + ' goes there, closes the menu and marks the button current');
+    if (!(await alice.evaluate(`[...document.querySelectorAll('#account-menu a')].find(a => a.textContent === ${JSON.stringify(title)}).getAttribute('aria-current') === 'page'`))) throw new Error(title + ' link is not marked current');
+  }
+  ok('choosing My level and Settings from the menu goes there, closes it, and marks the button and the link current');
+  await alice.evaluate('location.hash = "#/home"'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-current") === null', 'back home, button not current');
   await alice.evaluate('location.hash = "#/members"'); await until(alice, has(alice, 'Waiting for approval'), 'alice sees bea waiting'); ok('alice sees bea waiting on the members page');
   const waitingLine = await alice.evaluate('[...document.querySelectorAll("li")].map(l => l.innerText).find(t => t.includes("Check and approve access")) || ""');
   if (!waitingLine.includes('New member (waiting for a name)') || /[0-9a-f]{4} [0-9a-f]{4}/.test(waitingLine)) throw new Error('waiting line: ' + waitingLine);
@@ -328,6 +353,9 @@ try {
   await until(alice, 'document.documentElement.dataset.text === "larger" && document.documentElement.dataset.theme === "dark" && getComputedStyle(document.documentElement).fontSize === "22px" && getComputedStyle(document.documentElement).colorScheme === "dark"', 'appearance applied');
   ok('largest text (22 px) and dark colours apply at once');
   await checkAccessibility(alice, 'settings at the largest text size, dark');
+  await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "true"', 'menu open at the largest text');
+  await checkAccessibility(alice, 'settings at the largest text size with the account menu open, dark');
+  await click(alice, 'account-menu'); await until(alice, 'document.getElementById("account-menu-button").getAttribute("aria-expanded") === "false"', 'menu closed again');
   await alice.evaluate('(() => { const f = document.getElementById("appearance-form"); f.elements.namedItem("text-size").value = "standard"; f.elements.namedItem("theme").value = "system"; f.requestSubmit(); return true; })()');
   await until(alice, 'document.documentElement.dataset.text === "standard" && getComputedStyle(document.documentElement).fontSize === "16px"', 'appearance back to standard'); ok('appearance back to standard');
   // Standing: a valuable item is not open to a new member (Level 1); the steward counts as Level 3 (ADR 0070).
@@ -344,7 +372,7 @@ try {
   ok('the reasons say "Drill needs Level 2; you are Level 1." and name the vouch route, with no tier identifiers');
   await bea.evaluate('location.hash = "#/standing"'); await until(bea, has(bea, 'Your level: 1'), 'bea standing');
   await alice.evaluate('location.hash = "#/standing"'); await until(alice, has(alice, 'Your level: 3') + ' && ' + has(alice, 'Stewards are treated as at least Level 3'), 'alice standing'); ok('standing pages: bea is at Level 1, alice (steward) counts as Level 3');
-  await checkAccessibility(alice, 'my standing');
+  await checkAccessibility(alice, 'my level');
   // Menus of members (ADR 0078): a link to the chosen member sits beside the menu and follows the choice.
   await until(alice, 'document.querySelector("select[data-member-menu]") !== null', 'a member menu on the standing page');
   { const r = JSON.parse(await alice.evaluate(`(() => {

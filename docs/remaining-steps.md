@@ -75,7 +75,7 @@ You need two devices that can both open your host: **Phone A** (the one you are 
 | Items | Add an item with a name; add a photo from the camera or gallery; open "Larger photos" |
 | Skills | Offer a skill; use the search box |
 | Borrow | Request an item that Device B owns (see below) |
-| My standing | Read the page; does it make sense to someone new? |
+| My level | Read the page; does it make sense to someone new? |
 | Members | Invite, vouch, "Show my QR code" |
 | Stewards | Read the rules; try proposing a rule change |
 | Settings | Change text size to Largest and colours to Dark; confirm everything still fits; set it back |
@@ -136,7 +136,7 @@ Switch it on, close your eyes or turn the screen off (TalkBack "screen curtain";
 
 **Also check**: you never get stuck in a part of the page you cannot leave; the on-screen message ("Saved.", "Request sent.") is read aloud without you hunting for it; the spinner on a busy button is announced as busy.
 
-**Reading level:** hand the Borrow page and the My standing page to someone who has not seen the app. Ask them to say in their own words what each is for. Anything they stumble on, write down verbatim.
+**Reading level:** hand the Borrow page and the My level page to someone who has not seen the app. Ask them to say in their own words what each is for. Anything they stumble on, write down verbatim.
 
 **Done when:** you completed tasks 1 to 6 without looking, or you have a list of exactly where you could not.
 
@@ -154,7 +154,7 @@ Switch it on, close your eyes or turn the screen off (TalkBack "screen curtain";
 1. You start a circle and invite everyone (Members, Invite, one link each; let each person in).
 2. Everyone adds one real item or skill they would genuinely lend or offer, with a photo if possible.
 3. Do three real borrows between different pairs, including one with a "valuable" item so people meet the tier rules.
-4. Two people vouch for the newest member. Check **My standing** changes in a way they understand.
+4. Two people vouch for the newest member. Check **My level** changes in a way they understand.
 5. Make one steward change: propose a second steward, agree on it from two phones. Then each steward makes a recovery code (Settings, **Make a recovery code**) and writes it on paper.
 6. Remove one person who agrees to play the removed member (Members, **Remove this person**), then **Change the key**. Check they are signed out, and the others still work.
 7. Ask each person afterwards: what was confusing, what felt slow, what they would change first, and whether they would use it again.
