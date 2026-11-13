@@ -254,6 +254,7 @@ try {
   await alice.evaluate('location.hash = "#/items"'); await until(alice, has(alice, 'Long ladder'), 'alice back on items');
   // Loan history (ADR 0072): the owner sees every loan of the ladder; the borrower sees it under their borrowing history with a way to ask again.
   await click(alice, 'item-history'); await until(alice, has(alice, 'Loan history') + ' && ' + has(alice, 'Dates:'), 'alice item history');
+  { const h1 = await alice.evaluate(`document.querySelector('h1').textContent.trim() + '|' + document.title + '|' + document.querySelectorAll('h1').length`); if (!/^.+ - Loan history\|.+ - Loan history - Lendger\|1$/.test(h1)) throw new Error('item history heading: ' + h1); console.log('ok item history heading ' + h1); }
   const ownerHistory = await text(alice);
   if ((ownerHistory.match(/Dates:/g) || []).length !== 4) throw new Error('owner history should list 4 loans: ' + ownerHistory);
   if (!ownerHistory.includes('Bea') || !ownerHistory.includes('damage reported (no penalty for telling)') || !ownerHistory.includes('Returned on time.') || !ownerHistory.includes('Returned late.')) throw new Error('owner history words: ' + ownerHistory);

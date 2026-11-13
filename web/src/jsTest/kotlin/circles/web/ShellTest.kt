@@ -1602,6 +1602,9 @@ class NamesViewTest {
         )
         val html = render(open(home(items = listOf(ladder, drill), loans = loans)).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
         assertTrue("Loan history" in html && "Ladder" in html && "Bea" in html)
+        assertEquals(1, Regex("<h1").findAll(html).count())
+        assertTrue(Regex("<h1[^>]*>\\s*Ladder - Loan history\\s*</h1>").containsMatchIn(html), "the item name is in the main heading")
+        assertFalse("<h3" in html, "no level is skipped under the h1")
         assertTrue("Returned late." in html && "Reported back: ${ld(20_704)}" in html)
         assertTrue("damage reported (no penalty for telling)" in html && "report of damage was upheld" in html)
         assertTrue("Declined." in html)
@@ -1726,6 +1729,7 @@ class NamesViewTest {
         val html = render(open(home(items = emptyList(), archived = listOf(ArchivedItem(ladder.item, "")))).copy(screen = Screen.ItemHistory, historyOf = ladder.item))
         assertEquals("An archived item", UNREADABLE_ITEM_NAME)
         assertTrue(UNREADABLE_ITEM_NAME in html)
+        assertTrue(Regex("<h1[^>]*>\\s*An archived item - Loan history\\s*</h1>").containsMatchIn(html), "archived fallback heading")
         assertTrue(UNREADABLE_ITEM_NAME in render(open(home(items = emptyList(), archived = listOf(ArchivedItem(ladder.item, "")))).copy(screen = Screen.Items)))
     }
 
@@ -1958,6 +1962,7 @@ class NamesViewTest {
 
     @Test fun theAccountButtonShowsTheNameAndClosedMenuLinksAreHidden() {
         val header = headerOf(render(open(home(myName = "Alice Smith")).copy(screen = Screen.Home)))
+        assertTrue("""aria-label="Alice Smith, $ACCOUNT_MENU_LABEL"""" in header, "a screen reader hears the name and that it is a menu")
         assertTrue(Regex("""<button[^>]*id="$ID_ACCOUNT_BUTTON"[^>]*aria-expanded="false"[^>]*aria-controls="$ID_ACCOUNT_MENU"[^>]*>Alice Smith</button>""").containsMatchIn(header) ||
             Regex("""<button[^>]*aria-expanded="false"[^>]*>Alice Smith</button>""").containsMatchIn(header), header)
         assertTrue("aria-controls=\"$ID_ACCOUNT_MENU\"" in header)
@@ -1990,12 +1995,11 @@ class NamesViewTest {
         assertEquals("Your account", ACCOUNT_FALLBACK)
         val noName = render(open(home(myName = null)).copy(screen = Screen.Home))
         assertTrue(">Your account</button>" in headerOf(noName) || ">Your account<" in headerOf(noName))
+        assertFalse("aria-label=\"Your account" in headerOf(noName), "the fallback already says what it is")
         val yourName = render(open(home(myName = null)).copy(screen = Screen.YourName))
         assertFalse(ID_ACCOUNT_BUTTON in yourName, "the name page has no navigation and no menu to wander off with")
-        assertTrue("""aria-label="Alice Smith, $ACCOUNT_MENU_LABEL"""" in headerOf(render(open(home()))), "the name says what the button is")
         assertFalse("<nav" in yourName)
         assertFalse(ID_ACCOUNT_BUTTON in render(AppState(screen = Screen.Welcome, model = AppModel.NoIdentity)), "no menu before sign-in")
-        assertFalse("aria-label=\"Your account" in headerOf(noName), "the fallback already says what it is")
     }
 
     @Test fun theMenuOpensAndClosesAndClosesOnNavigatingOrWhenTheAppLocks() {

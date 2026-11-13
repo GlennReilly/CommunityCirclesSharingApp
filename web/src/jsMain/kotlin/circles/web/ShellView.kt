@@ -1704,9 +1704,24 @@ private fun FlowContent.historyEntry(entry: HistoryEntry) {
     entry.dispute?.let { p { +historyDisputeText(it, entry.claim) } }
 }
 
+/** The item's name for its history page: the name this device can read, or the fallback for an unreadable archived item. */
+fun itemHistoryName(home: HomeData, state: AppState): String {
+    val listed = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
+    if (listed != null) return listed.name
+    val archived = state.historyOf?.let { LoanHistory.archivedOwnedItem(home.archivedItems, home.loans, it) }
+    return archived?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
+}
+
+/** Heading and document title of the item history page: "Long ladder - Loan history". */
+fun itemHistoryTitle(home: HomeData, state: AppState): String {
+    val known = home.items.any { it.item == state.historyOf && it.ownedByMe } ||
+        state.historyOf?.let { LoanHistory.archivedOwnedItem(home.archivedItems, home.loans, it) } != null
+    return if (known) "${itemHistoryName(home, state)} - ${Screen.ItemHistory.title}" else Screen.ItemHistory.title
+}
+
 /** Every loan of one item the member owns, or has archived (ADR 0072, 0073, 0075). */
 private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
-    h1 { +Screen.ItemHistory.title }
+    h1 { +itemHistoryTitle(home, state) }
     val listed = home.items.firstOrNull { it.item == state.historyOf && it.ownedByMe }
     val archived = if (listed == null) state.historyOf?.let { LoanHistory.archivedOwnedItem(home.archivedItems, home.loans, it) } else null
     if (listed == null && archived == null) {
@@ -1714,9 +1729,8 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
         p { a(href = Screen.Items.fragment) { +"Back to items" } }
         return
     }
-    val name = listed?.name ?: archived?.name.orEmpty().ifBlank { UNREADABLE_ITEM_NAME }
+    val name = itemHistoryName(home, state)
     val entries = listed?.let { LoanHistory.forOwnedItem(home.loans, it.item) } ?: archived?.entries.orEmpty()
-    h2 { +name }
     if (archived != null) {
         p { +"You archived this item. Its loans are kept here. You can restore it to put it back on the list." }
         restoreButton(archived.item)
@@ -1727,7 +1741,7 @@ private fun FlowContent.itemHistoryPage(home: HomeData, state: AppState) {
         for (entry in entries) {
             div {
                 attributes[ATTR_HISTORY_TEXT] = historySearchText(entry, name, nameOf(home, entry.loan.other)) // plain-name: search text, not shown
-                h3 { personName(home, entry.loan.other) }
+                h2 { personName(home, entry.loan.other) }
                 historyEntry(entry)
             }
         }

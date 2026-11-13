@@ -128,12 +128,17 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
         }
     }
 
+    private fun pageTitle(): String {
+        val home = (state.model as? AppModel.Open)?.home
+        return if (state.screen == Screen.ItemHistory && home != null && state.historyOf != null) itemHistoryTitle(home, state) else state.screen.title
+    }
+
     private fun render(screenChanged: Boolean) {
         val kept = if (screenChanged) null else rememberFocus()
         root.clear()
         root.append { div { shell(state) } }
         val due = (state.model as? AppModel.Open)?.let { dueCount(it.home) } ?: 0
-        document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Lendger" else "${state.screen.title} - Lendger"
+        document.title = (if (due > 0) "($due due) " else "") + if (state.model is AppModel.Loading) "Lendger" else "${pageTitle()} - Lendger"
         if (screenChanged) document.getElementById(MAIN_ID)?.let { (it as HTMLElement).focus() }
         kept?.let { restoreFocus(it) }
         loadImages()
