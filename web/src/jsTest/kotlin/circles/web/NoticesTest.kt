@@ -38,4 +38,23 @@ class NoticesTest {
         assertEquals("the new member", Notices.nameFor(named, null, Notices.NEW_MEMBER))
         assertEquals("the new member", Notices.nameFor(home(mapOf(bea to NameSummary("  ", confirmed = false))), bea, Notices.NEW_MEMBER))
     }
+
+    @Test fun aRefusalReasonBecomesASentenceWithItsDateInTheChosenFormat() {
+        val reason = "A new steward cannot vote until ${circles.app.ReasonDates.token(20_766)}."
+        DateText.current = circles.app.DateFormat.LONG
+        assertEquals("A new steward cannot vote until 9 Nov 2026.", Notices.sentenceOf(reason))
+        DateText.current = circles.app.DateFormat.DAY_FIRST
+        assertEquals("A new steward cannot vote until 09/11/2026.", Notices.sentenceOf(reason))
+        DateText.current = circles.app.DateFormat.MONTH_FIRST
+        assertEquals("A new steward cannot vote until 11/09/2026.", Notices.sentenceOf(reason))
+        DateText.current = circles.app.DateFormat.ISO
+        assertEquals("A new steward cannot vote until 2026-11-09.", Notices.sentenceOf(reason))
+        DateText.current = circles.app.DateFormat.LONG
+        assertFalse("{date:" in Notices.sentenceOf(reason), "no placeholder reaches a person")
+    }
+
+    @Test fun aReasonWithoutAFullStopGetsOneAndAStartsWithACapital() {
+        assertEquals("Unknown item.", Notices.sentenceOf("unknown item"))
+        assertEquals("Already full.", Notices.sentenceOf(" already full."))
+    }
 }

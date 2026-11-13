@@ -193,7 +193,7 @@ class EventRules(
         effect: () -> Effect,
     ): Decision =
         when (outcome) {
-            is StewardOutcome.Refused -> reject(if (voter in stewards) RejectionCode.INVALID_PUBLIC else RejectionCode.NOT_STEWARD, outcome.reason)
+            is StewardOutcome.Refused -> reject(if (voter in stewards) RejectionCode.INVALID_PUBLIC else RejectionCode.NOT_STEWARD, circles.app.ReasonDates.plain(outcome.reason))
             StewardOutcome.Pending -> Decision.Accept(listOf(Effect.RecordStewardVote(envelope.circle, change, subject, voter, envelope.day)))
             StewardOutcome.Effective -> Decision.Accept(listOf(effect(), Effect.ClearStewardVotes(envelope.circle, subject)))
         }

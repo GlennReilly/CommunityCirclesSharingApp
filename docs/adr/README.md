@@ -85,6 +85,7 @@ One short file per decision that is hard to reverse, changes a rule, picks a tec
 | [0079](0079-a-steward-needs-a-confirmed-identity.md) | A steward needs a confirmed identity | Accepted |
 | [0080](0080-date-format-setting.md) | Date format setting | Accepted |
 | [0081](0081-approve-access-wording.md) | The UI says "approve access", not "let in" | Accepted |
+| [0082](0082-dates-in-refusal-reasons.md) | Dates inside refusal reasons are placeholders the page fills in | Accepted |
 
 ## Open decisions still to record
 

@@ -81,7 +81,7 @@ class StewardRulesTest {
     @Test
     fun aNewStewardCannotVoteUntilTheCoolOffHasPassed() {
         val stewards = mapOf(a to founding, b to 100)
-        assertTrue(refused(add(c, b, 100 + policy.coolOffDays - 1, stewards, listOf(StewardVote(a, 100)))).contains("cannot vote until day"))
+        assertTrue(refused(add(c, b, 100 + policy.coolOffDays - 1, stewards, listOf(StewardVote(a, 100)))).contains("cannot vote until {date:"))
         assertEquals(StewardOutcome.Effective, add(c, b, 100 + policy.coolOffDays, stewards, listOf(StewardVote(a, 100))))
     }
 
@@ -243,7 +243,7 @@ class StewardRulesTest {
         val quiet = Activity(lastDay = mapOf(b to 1))
         assertEquals("a circle keeps at least one steward", refused(StewardRules.decide(policy, StewardChange.REMOVE, a, a, 300, mapOf(a to founding), proposalAt100, quiet)))
         val fresh = mapOf(a to 290, b to founding)
-        assertTrue(refused(StewardRules.decide(policy, StewardChange.ADD, c, a, 291, fresh, proposalAt100, quiet)).contains("cannot vote until day"))
+        assertTrue(refused(StewardRules.decide(policy, StewardChange.ADD, c, a, 291, fresh, proposalAt100, quiet)).contains("cannot vote until {date:"))
     }
 
     @Test

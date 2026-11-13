@@ -185,7 +185,7 @@ abstract class CircleFoldContract {
         val tooSoon = w.bea.stewardAdd(w.circle, w.carol.identity.member, day + 6)
         val view = w.fold(w.founder, w.log + listOf(addBea, pending, tooSoon))
         assertEquals(setOf(w.founder.identity.member, w.bea.identity.member), view.stewards)
-        assertEquals(listOf("a new steward cannot vote until day ${day + 7}"), view.rejected.map { it.reason })
+        assertEquals(listOf("A new steward cannot vote until ${circles.app.ReasonDates.token(day + 7)}."), view.rejected.map { it.reason })
 
         val approve = w.bea.stewardAdd(w.circle, w.carol.identity.member, day + 7)
         val done = w.fold(w.founder, w.log + listOf(addBea, pending, approve))

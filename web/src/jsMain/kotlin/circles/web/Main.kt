@@ -519,7 +519,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         AppAction.Notice(
                             when (result) {
                                 circles.app.NoteResult.Sent -> "Your note was sent. It counts once the person named in it confirms it."
-                                is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                                is circles.app.NoteResult.Refused -> Notices.sentenceOf(result.reason)
                                 else -> "Your note could not be sent right now. Try syncing, then try again."
                             },
                         ),
@@ -565,7 +565,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                             is RebuildResult.BadCode -> if (result.mistyped) "Code ${result.position} has a mistake in it. Check it with the steward who read it out." else "Code ${result.position} is not a share code."
                             RebuildResult.DifferentEpochs -> "These share codes are for different keys. Use codes for the same key number."
                             RebuildResult.AlreadyHaveKey -> "This device already has the circle key those codes would rebuild."
-                            is RebuildResult.Wrong -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                            is RebuildResult.Wrong -> Notices.sentenceOf(result.reason)
                             RebuildResult.NotAllowed -> "Only a steward can rebuild the key."
                         },
                     ),
@@ -647,7 +647,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             AppAction.Notice(
                 when (result) {
                     NameResult.Saved -> done
-                    is NameResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is NameResult.Refused -> Notices.sentenceOf(result.reason)
                     is NameResult.NameTaken -> result.message
                     NameResult.NotLetInYet -> "A steward needs to approve your access before you can set your name."
                     NameResult.NotAllowed -> "Your name could not be saved right now. Try syncing, then try again."
@@ -690,7 +690,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             AppAction.Notice(
                 when (result) {
                     is SkillResult.Saved -> done
-                    is SkillResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is SkillResult.Refused -> Notices.sentenceOf(result.reason)
                     SkillResult.NotAllowed -> "The skill offer could not be saved right now. Try syncing, then try again."
                 },
             ),
@@ -707,7 +707,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                     PhotoResult.Full -> "The circle's photo storage is full."
                     PhotoResult.TooMany -> "An item can have ${circles.event.MAX_PHOTOS_PER_ITEM} photos. Remove one of its photos first."
                     PhotoResult.TooBig -> "The photo you chose is too large once it has been prepared."
-                    is PhotoResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is PhotoResult.Refused -> Notices.sentenceOf(result.reason)
                     PhotoResult.NotAllowed -> "The photo could not be added right now. Try syncing, then try again."
                 },
             ),
@@ -719,7 +719,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             AppAction.Notice(
                 when (result) {
                     is RulesResult.Sent -> if (result.takesEffect) "The new circle rules apply from today." else "Your proposal for new circle rules was sent. The rules change when enough stewards agree."
-                    is RulesResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is RulesResult.Refused -> Notices.sentenceOf(result.reason)
                     RulesResult.NotAllowed -> "Only a steward can change the circle rules."
                 },
             ),
@@ -731,7 +731,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
             AppAction.Notice(
                 when (result) {
                     is StewardResult.Sent -> if (result.takesEffect) "The steward change takes effect now." else "Your steward proposal was sent. It takes effect when enough stewards agree."
-                    is StewardResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                    is StewardResult.Refused -> Notices.sentenceOf(result.reason)
                     StewardResult.NotAllowed -> "Only a steward can change who the stewards are."
                 },
             ),
@@ -827,7 +827,7 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                         AppAction.Notice(
                             when (val result = circleApp?.confirmContribution(circles.event.NoteId(id))) {
                                 circles.app.NoteResult.Sent -> "The note has been confirmed. Thank you."
-                                is circles.app.NoteResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+                                is circles.app.NoteResult.Refused -> Notices.sentenceOf(result.reason)
                                 else -> "The note could not be confirmed right now. Try syncing, then try again."
                             },
                         ),
@@ -1006,7 +1006,7 @@ internal fun exportNotice(result: ExportResult.Ready): String {
 
 private fun pauseText(result: PauseResult, done: String): String = when (result) {
     PauseResult.Sent -> done
-    is PauseResult.Refused -> result.reason.replaceFirstChar { it.uppercase() } + "."
+    is PauseResult.Refused -> Notices.sentenceOf(result.reason)
     PauseResult.NotAllowed -> "The pause step could not be done right now. Try syncing, then try again."
 }
 

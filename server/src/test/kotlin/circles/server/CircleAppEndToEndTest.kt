@@ -638,7 +638,7 @@ class CircleAppEndToEndTest {
         assertEquals(id(carol), waiting.member)
         assertEquals(1, waiting.agreeing); assertEquals(2, waiting.needed)
         assertFalse(waiting.canAgree)
-        assertTrue(assertIs<StewardResult.Refused>(bea.app.proposeSteward(id(carol))).reason.contains("cannot vote until day"))
+        assertTrue(assertIs<StewardResult.Refused>(bea.app.proposeSteward(id(carol))).reason.contains("cannot vote until {date:"))
         assertFalse(home(alice.app).proposals.single().canAgree, "Alice already agrees")
 
         day += 7; server.clock.advanceSeconds(7L * 24 * 60 * 60)

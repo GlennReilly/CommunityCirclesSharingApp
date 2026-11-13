@@ -426,7 +426,7 @@ internal class MarketFold(
         val facts = stewardFactsAt(id)
         if (author !in facts.stewards) return "only a steward may change the circle's rules"
         val since = facts.since[author]
-        if (facts.quorum > 1 && since != null && since != FOUNDING_STEWARD_DAY && day < since + DEFAULT_STEWARD_COOL_OFF_DAYS) return "a new steward cannot vote until day ${since + DEFAULT_STEWARD_COOL_OFF_DAYS}"
+        if (facts.quorum > 1 && since != null && since != FOUNDING_STEWARD_DAY && day < since + DEFAULT_STEWARD_COOL_OFF_DAYS) return "A new steward cannot vote until ${circles.app.ReasonDates.token(since + DEFAULT_STEWARD_COOL_OFF_DAYS)}."
         v.problem(baseConfig)?.let { return it }
         if (v == ConfigSettings.of(config(day))) return "those are already the circle's rules"
         val open = configProposals[v]?.takeIf { day <= it.firstDay + DEFAULT_STEWARD_PROPOSAL_DAYS }

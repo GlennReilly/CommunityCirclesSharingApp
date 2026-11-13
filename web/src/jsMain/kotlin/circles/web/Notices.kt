@@ -16,6 +16,15 @@ object Notices {
         member?.let { home?.names?.get(it)?.name }?.takeIf { it.isNotBlank() } ?: fallback
 
     /** "'s" always follows the name, including names that end in s (ADR 0078). The fallback phrase starts the sentence, so it gets a capital. */
+    /**
+     * A refusal reason from the circle rules as a sentence for a person (ADR 0082, 0083): any date inside it is written in the
+     * chosen format, it starts with a capital, and it ends with a full stop.
+     */
+    fun sentenceOf(reason: String): String {
+        val text = circles.app.ReasonDates.format(reason.trim(), DateText.current).replaceFirstChar { it.uppercase() }
+        return if (text.endsWith(".") || text.endsWith("!") || text.endsWith("?")) text else "$text."
+    }
+
     fun letIn(name: String): String =
         (if (name == NEW_MEMBER) name.replaceFirstChar { it.uppercase() } else name) + "'s access has now been approved. The circle opens for their device once it syncs."
 

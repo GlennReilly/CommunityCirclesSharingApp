@@ -98,7 +98,7 @@ class StewardTest {
         assertEquals(ids(founder, bea), stewards())
         accept(founder.stewardAdd(circle, carol.identity.member, TODAY)) // pending: one of two
         assertEquals(ids(founder, bea), stewards())
-        reject(RejectionCode.INVALID_PUBLIC, bea.stewardAdd(circle, carol.identity.member, TODAY), "cannot vote until day")
+        reject(RejectionCode.INVALID_PUBLIC, bea.stewardAdd(circle, carol.identity.member, TODAY), "cannot vote until")
         waitDays(COOL_OFF)
         accept(bea.stewardAdd(circle, carol.identity.member, TODAY + COOL_OFF))
         assertEquals(ids(founder, bea, carol), stewards())
@@ -184,7 +184,7 @@ class StewardTest {
         reject(RejectionCode.NOT_STEWARD, shares[1])
         accept(founder.stewardAdd(circle, bea.identity.member, day)) // lone steward again, so alone
         accept(shares[1])
-        reject(RejectionCode.INVALID_PUBLIC, bea.stewardRemove(circle, founder.identity.member, day), "cannot vote until day")
+        reject(RejectionCode.INVALID_PUBLIC, bea.stewardRemove(circle, founder.identity.member, day), "cannot vote until")
         assertEquals(ids(founder, bea), stewards())
     }
 

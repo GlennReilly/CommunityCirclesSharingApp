@@ -164,7 +164,7 @@ object StewardRules {
         val since = stewards[voter] ?: return StewardOutcome.Refused("only a steward may change stewards")
         // Leaving is a right, not a vote, and a quorum of one has no one to wait for, so cool-off never delays either.
         val coolOff = if (policy.quorum == 1 || leaving) 0 else policy.coolOffDays
-        return if (day < since + coolOff) StewardOutcome.Refused("a new steward cannot vote until day ${since + coolOff}") else null
+        return if (day < since + coolOff) StewardOutcome.Refused("A new steward cannot vote until ${circles.app.ReasonDates.token(since + coolOff)}.") else null
     }
 
     private fun count(

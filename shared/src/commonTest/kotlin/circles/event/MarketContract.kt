@@ -884,7 +884,7 @@ abstract class MarketContract {
         assertEquals(emptyList(), view.market.configs)
         assertEquals(setOf(w.founder.identity.member), view.market.pendingConfigs.single().voters)
         // Bea is a new steward: she may not vote for 7 days; a vote for different settings does not count towards these.
-        assertEquals(listOf("a new steward cannot vote until day ${DAY + 7}"), w.reasons(listOf(w.bea.configUpdate(w.circle, DAY + 1, wanted))))
+        assertEquals(listOf("A new steward cannot vote until ${circles.app.ReasonDates.token(DAY + 7)}."), w.reasons(listOf(w.bea.configUpdate(w.circle, DAY + 1, wanted))))
         view = w.foldAs(w.founder, w.log + w.bea.configUpdate(w.circle, DAY + 7, other))
         assertEquals(emptyList(), view.market.configs)
         assertEquals(2, view.market.pendingConfigs.size)
