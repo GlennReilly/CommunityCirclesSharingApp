@@ -85,4 +85,26 @@ class StandaloneWordsSourceScanTest {
         assertTrue(problemsIn("""x("Alice has been approved. They can read it.")""").isEmpty(), "a pronoun after its subject is allowed")
         assertTrue(problemsIn("""loanButton(ACTION_CONFIRM_RETURN, loan, "It came back fine")""").isEmpty())
     }
+
+    /** Owner wording: actions say "Create", never "Make". Only the two sentences where "make" means "form" are allowed. Ids such as make-shares-form are identifiers. */
+    private val makeVerb = Regex("""\b[Mm]ak(e|es|ing)\b""")
+    private val makeAllowed = listOf("do not make a recovery code", "do not make this circle's key")
+
+    @Test
+    fun noMessageOrLabelSaysMakeAsAVerbForCreating() {
+        val files = scanned.map { File(root, it) }.filter { it.isDirectory }
+            .flatMap { dir -> dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+        val found = files.flatMap { file ->
+            file.readLines().withIndex()
+                .filter { (_, line) -> line.trimStart().let { !it.startsWith("//") && !it.startsWith("*") && !it.startsWith("/**") } }
+                .flatMap { (index, line) ->
+                    literal.findAll(line)
+                        .filter { m -> val t = m.groupValues[1]; !t.matches(Regex("[a-z0-9-]+")) && makeVerb.containsMatchIn(t) && makeAllowed.none { it in t } }
+                        .map { "${file.relativeTo(root)}:${index + 1}: ${it.value}" }.toList()
+                }
+        }
+        assertTrue(found.isEmpty(), "Say Create, not Make (owner wording):\n" + found.joinToString("\n"))
+        assertTrue(makeVerb.containsMatchIn("Make an invite link") && makeVerb.containsMatchIn("You can make 3 more") && makeVerb.containsMatchIn("Making a code"))
+        assertTrue(!makeVerb.containsMatchIn("Create an invite link") && !makeVerb.containsMatchIn("Those 12 words do not remake"))
+    }
 }

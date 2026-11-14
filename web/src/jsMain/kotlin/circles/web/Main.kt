@@ -564,8 +564,8 @@ private class Page(private val root: HTMLElement, private val scope: CoroutineSc
                                 null -> "Enter a whole number for how many stewards are needed to rebuild the key."
                                 is ShareMakingResult.Sent -> "The key shares were sent. Each of the ${result.stewards} stewards now has a share, and any ${result.threshold} of them can rebuild the key."
                                 is ShareMakingResult.BadThreshold -> "Choose how many stewards are needed to rebuild the key: a number from ${result.min} to ${result.max}."
-                                ShareMakingResult.NoKey -> "This device does not have the circle's current key, so it cannot make key shares."
-                                ShareMakingResult.NotAllowed -> "Only a steward can make key shares."
+                                ShareMakingResult.NoKey -> "This device does not have the circle's current key, so it cannot create key shares."
+                                ShareMakingResult.NotAllowed -> "Only a steward can create key shares."
                             },
                         ),
                     )

@@ -607,7 +607,7 @@ try {
   await checkAccessibility(alice, 'pauses');
 
   // Recovery shares (ADR 0048): two stewards, so alice splits the key 2 of 2; each steward can show a share code; no rebuild form while the key is held.
-  await alice.evaluate('location.hash = "#/stewards/recovery-shares"'); await until(alice, has(alice, 'Make the shares'), 'shares page');
+  await alice.evaluate('location.hash = "#/stewards/recovery-shares"'); await until(alice, has(alice, 'Create the shares'), 'shares page');
   await checkAccessibility(alice, 'recovery shares');
   if (!(await buttonHidden(alice, 'make-shares-form'))) throw new Error('make-shares button visible while empty');
   await setField(alice, 'make-shares-form', 'share-threshold', '2');

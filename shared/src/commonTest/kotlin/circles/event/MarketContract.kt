@@ -976,7 +976,7 @@ abstract class MarketContract {
         // Three notes in 30 days; the fourth waits until the first is 30 days old.
         val first = note(w.bea, w.carol, DAY)
         w.log += first; w.log += note(w.bea, w.carol, DAY + 1); w.log += note(w.bea, w.founder, DAY + 2)
-        assertEquals(listOf("A member can make at most 3 contribution notes in 30 days."), w.reasons(listOf(note(w.bea, w.carol, DAY + 29))))
+        assertEquals(listOf("A member can create at most 3 contribution notes in 30 days."), w.reasons(listOf(note(w.bea, w.carol, DAY + 29))))
         assertEquals(emptyList(), w.reasons(listOf(note(w.bea, w.carol, DAY + 30))))
         // Only the named person confirms, once, and in time.
         val id = w.foldAs(w.bea).market.contributions.first().note

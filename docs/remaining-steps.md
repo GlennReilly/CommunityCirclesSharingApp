@@ -155,7 +155,7 @@ Switch it on, close your eyes or turn the screen off (TalkBack "screen curtain";
 2. Everyone adds one real item or skill they would genuinely lend or offer, with a photo if possible.
 3. Do three real borrows between different pairs, including one with a "valuable" item so people meet the tier rules.
 4. Two people vouch for the newest member. Check **My level** changes in a way they understand.
-5. Make one steward change: propose a second steward, agree on it from two phones. Then each steward makes a recovery code (Settings, **Create a recovery code**) and writes it on paper.
+5. Make one steward change: propose a second steward, agree on it from two phones. Then each steward creates a recovery code (Settings, **Create a recovery code**) and writes it on paper.
 6. Remove one person who agrees to play the removed member (Members, **Remove this person**), then **Change the key**. Check they are signed out, and the others still work.
 7. Ask each person afterwards: what was confusing, what felt slow, what they would change first, and whether they would use it again.
 

@@ -792,7 +792,7 @@ class ShellViewTest {
     @Test fun proposalsShowProgressAndOnlyThoseWhoCanVoteSeeAgree() {
         val add = ProposalSummary(StewardChange.ADD, MemberId("c".repeat(32)), null, agreeing = 1, needed = 2, iAgree = false, canAgree = true)
         val html = stewards(true, listOf(meSteward, beaSteward), listOf(add))
-        assertTrue(">$UNNAMED_MEMBER</a> a steward" in html && "Make <a" in html)
+        assertTrue(">$UNNAMED_MEMBER</a> as a steward" in html && "Propose <a" in html)
         assertTrue("1 of 2 stewards agree." in html)
         assertTrue("""$ATTR_ACTION="$ACTION_STEWARD_ADD" $ATTR_SUBJECT="${"c".repeat(32)}"""" in html)
         val mine = stewards(true, listOf(meSteward, beaSteward), listOf(add.copy(iAgree = true, canAgree = false)))
@@ -1231,7 +1231,7 @@ class ShellViewTest {
         val html = standingPage(circles.app.ContributionsSummary(toConfirm = listOf(note), mine = listOf(note.copy(status = circles.app.NoteStatus.COUNTED)), candidates = listOf(bea), notesLeft = 2))
         assertTrue("Waiting for your confirmation" in html && "says they helped you with a skill." in html && "fixed the gate" in html)
         assertTrue("""$ATTR_ACTION="$ACTION_NOTE_CONFIRM" $ATTR_NOTE_ID="${note.note.v}"""" in html)
-        assertTrue("""id="$FORM_NOTE_ADD"""" in html && "You can make 2 more in the next 30 days." in html)
+        assertTrue("""id="$FORM_NOTE_ADD"""" in html && "You can create 2 more in the next 30 days." in html)
         assertTrue("I mentored them as a new member" in html)
         assertTrue("confirmed and counted." in html)
     }

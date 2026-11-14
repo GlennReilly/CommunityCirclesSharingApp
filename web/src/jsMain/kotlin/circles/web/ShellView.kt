@@ -933,7 +933,7 @@ private fun FlowContent.members(home: HomeData, state: AppState) {
         p { +"An invite link works once and for $INVITE_VALID_DAYS days. Send it only to the person you are inviting." }
         button(type = ButtonType.button) {
             attributes[ATTR_ACTION] = ACTION_INVITE
-            +"Make an invite link"
+            +"Create an invite link"
         }
         state.newInvite?.let { link ->
             label {
@@ -2107,7 +2107,7 @@ private fun FlowContent.agreeButton(proposal: ProposalSummary) {
 private fun FlowOrPhrasingContent.proposalText(home: HomeData, proposal: ProposalSummary) {
     val member = proposal.member
     when (proposal.change) {
-        StewardChange.ADD -> if (member != null) { +"Make "; personName(home, member, showStatus = false); +" a steward" } else +"Make a member a steward"
+        StewardChange.ADD -> if (member != null) { +"Propose "; personName(home, member, showStatus = false); +" as a steward" } else +"Propose a member as a steward"
         StewardChange.REMOVE -> if (member != null) { +"Remove "; personName(home, member, showStatus = false); +" as a steward" } else +"Remove a steward"
         StewardChange.POLICY -> +policyProposalText(proposal)
     }
@@ -2553,7 +2553,7 @@ private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
             )
     }
     section {
-        h2 { +"Make the shares" }
+        h2 { +"Create the shares" }
         p {
             role = "status"
             +(if (shares.currentSetSent) "Every steward has a share of the current key." else "Not every steward has a share of the current key yet.")
@@ -2573,10 +2573,10 @@ private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
                     attributes["max"] = shares.maxThreshold.toString()
                     attributes[ATTR_MIN] = "1"
                 }
-                formSubmit("Make and send the shares")
+                formSubmit("Create and send the shares")
             }
         } else {
-            p { +"This device cannot make shares now: it needs the current key and at least two stewards." }
+            p { +"This device cannot create shares now: it needs the current key and at least two stewards." }
         }
     }
     if (shares.heldEpochs.isNotEmpty()) {
@@ -2620,7 +2620,7 @@ private fun FlowContent.recoverySharesPage(home: HomeData, state: AppState) {
     if (shares.missingKeyEpochs.isNotEmpty()) {
         section {
             h2 { +"Rebuild the key" }
-            p { +"This device does not have the key for ${shares.missingKeyEpochs.joinToString(", ") { "key number $it" }}. Type or paste share codes from enough stewards, one on each line (yours too). Nothing is changed unless they make the right key." }
+            p { +"This device does not have the key for ${shares.missingKeyEpochs.joinToString(", ") { "key number $it" }}. Type or paste share codes from enough stewards, one on each line (yours too). Nothing is changed unless they add up to the right key." }
             form {
                 id = FORM_REBUILD_KEY
                 label {
@@ -2804,7 +2804,7 @@ private fun FlowContent.contributions(home: HomeData) {
     if (home.canRead && c.candidates.isNotEmpty()) {
         section {
             h2 { +"Log a contribution" }
-            p { +"Helped someone? It counts towards your level once they confirm it. You can make ${c.notesLeft} more in the next 30 days." }
+            p { +"Helped someone? It counts towards your level once they confirm it. You can create ${c.notesLeft} more in the next 30 days." }
             if (c.notesLeft > 0) {
                 form {
                     id = FORM_NOTE_ADD

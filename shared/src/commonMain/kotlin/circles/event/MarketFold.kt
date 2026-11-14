@@ -403,7 +403,7 @@ internal class MarketFold(
         if (notes.containsKey(v.note)) return "That contribution note has already been recorded."
         if (v.with == author) return "A contribution note must name someone other than its author."
         if (author !in members() || v.with !in members()) return "Both people in a contribution note must be members of the circle."
-        if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "A member can make at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days."
+        if (notes.values.count { it.author == author && it.day > day - NOTE_WINDOW_DAYS && it.day <= day } >= MAX_NOTES_PER_WINDOW) return "A member can create at most $MAX_NOTES_PER_WINDOW contribution notes in $NOTE_WINDOW_DAYS days."
         if (v.kind == ContributionKind.MENTORED_NEW_MEMBER &&
             StandingRules.standingOf(v.with, config(day), loans.values, vouchesCounting(day), stewardsAt(id), day, confirmedNotes()).tier != circles.policy.Tier.NEW
         ) return "Only a new member can be named as mentored."

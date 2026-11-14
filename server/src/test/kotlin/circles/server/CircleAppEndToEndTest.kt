@@ -1389,7 +1389,7 @@ class CircleAppEndToEndTest {
         // Three in 30 days, then the cap.
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(NoteResult.Sent, bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
-        assertEquals(NoteResult.Refused("A member can make at most 3 contribution notes in 30 days."), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
+        assertEquals(NoteResult.Refused("A member can create at most 3 contribution notes in 30 days."), bea.app.addContribution(ContributionKind.HOSTED_OR_ORGANISED, aliceId, ""))
         assertEquals(0, home(bea.app).contributions.notesLeft)
         listOf(alice, bea).forEach { assertEquals(0, assertNotNull(it.app.syncOnce()).refused) }
     }
